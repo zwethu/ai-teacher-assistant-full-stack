@@ -2,7 +2,6 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import AppLayout from './components/layout/AppLayout.jsx'
 import ProtectedRoute from './components/layout/ProtectedRoute.jsx'
 import Login from './pages/Login.jsx'
-import Dashboard from './pages/Dashboard.jsx'
 import Assessments from './pages/Assessments.jsx'
 import LessonPlans from './pages/LessonPlans.jsx'
 import Batches from './pages/Batches.jsx'
@@ -18,7 +17,6 @@ export default function App() {
 
         <Route element={<ProtectedRoute />}>
           <Route element={<AppLayout />}>
-            <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/assessments" element={<Assessments />} />
             <Route path="/lesson-plans" element={<LessonPlans />} />
             <Route path="/batches" element={<Batches />} />
@@ -28,8 +26,8 @@ export default function App() {
           </Route>
         </Route>
 
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/" element={<Navigate to="/assessments" replace />} />
+        <Route path="*" element={<Navigate to="/assessments" replace />} />
       </Routes>
     </BrowserRouter>
   )

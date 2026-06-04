@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { doc, onSnapshot } from 'firebase/firestore'
+import { fromFirestore } from '../entity/User.js'
 import { db } from '../lib/firebase.js'
 import { useAuth } from './useAuth.js'
 
@@ -21,7 +22,7 @@ export function useCredits() {
     const unsubscribe = onSnapshot(
       userRef,
       (snapshot) => {
-        const data = snapshot.data()
+        const data = fromFirestore(snapshot)
         setCredits(typeof data?.credits === 'number' ? data.credits : 0)
         setLoading(false)
       },

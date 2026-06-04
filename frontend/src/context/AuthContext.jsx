@@ -17,7 +17,7 @@ import api from '../hooks/useApi.js'
 export const AuthContext = createContext(null)
 
 async function ensureUserDocument() {
-  await api.post('/api/auth/init-user')
+  await api.post('/auth/init-user')
 }
 
 export function AuthProvider({ children }) {

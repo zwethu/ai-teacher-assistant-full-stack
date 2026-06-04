@@ -1,19 +1,18 @@
 import axios from 'axios'
-import { auth } from './firebase'
+import { auth } from './firebase.js'
 
 /**
- * Axios client for the FastAPI backend.
- * Attaches a fresh Firebase ID token on every request.
+ * Axios client for the FastAPI backend (base URL includes /api prefix).
  */
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000',
+  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000/api',
   withCredentials: true,
 })
 
 api.interceptors.request.use(async (config) => {
   const user = auth.currentUser
   if (user) {
-    const token = await user.getIdToken(true)
+    const token = await user.getIdToken()
     config.headers = config.headers ?? {}
     config.headers.Authorization = `Bearer ${token}`
   }

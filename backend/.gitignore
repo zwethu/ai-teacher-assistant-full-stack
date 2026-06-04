@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 .env
+serviceAccountKey.json
 *.egg-info/
 dist/
 build/

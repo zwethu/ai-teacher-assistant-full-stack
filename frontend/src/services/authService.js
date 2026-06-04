@@ -2,7 +2,7 @@ import api from '../lib/api.js'
 import { auth } from '../lib/firebase.js'
 
 const API_URL =
-  import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
+  import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 /**
  * @returns {Promise<{ has_google_scopes: boolean }>}

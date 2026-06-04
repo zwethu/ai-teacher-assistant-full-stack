@@ -122,17 +122,17 @@ export default function Email() {
   }, [])
 
   useEffect(() => {
-    const oauthResult = searchParams.get('google_scopes')
-    if (!oauthResult) return
+    const connected = searchParams.get('connected')
+    if (connected === null) return
 
-    if (oauthResult === 'success') {
+    if (connected === 'true') {
       showToast('success', 'Google account connected successfully.')
       refreshPermissions()
-    } else if (oauthResult === 'error') {
+    } else {
       showToast('error', 'Could not connect Google account. Please try again.')
     }
 
-    searchParams.delete('google_scopes')
+    searchParams.delete('connected')
     setSearchParams(searchParams, { replace: true })
   }, [searchParams, setSearchParams])
 

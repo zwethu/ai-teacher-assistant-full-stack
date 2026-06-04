@@ -1,2 +1,98 @@
-# APScheduler — optional server cron for scheduled emails
-# Firestore triggers or Cloud Scheduler are alternatives if you skip this.
+import logging
+from datetime import datetime, timezone
+
+from apscheduler.schedulers.background import BackgroundScheduler
+
+from services.gmail_service import GmailSendError, send_email
+from utils.firestore_client import get_firestore
+
+logger = logging.getLogger(__name__)
+
+USERS_COLLECTION = "users"
+EMAILS_COLLECTION = "emails"
+
+_scheduler: BackgroundScheduler | None = None
+
+
+def start_scheduler() -> None:
+    """Start the background job that sends due scheduled emails."""
+    global _scheduler
+    if _scheduler is not None and _scheduler.running:
+        return
+
+    _scheduler = BackgroundScheduler()
+    _scheduler.add_job(
+        check_and_send_emails,
+        trigger="interval",
+        minutes=2,
+    )
+    _scheduler.start()
+    logger.info("Email scheduler started (interval: 2 minutes)")
+
+
+def shutdown_scheduler() -> None:
+    """Stop the background email scheduler."""
+    global _scheduler
+    if _scheduler is not None and _scheduler.running:
+        _scheduler.shutdown(wait=False)
+        logger.info("Email scheduler stopped")
+    _scheduler = None
+
+
+def check_and_send_emails() -> None:
+    """Send pending emails whose send_at time has passed."""
+    try:
+        db = get_firestore()
+        now = datetime.now(timezone.utc)
+        pending = (
+            db.collection(EMAILS_COLLECTION)
+            .where("status", "==", "pending")
+            .where("send_at", "<=", now)
+            .stream()
+        )
+    except Exception as exc:
+        logger.exception("Failed to query pending emails: %s", exc)
+        return
+
+    for doc in pending:
+        try:
+            data = doc.to_dict() or {}
+            uid = data.get("uid")
+            if not uid:
+                logger.warning("Email %s has no uid; skipping", doc.id)
+                continue
+
+            user_snap = db.collection(USERS_COLLECTION).document(uid).get()
+            if not user_snap.exists:
+                logger.warning(
+                    "User %s not found for email %s; skipping", uid, doc.id
+                )
+                continue
+
+            refresh_token = (user_snap.to_dict() or {}).get("google_refresh_token")
+            if not refresh_token:
+                logger.warning(
+                    "No google_refresh_token for user %s (email %s); skipping",
+                    uid,
+                    doc.id,
+                )
+                continue
+
+            to = data.get("to")
+            subject = data.get("subject")
+            body = data.get("body")
+            if not to or not subject or not body:
+                logger.warning(
+                    "Email %s missing to/subject/body; skipping", doc.id
+                )
+                continue
+
+            send_email(refresh_token, str(to), str(subject), str(body))
+
+            sent_at = datetime.now(timezone.utc)
+            doc.reference.update({"status": "sent", "sent_at": sent_at})
+            logger.info("Sent scheduled email %s to %s", doc.id, to)
+        except GmailSendError as exc:
+            logger.error("Failed to send email %s: %s", doc.id, exc)
+        except Exception as exc:
+            logger.error("Failed to process email %s: %s", doc.id, exc)

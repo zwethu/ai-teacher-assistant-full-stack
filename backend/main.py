@@ -1,57 +1,51 @@
-import os
-
 from dotenv import load_dotenv
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-
-from routers import agent, auth, email, google
 
 load_dotenv()
 
-app = FastAPI(
-    title="AI Teaching Companion API",
-    description=(
-        "Minimal backend. React uses Firebase (auth, Firestore) and GCP Agent Engine "
-        "for AI. This service only handles server-side secrets and jobs."
-    ),
-    version="0.1.0",
+import logging
+import os
+
+logging.basicConfig(level=logging.INFO)
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from routers.auth import router as auth_router
+from routers.email import router as email_router
+from services.email_scheduler import shutdown_scheduler, start_scheduler
+
+_frontend_url = (os.getenv("FRONTEND_URL") or "http://localhost:5173").rstrip("/")
+_cors_origins = list(
+    dict.fromkeys([_frontend_url, "http://localhost:5173"]),
 )
 
-_cors_origins = os.getenv(
-    "CORS_ORIGINS",
-    "http://localhost:5173,http://127.0.0.1:5173",
-).split(",")
+app = FastAPI(title="AI Teacher Assistant API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o.strip() for o in _cors_origins if o.strip()],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Google OAuth (client secret must not live in the browser)
-app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
-
-# Email (Gmail send-now)
-app.include_router(email.router, prefix="/api/email", tags=["email"])
-
-# Optional Google Workspace proxy (Gmail / Calendar / Forms with stored refresh tokens)
-app.include_router(google.router, prefix="/api/google", tags=["google"])
-
-# Optional thin proxy to Agent Engine when the endpoint must not be called from the browser
-app.include_router(agent.router, prefix="/api/agent", tags=["agent"])
+app.include_router(auth_router, prefix="", tags=["auth"])
+app.include_router(email_router, prefix="", tags=["email"])
 
 
 @app.on_event("startup")
 async def on_startup() -> None:
-    """Startup — e.g. start APScheduler for scheduled emails when implemented."""
-    _ = os.getenv("APP_ENV", "development")
+    start_scheduler()
 
 
-@app.get("/health")
-async def health_check() -> dict[str, str]:
-    return {"status": "ok"}
+@app.on_event("shutdown")
+async def on_shutdown() -> None:
+    shutdown_scheduler()
+
+
+@app.get("/")
+async def root() -> dict[str, str]:
+    return {"status": "ok", "service": "AI Teacher Assistant API"}
 
 
 if __name__ == "__main__":

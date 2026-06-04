@@ -1,9 +1,9 @@
 from pydantic import BaseModel
 
 
-class User(BaseModel):
+class UserModel(BaseModel):
     uid: str
     email: str
-    displayName: str | None = None
+    display_name: str | None = None
     credits: int = 0
-    googleRefreshToken: str | None = None
+    google_refresh_token: str | None = None

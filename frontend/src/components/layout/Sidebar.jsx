@@ -156,17 +156,17 @@ export default function Sidebar({
           </button>
         </div>
 
-        <div className="flex flex-shrink-0 items-center px-4 mb-5 mt-2">
-          <span className="text-xl font-bold text-slate-900 tracking-tight">
+        <div className="flex flex-shrink-0 items-center px-6 pt-6 pb-4 pr-14">
+          <span className="text-lg font-bold text-slate-900 tracking-tight leading-snug">
             AI Teaching Companion
           </span>
         </div>
 
-        <nav className="flex-1 space-y-2 px-4 pb-4 overflow-y-auto">
+        <nav className="flex-1 space-y-2 px-5 pb-4 overflow-y-auto">
           <NavItems showLabels onNavigate={onMobileClose} />
         </nav>
 
-        <div className="mt-auto px-4 py-3 border-t border-slate-100">
+        <div className="mt-auto px-5 py-4 border-t border-slate-100">
           <ProfileBlock collapsed={false} onSignOut={handleSignOut} />
         </div>
       </aside>
@@ -176,46 +176,40 @@ export default function Sidebar({
         id="mainSidebar"
         className={`hidden md:flex flex-col border-r border-blue-200/60 bg-white/80 backdrop-blur-xl h-screen sticky top-0 transition-all duration-300 ease-in-out shadow-[10px_0_40px_rgba(15,23,42,0.08)] flex-shrink-0 ${sidebarWidth}`}
       >
-        <div className="h-16 flex items-center p-6 mt-4 flex-shrink-0 overflow-hidden whitespace-nowrap">
-          <span className="flex items-center justify-between w-full">
+        <div className="flex-shrink-0 px-5 pt-6 pb-5">
+          <div
+            className={`flex items-center min-w-0 ${
+              collapsed ? 'justify-center' : 'justify-between gap-3'
+            }`}
+          >
             {!collapsed && (
               <NavLink
                 to="/dashboard"
-                className="text-xl font-bold tracking-tight bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent"
+                className="min-w-0 flex-1 text-lg font-bold leading-snug tracking-tight bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent"
               >
                 AI Teaching Companion
               </NavLink>
             )}
-            {collapsed && (
-              <button
-                type="button"
-                onClick={onToggleCollapsed}
-                className="p-1 rounded-lg hover:bg-slate-100 mx-auto"
-                aria-label="Expand sidebar"
-              >
-                <Menu className="w-5 h-5 text-slate-600" />
-              </button>
-            )}
-          </span>
-          {!collapsed && (
             <button
               type="button"
               onClick={onToggleCollapsed}
-              className="ml-2 p-2 rounded-xl hover:bg-emerald-100 text-slate-500 border border-slate-200/80 transition-all active:scale-95 shadow-sm"
-              title="Toggle sidebar"
-              aria-label="Toggle sidebar"
+              className={`flex-shrink-0 p-2.5 rounded-xl hover:bg-emerald-100 text-slate-500 border border-slate-200/80 transition-all active:scale-95 shadow-sm ${
+                collapsed ? 'mx-auto' : ''
+              }`}
+              title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             >
               <Menu className="w-5 h-5" />
             </button>
-          )}
+          </div>
         </div>
 
-        <nav className="flex-1 p-4 space-y-2 overflow-y-auto overflow-x-hidden">
+        <nav className="flex-1 px-5 pb-4 space-y-2 overflow-y-auto overflow-x-hidden">
           <NavItems showLabels={!collapsed} />
         </nav>
 
         {!collapsed && (
-          <div className="px-4 py-3 border-t border-slate-100 flex-shrink-0">
+          <div className="px-5 py-4 border-t border-slate-100 flex-shrink-0">
             <NavLink
               to="/wellness"
               className="w-full text-left hover:bg-slate-50 rounded-xl p-2 transition-colors group block"
@@ -237,7 +231,7 @@ export default function Sidebar({
           </div>
         )}
 
-        <div className="px-4 py-4 border-t border-slate-100 flex-shrink-0">
+        <div className="px-5 py-5 border-t border-slate-100 flex-shrink-0">
           <ProfileBlock collapsed={collapsed} onSignOut={handleSignOut} />
         </div>
       </aside>

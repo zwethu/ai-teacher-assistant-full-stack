@@ -6,7 +6,7 @@ _client: firestore.Client | None = None
 
 
 def get_firestore() -> firestore.Client:
-    """Return the shared Firestore client (initializes Firebase Admin if needed)."""
+    """Return the shared Firestore client (initializes Firebase Admin on first use)."""
     global _client
     if _client is None:
         init_firebase()
@@ -20,4 +20,4 @@ def __getattr__(name: str):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-__all__ = ["get_firestore", "db"]
+__all__ = ["db", "get_firestore"]

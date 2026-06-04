@@ -1,6 +1,5 @@
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
@@ -15,7 +14,6 @@ router = APIRouter()
 
 USERS_COLLECTION = "users"
 OAUTH_STATES_COLLECTION = "oauth_states"
-DEFAULT_CREDITS = 10
 OAUTH_STATE_TTL_MINUTES = 10
 
 
@@ -23,52 +21,13 @@ def _frontend_base_url() -> str:
     return (os.getenv("FRONTEND_URL") or "http://localhost:5173").rstrip("/")
 
 
-def _user_doc_to_dict(snapshot) -> dict[str, Any]:
-    data = snapshot.to_dict() or {}
-    data["id"] = snapshot.id
-    for key, value in list(data.items()):
-        if hasattr(value, "isoformat"):
-            data[key] = value.isoformat()
-    return data
-
-
-@router.post("/init-user")
-async def init_user(
-    current_user: CurrentUser = Depends(get_current_user),
-) -> dict[str, Any]:
-    uid = current_user["uid"]
-    email = current_user.get("email")
-    if not email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email is required on the Firebase account",
-        )
-
-    db = get_firestore()
-    doc_ref = db.collection(USERS_COLLECTION).document(uid)
-    snapshot = doc_ref.get()
-
-    if snapshot.exists:
-        return _user_doc_to_dict(snapshot)
-
-    doc_ref.set(
-        {
-            "email": email,
-            "name": current_user.get("name"),
-            "picture": current_user.get("picture"),
-            "credits": DEFAULT_CREDITS,
-            "created_at": SERVER_TIMESTAMP,
-        }
-    )
-    return _user_doc_to_dict(doc_ref.get())
-
-
 @router.get("/google-scopes")
 async def google_scopes(
     current_user: CurrentUser = Depends(get_current_user_bearer_or_query),
 ) -> RedirectResponse:
     """
-    Start Google Workspace OAuth. Browser: open with ?firebase_token=<Firebase ID token>.
+    Start Google Workspace OAuth.
+    Browser: open with ?firebase_token=<Firebase ID token>.
     API clients may use Authorization: Bearer instead.
     """
     try:
@@ -208,5 +167,4 @@ async def check_permissions(
         return {"has_google_scopes": False}
 
     data = snapshot.to_dict() or {}
-    has_token = bool(data.get("google_refresh_token"))
-    return {"has_google_scopes": has_token}
+    return {"has_google_scopes": bool(data.get("google_refresh_token"))}

@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from routers import agent, auth, google
+from routers import agent, auth, email, google
 
 load_dotenv()
 
@@ -32,6 +32,9 @@ app.add_middleware(
 
 # Google OAuth (client secret must not live in the browser)
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+
+# Email (Gmail send-now)
+app.include_router(email.router, prefix="/api/email", tags=["email"])
 
 # Optional Google Workspace proxy (Gmail / Calendar / Forms with stored refresh tokens)
 app.include_router(google.router, prefix="/api/google", tags=["google"])

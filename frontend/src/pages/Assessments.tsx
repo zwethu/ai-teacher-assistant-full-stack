@@ -26,6 +26,7 @@ import { useAuth } from '../hooks/useAuth'
 import { useUserCollection } from '../hooks/useUserCollection'
 import { fromFirestore, toFirestore } from '../entity/Assessment'
 import { generateAssessment } from '../services/agentService'
+import { increaseStress } from '../services/wellnessService'
 import { formatAssessmentContent as formatContentForDisplay } from '../utils/content'
 import { timeAgo } from '../utils/formatDate'
 
@@ -118,6 +119,7 @@ export default function Assessments() {
 
       setGenerateOpen(false)
       showToast('success', 'Assessment generated and saved successfully.')
+      increaseStress(user.uid, 5)
     } catch (err) {
       console.error(err)
       showToast('error', getErrorMessage(err, 'Failed to generate assessment.'))

@@ -27,6 +27,7 @@ import { useAuth } from '../hooks/useAuth'
 import { useUserCollection } from '../hooks/useUserCollection'
 import { fromFirestore, toFirestore } from '../entity/LessonPlan'
 import { generateLessonPlan } from '../services/agentService'
+import { increaseStress } from '../services/wellnessService'
 import { formatLessonPlanContent as formatContentForDisplay } from '../utils/content'
 import { timeAgo } from '../utils/formatDate'
 
@@ -109,6 +110,7 @@ export default function LessonPlans() {
 
       setGenerateOpen(false)
       showToast('success', 'Lesson plan generated and saved successfully.')
+      increaseStress(user.uid, 5)
     } catch (err) {
       console.error(err)
       showToast('error', getErrorMessage(err, 'Failed to generate lesson plan.'))

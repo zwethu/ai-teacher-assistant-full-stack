@@ -168,7 +168,7 @@ export default function Login() {
   }
 
   if (user) {
-    return <Navigate to="/dashboard" replace />
+    return <Navigate to="/chat" replace />
   }
 
   function handleSignIn() {

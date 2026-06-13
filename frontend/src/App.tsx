@@ -3,12 +3,11 @@ import AppLayout from './components/layout/AppLayout'
 import ProtectedRoute from './components/layout/ProtectedRoute'
 import AuthCallback from './pages/AuthCallback'
 import Login from './pages/Login'
+import Chat from './pages/Chat'
 import Assessments from './pages/Assessments'
 import LessonPlans from './pages/LessonPlans'
 import Batches from './pages/Batches'
 import Email from './pages/Email'
-import Timetable from './pages/Timetable'
-import Wellness from './pages/Wellness'
 
 export default function App() {
   return (
@@ -19,12 +18,11 @@ export default function App() {
 
         <Route element={<ProtectedRoute />}>
           <Route element={<AppLayout />}>
+            <Route path="/chat" element={<Chat />} />
+            <Route path="/batches" element={<Batches />} />
             <Route path="/assessments" element={<Assessments />} />
             <Route path="/lesson-plans" element={<LessonPlans />} />
-            <Route path="/batches" element={<Batches />} />
             <Route path="/email" element={<Email />} />
-            <Route path="/timetable" element={<Timetable />} />
-            <Route path="/wellness" element={<Wellness />} />
           </Route>
         </Route>
 

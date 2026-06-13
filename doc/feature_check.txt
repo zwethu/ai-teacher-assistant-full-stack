@@ -2,6 +2,9 @@ can login
 can logout
 show google profile img, username and email
 show terms and conditions page
+grant all necessary google permissions
+logined state is saved
+side navbar ui is responsive, good and correct
 
 ---need to update terms and conditions 
 ---need to update privacy and policy

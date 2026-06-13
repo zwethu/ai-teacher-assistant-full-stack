@@ -53,6 +53,19 @@ service cloud.firestore {
       allow delete: if isOwner();
     }
 
+    // Stress score per user (document id = Firebase Auth uid).
+    match /user_stress/{uid} {
+      allow read, create, update, delete: if signedIn() && request.auth.uid == uid;
+    }
+
+    // Post-breathing journal entries (scoped by uid field).
+    match /wellness_journal/{docId} {
+      allow get, list: if isOwner();
+      allow create: if isOwnerOnCreate();
+      allow update: if isOwnerOnUpdate();
+      allow delete: if isOwner();
+    }
+
     match /timetable/{docId} {
       allow get, list: if isOwner();
       allow create: if isOwnerOnCreate();

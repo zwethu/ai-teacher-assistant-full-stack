@@ -34,6 +34,7 @@ import {
 } from '../services/authService'
 import { fromFirestore, toFirestore } from '../entity/Email'
 import { sendEmailNow } from '../services/emailService'
+import { increaseStress } from '../services/wellnessService'
 import { formatDateTime, timeAgo } from '../utils/formatDate'
 
 const NOTES_PREVIEW_LEN = 120
@@ -215,6 +216,7 @@ export default function Email() {
 
         closeModal()
         showToast('success', 'Email sent successfully.')
+        increaseStress(user.uid, 3)
       } else if (modalMode === 'schedule') {
         if (!form.sendAt) {
           setFormError('Please choose a send date and time.')
@@ -241,6 +243,7 @@ export default function Email() {
 
         closeModal()
         showToast('success', 'Email scheduled successfully')
+        increaseStress(user.uid, 3)
       }
     } catch (err) {
       console.error(err)

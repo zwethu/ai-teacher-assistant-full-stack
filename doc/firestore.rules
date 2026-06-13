@@ -32,11 +32,22 @@ service cloud.firestore {
       allow delete: if isOwner();
     }
 
-    match /batches/{docId} {
+    match /batches/{batchId} {
       allow get, list: if isOwner();
       allow create: if isOwnerOnCreate();
       allow update: if isOwnerOnUpdate();
       allow delete: if isOwner();
+
+      match /students/{studentId} {
+        function batchOwner() {
+          return signedIn()
+            && get(/databases/$(database)/documents/batches/$(batchId)).data.uid
+               == request.auth.uid;
+        }
+        allow get, list: if batchOwner();
+        allow create: if batchOwner();
+        allow update, delete: if batchOwner();
+      }
     }
 
     match /lesson_plans/{docId} {

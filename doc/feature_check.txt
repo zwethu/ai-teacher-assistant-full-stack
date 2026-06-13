@@ -12,4 +12,23 @@ side navbar ui is responsive, good and correct
 ---need to add users auto accept terms and conditions by signing in
 ---need to update contact us page
 ---need to remove PNai text from the system and update date
+---mobile nav bar does not look good
+---confirmation are done by default showalert
+---need to implement skeleton for lists
 
+
+**** chat not implemeneted yet
+**** lesson plan
+**** assessment
+**** email
+**** stress meter
+
+batch can create with csv
+batch can create manually
+batch can search in search bar
+can delete batch
+can delete student
+can still add new student after creating batch manually and also with csv (can edit)
+batch manually form has null check and email check
+batch csv form show csv data as table
+    

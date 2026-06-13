@@ -155,16 +155,23 @@ async def google_scopes_callback(
         )
         email = idinfo.get("email")
         name = idinfo.get("name") or ""
+        picture = idinfo.get("picture") or ""
         if not email:
             return RedirectResponse(url=failure_url, status_code=status.HTTP_302_FOUND)
 
         try:
             user_record = firebase_auth_module.get_user_by_email(email)
             uid = user_record.uid
+            firebase_auth_module.update_user(
+                uid,
+                display_name=name or None,
+                photo_url=picture or None,
+            )
         except firebase_auth_module.UserNotFoundError:
             user_record = firebase_auth_module.create_user(
                 email=email,
                 display_name=name or None,
+                photo_url=picture or None,
             )
             uid = user_record.uid
 
@@ -176,6 +183,8 @@ async def google_scopes_callback(
             "display_name": name,
             "google_refresh_token": refresh_token,
         }
+        if picture:
+            user_payload["photo_url"] = picture
         if not user_snap.exists:
             user_payload["createdAt"] = SERVER_TIMESTAMP
         user_ref.set(user_payload, merge=True)

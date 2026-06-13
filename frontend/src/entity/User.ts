@@ -5,6 +5,7 @@ import { baseFromFirestore, omitUndefined } from './_helpers'
 export interface User extends BaseDoc {
   email: string
   displayName: string
+  photoURL: string | null
   googleRefreshToken: string | null
   googleScopes: string[]
   googleConnectedAt: FirestoreTimestamp
@@ -15,6 +16,7 @@ export const defaultShape: User = {
   uid: '',
   email: '',
   displayName: '',
+  photoURL: null,
   googleRefreshToken: null,
   googleScopes: [],
   googleConnectedAt: null,
@@ -46,5 +48,7 @@ export function fromFirestore(snapshot: DocumentSnapshot): User | null {
     googleConnectedAt:
       doc.googleConnectedAt ?? doc.google_connected_at ?? null,
     displayName: (doc.displayName as string) ?? (doc.display_name as string) ?? '',
+    photoURL:
+      (doc.photoURL as string | null) ?? (doc.photo_url as string | null) ?? null,
   } as User
 }

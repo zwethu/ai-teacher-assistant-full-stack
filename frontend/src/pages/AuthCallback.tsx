@@ -16,7 +16,8 @@ export default function AuthCallback() {
     }
 
     signInWithCustomToken(auth, customToken)
-      .then(() => {
+      .then(async (credential) => {
+        await credential.user.reload()
         navigate('/assessments', { replace: true })
       })
       .catch((err) => {

@@ -3,6 +3,7 @@ can logout
 show google profile img, username and email
 show terms and conditions page
 grant all necessary google permissions
+both firebase oauth and google oauth work at the same time
 logined state is saved
 side navbar ui is responsive, good and correct
 

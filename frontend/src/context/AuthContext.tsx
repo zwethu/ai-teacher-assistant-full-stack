@@ -40,8 +40,17 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, [])
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-      setUser(firebaseUser)
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser && !firebaseUser.photoURL) {
+        try {
+          await firebaseUser.reload()
+          setUser(auth.currentUser)
+        } catch {
+          setUser(firebaseUser)
+        }
+      } else {
+        setUser(firebaseUser)
+      }
       setLoading(false)
     })
     return unsubscribe

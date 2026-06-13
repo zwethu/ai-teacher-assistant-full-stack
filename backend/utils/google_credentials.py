@@ -6,13 +6,23 @@ GOOGLE_SCOPES = [
     "openid",
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/userinfo.profile",
-    "https://www.googleapis.com/auth/gmail.send",
-    "https://www.googleapis.com/auth/gmail.modify",
-    "https://www.googleapis.com/auth/calendar",
+
+    # Drive file access for app-created / app-used files
+    "https://www.googleapis.com/auth/drive.file",
+
+    # Lesson plan Google Docs
+    "https://www.googleapis.com/auth/documents",
+
+    # Google Forms creation + responses
     "https://www.googleapis.com/auth/forms.body",
     "https://www.googleapis.com/auth/forms.responses.readonly",
-]
 
+    # Gmail: create drafts + send emails
+    "https://www.googleapis.com/auth/gmail.compose",
+
+    # Calendar: read events + create/update schedules
+    "https://www.googleapis.com/auth/calendar.events",
+]
 
 def _allow_local_http_oauth(redirect_uri: str) -> None:
     if redirect_uri.startswith("http://127.0.0.1") or redirect_uri.startswith(

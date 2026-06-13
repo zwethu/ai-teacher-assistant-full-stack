@@ -1,4 +1,8 @@
+import base64
+import hashlib
+import logging
 import os
+import secrets
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -12,6 +16,8 @@ from google.cloud.firestore import SERVER_TIMESTAMP
 from utils.firebase_auth import CurrentUser, get_current_user, init_firebase
 from utils.firestore_client import get_firestore
 from utils.google_credentials import get_google_flow
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth")
 
@@ -71,15 +77,25 @@ async def google_scopes() -> RedirectResponse:
             detail=str(exc),
         ) from exc
 
+    code_verifier = secrets.token_urlsafe(96)
+    code_challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(code_verifier.encode()).digest()
+    ).rstrip(b"=").decode()
+
     authorization_url, state = flow.authorization_url(
         access_type="offline",
         prompt="consent",
         include_granted_scopes="true",
+        code_challenge=code_challenge,
+        code_challenge_method="S256",
     )
 
     db = get_firestore()
     db.collection(OAUTH_STATES_COLLECTION).document(state).set(
-        {"createdAt": SERVER_TIMESTAMP}
+        {
+            "createdAt": SERVER_TIMESTAMP,
+            "code_verifier": code_verifier,
+        }
     )
 
     return RedirectResponse(url=authorization_url, status_code=status.HTTP_302_FOUND)
@@ -104,13 +120,20 @@ async def google_scopes_callback(
     if not state_snap.exists:
         return RedirectResponse(url=failure_url, status_code=status.HTTP_302_FOUND)
 
+    state_data = state_snap.to_dict() or {}
+    code_verifier = state_data.get("code_verifier")
+    if not code_verifier:
+        state_ref.delete()
+        return RedirectResponse(url=failure_url, status_code=status.HTTP_302_FOUND)
+
     try:
         flow = _build_flow()
-        flow.fetch_token(code=code)
+        flow.fetch_token(code=code, code_verifier=code_verifier)
         credentials = flow.credentials
         refresh_token = credentials.refresh_token
         google_id = credentials.id_token
-    except Exception:
+    except Exception as exc:
+        logger.exception("OAuth callback error: %s", exc)
         state_ref.delete()
         return RedirectResponse(url=failure_url, status_code=status.HTTP_302_FOUND)
 
@@ -158,7 +181,8 @@ async def google_scopes_callback(
         user_ref.set(user_payload, merge=True)
 
         custom_token = firebase_auth_module.create_custom_token(uid).decode("utf-8")
-    except Exception:
+    except Exception as exc:
+        logger.exception("OAuth callback error: %s", exc)
         return RedirectResponse(url=failure_url, status_code=status.HTTP_302_FOUND)
 
     success_url = f"{frontend}/auth/callback?{urlencode({'custom_token': custom_token})}"

@@ -7,3 +7,4 @@ serviceAccountKey.json
 dist/
 build/
 .pytest_cache/
+client_secret.json

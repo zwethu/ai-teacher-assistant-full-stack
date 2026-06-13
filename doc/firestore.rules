@@ -1,0 +1,75 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // Documents scoped by a top-level "uid" field (must match the signed-in user).
+    function isOwner() {
+      return signedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    function isOwnerOnCreate() {
+      return signedIn() && request.resource.data.uid == request.auth.uid;
+    }
+
+    function isOwnerOnUpdate() {
+      return signedIn()
+        && resource.data.uid == request.auth.uid
+        && request.resource.data.uid == request.auth.uid;
+    }
+
+    match /users/{userId} {
+      allow read, create, update, delete: if signedIn() && request.auth.uid == userId;
+    }
+
+    match /assessments/{docId} {
+      allow get, list: if isOwner();
+      allow create: if isOwnerOnCreate();
+      allow update: if isOwnerOnUpdate();
+      allow delete: if isOwner();
+    }
+
+    match /batches/{docId} {
+      allow get, list: if isOwner();
+      allow create: if isOwnerOnCreate();
+      allow update: if isOwnerOnUpdate();
+      allow delete: if isOwner();
+    }
+
+    match /lesson_plans/{docId} {
+      allow get, list: if isOwner();
+      allow create: if isOwnerOnCreate();
+      allow update: if isOwnerOnUpdate();
+      allow delete: if isOwner();
+    }
+
+    match /wellness/{docId} {
+      allow get, list: if isOwner();
+      allow create: if isOwnerOnCreate();
+      allow update: if isOwnerOnUpdate();
+      allow delete: if isOwner();
+    }
+
+    match /timetable/{docId} {
+      allow get, list: if isOwner();
+      allow create: if isOwnerOnCreate();
+      allow update: if isOwnerOnUpdate();
+      allow delete: if isOwner();
+    }
+
+    match /emails/{docId} {
+      allow get, list: if isOwner();
+      allow create: if isOwnerOnCreate();
+      allow update: if isOwnerOnUpdate();
+      allow delete: if isOwner();
+    }
+
+    // Written only by the backend (Admin SDK). Block all client access.
+    match /oauth_states/{docId} {
+      allow read, write: if false;
+    }
+  }
+}

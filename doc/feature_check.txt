@@ -1,0 +1,11 @@
+can login
+can logout
+show google profile img, username and email
+show terms and conditions page
+
+---need to update terms and conditions 
+---need to update privacy and policy
+---need to add users auto accept terms and conditions by signing in
+---need to update contact us page
+---need to remove PNai text from the system and update date
+

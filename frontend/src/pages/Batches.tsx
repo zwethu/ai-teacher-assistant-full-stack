@@ -20,16 +20,22 @@ import {
   addStudentToBatch,
   createBatch,
   deleteBatch,
-  getBatchStudentCount,
   listBatches,
   listBatchStudents,
   removeStudentFromBatch,
 } from '../services/batchService'
 import { formatDate } from '../utils/formatDate'
 
-type CreateStep = 'method' | 'manual' | 'csv'
+type CreateStep = 'details' | 'method' | 'manual' | 'csv'
 type StudentRow = { name: string; email: string }
-type BatchWithCount = Batch & { studentCount: number }
+type BatchWithCount = Batch
+
+type BatchDetails = {
+  batch_name: string
+  course_name: string
+  academic_year: string
+  term: string
+}
 
 function parseCsv(text: string): StudentRow[] {
   const lines = text.trim().split(/\r?\n/).filter(Boolean)
@@ -60,8 +66,13 @@ const BTN_SECONDARY =
 const BTN_BACK =
   'inline-flex items-center justify-center px-3 py-2 text-sm font-medium text-slate-700 hover:text-slate-900 transition-colors'
 
+const INPUT_CLASS =
+  'block w-full rounded-md border border-emerald-200 bg-slate-50 focus:bg-white focus:border-emerald-500 py-2.5 px-3 text-sm'
+
 function modalTitle(step: CreateStep): string {
   switch (step) {
+    case 'details':
+      return 'Create New Batch — Details'
     case 'csv':
       return 'Create Batch — Upload CSV'
     case 'manual':
@@ -79,8 +90,15 @@ export default function Batches() {
   const [listError, setListError] = useState<string | null>(null)
 
   const [isCreateOpen, setIsCreateOpen] = useState(false)
-  const [createStep, setCreateStep] = useState<CreateStep>('method')
-  const [newBatchLabel, setNewBatchLabel] = useState('')
+  const [createStep, setCreateStep] = useState<CreateStep>('details')
+
+  const [batchDetails, setBatchDetails] = useState<BatchDetails>({
+    batch_name: '',
+    course_name: '',
+    academic_year: '',
+    term: '',
+  })
+
   const [manualStudents, setManualStudents] = useState<StudentRow[]>([])
   const [csvStudents, setCsvStudents] = useState<StudentRow[]>([])
   const [csvFileName, setCsvFileName] = useState<string | null>(null)
@@ -105,7 +123,10 @@ export default function Batches() {
   const filteredBatches = batches.filter((batch) => {
     const q = searchQuery.trim().toLowerCase()
     if (!q) return true
-    return (batch.label || 'Untitled Batch').toLowerCase().includes(q)
+    return (
+      (batch.batch_name || 'Untitled Batch').toLowerCase().includes(q) ||
+      (batch.course_name || '').toLowerCase().includes(q)
+    )
   })
 
   function showToast(type: ToastMessage['type'], message: string) {
@@ -115,8 +136,8 @@ export default function Batches() {
 
   function openCreateDialog() {
     setIsCreateOpen(true)
-    setCreateStep('method')
-    setNewBatchLabel('')
+    setCreateStep('details')
+    setBatchDetails({ batch_name: '', course_name: '', academic_year: '', term: '' })
     setManualStudents([])
     setCsvStudents([])
     setCsvFileName(null)
@@ -133,25 +154,18 @@ export default function Batches() {
   }
 
   const refreshBatches = useCallback(async () => {
-    if (!user?.uid) return
     setListLoading(true)
     setListError(null)
     try {
-      const data = await listBatches(user.uid)
-      const withCounts = await Promise.all(
-        data.map(async (batch) => ({
-          ...batch,
-          studentCount: await getBatchStudentCount(batch.id),
-        })),
-      )
-      setBatches(withCounts)
+      const data = await listBatches()
+      setBatches(data)
     } catch (err) {
       console.error(err)
       setListError(getErrorMessage(err, 'Could not load batches.'))
     } finally {
       setListLoading(false)
     }
-  }, [user?.uid])
+  }, [])
 
   const refreshStudents = useCallback(async () => {
     if (!selectedBatch) return
@@ -184,24 +198,34 @@ export default function Batches() {
     refreshStudents()
   }, [selectedBatch, refreshStudents])
 
+  function isDetailsComplete(): boolean {
+    return (
+      batchDetails.batch_name.trim() !== '' &&
+      batchDetails.course_name.trim() !== '' &&
+      batchDetails.academic_year.trim() !== '' &&
+      batchDetails.term.trim() !== ''
+    )
+  }
+
   async function handleCreateWithStudents(studentRows: StudentRow[]) {
     if (!user?.uid || studentRows.length === 0) return
-
-    const label = newBatchLabel.trim()
-    if (!label) return
+    if (!isDetailsComplete()) return
 
     setIsSubmitting(true)
     setCreateStatus('Creating batch…')
     try {
-      const batchId = await createBatch(user.uid, label)
-      await Promise.all(
-        studentRows.map((s) => addStudentToBatch(batchId, s.name, s.email)),
-      )
+      const batchId = await createBatch({
+        batch_name: batchDetails.batch_name.trim(),
+        course_name: batchDetails.course_name.trim(),
+        academic_year: batchDetails.academic_year.trim(),
+        term: batchDetails.term.trim(),
+        students: studentRows,
+      })
       setIsCreateOpen(false)
       await refreshBatches()
       showToast(
         'success',
-        `Batch "${label}" created with ${studentRows.length} student${studentRows.length === 1 ? '' : 's'}.`,
+        `Batch "${batchDetails.batch_name}" created with ${studentRows.length} student${studentRows.length === 1 ? '' : 's'}.`,
       )
     } catch (err) {
       console.error(err)
@@ -257,7 +281,7 @@ export default function Batches() {
   async function handleDeleteBatch(batch: Batch) {
     if (
       !window.confirm(
-        `Delete "${batch.label}" and all its students? This cannot be undone.`,
+        `Delete "${batch.batch_name}" and all its students? This cannot be undone.`,
       )
     ) {
       return
@@ -364,6 +388,86 @@ export default function Batches() {
           </div>
 
           <div className="p-6 overflow-y-auto flex-1">
+            {/* ── Step 1: Batch Details ── */}
+            {createStep === 'details' && (
+              <div className="space-y-4">
+                <p className="text-sm text-slate-600">
+                  Enter the batch details before adding students.
+                </p>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Batch Name <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={batchDetails.batch_name}
+                    onChange={(e) => setBatchDetails((d) => ({ ...d, batch_name: e.target.value }))}
+                    placeholder="e.g., CS101 Group A"
+                    className={INPUT_CLASS}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Course Name <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={batchDetails.course_name}
+                    onChange={(e) => setBatchDetails((d) => ({ ...d, course_name: e.target.value }))}
+                    placeholder="e.g., Introduction to Computer Science"
+                    className={INPUT_CLASS}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">
+                      Academic Year <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={batchDetails.academic_year}
+                      onChange={(e) =>
+                        setBatchDetails((d) => ({ ...d, academic_year: e.target.value }))
+                      }
+                      placeholder="e.g., 2025–2026"
+                      className={INPUT_CLASS}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">
+                      Term <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={batchDetails.term}
+                      onChange={(e) => setBatchDetails((d) => ({ ...d, term: e.target.value }))}
+                      placeholder="e.g., Semester 1"
+                      className={INPUT_CLASS}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-2">
+                  <button
+                    type="button"
+                    className={BTN_PRIMARY}
+                    disabled={!isDetailsComplete()}
+                    onClick={() => setCreateStep('method')}
+                  >
+                    Next: Add Students
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ── Step 2: Choose method ── */}
             {createStep === 'method' && (
               <div className="space-y-4">
                 <p className="text-sm text-slate-600">
@@ -402,25 +506,23 @@ export default function Batches() {
                     </p>
                   </button>
                 </div>
+
+                <div className="flex items-center justify-between pt-2">
+                  <button
+                    type="button"
+                    className={BTN_BACK}
+                    onClick={() => setCreateStep('details')}
+                  >
+                    <ArrowLeft className="w-4 h-4 mr-1" />
+                    Back
+                  </button>
+                </div>
               </div>
             )}
 
+            {/* ── Step 3a: CSV upload ── */}
             {createStep === 'csv' && (
               <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">
-                    Batch Name
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={newBatchLabel}
-                    onChange={(e) => setNewBatchLabel(e.target.value)}
-                    placeholder="e.g., CS101 - Fall 2025"
-                    className="block w-full rounded-md border border-emerald-200 bg-slate-50 focus:bg-white focus:border-emerald-500 py-2.5 px-3 text-sm"
-                  />
-                </div>
-
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-2">
                     Upload Students (CSV)
@@ -508,9 +610,7 @@ export default function Batches() {
                     <button
                       type="button"
                       className={BTN_PRIMARY}
-                      disabled={
-                        !newBatchLabel.trim() || csvStudents.length === 0 || isSubmitting
-                      }
+                      disabled={csvStudents.length === 0 || isSubmitting}
                       onClick={() => handleCreateWithStudents(csvStudents)}
                     >
                       {isSubmitting ? (
@@ -527,23 +627,10 @@ export default function Batches() {
               </div>
             )}
 
+            {/* ── Step 3b: Manual entry ── */}
             {createStep === 'manual' && (
               <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">
-                    Batch Name
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={newBatchLabel}
-                    onChange={(e) => setNewBatchLabel(e.target.value)}
-                    placeholder="e.g., CS101 - Fall 2025"
-                    className="block w-full rounded-md border border-emerald-200 bg-slate-50 focus:bg-white focus:border-emerald-500 py-2.5 px-3 text-sm"
-                  />
-                </div>
-
-                <div className="border-t border-slate-100 pt-4">
+                <div className="border-t border-slate-100 pt-2">
                   <label className="block text-sm font-medium text-slate-700 mb-3">
                     Add Students
                   </label>
@@ -628,9 +715,7 @@ export default function Batches() {
                     <button
                       type="button"
                       className={BTN_PRIMARY}
-                      disabled={
-                        !newBatchLabel.trim() || manualStudents.length === 0 || isSubmitting
-                      }
+                      disabled={manualStudents.length === 0 || isSubmitting}
                       onClick={() => handleCreateWithStudents(manualStudents)}
                     >
                       {isSubmitting ? (
@@ -661,14 +746,19 @@ export default function Batches() {
           <div>
             <div className="flex items-center gap-3 flex-wrap">
               <h1 className="text-2xl font-bold text-slate-800 tracking-tight">
-                {selectedBatch.label}
+                {selectedBatch.batch_name}
               </h1>
               <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-100">
                 {students.length} student{students.length === 1 ? '' : 's'}
               </span>
             </div>
             <p className="text-sm text-slate-500 mt-1">
-              Manage students and communications for this batch.
+              {selectedBatch.course_name && (
+                <span className="font-medium text-slate-700">{selectedBatch.course_name}</span>
+              )}
+              {selectedBatch.course_name && selectedBatch.academic_year && ' · '}
+              {selectedBatch.academic_year}
+              {selectedBatch.term && ` · ${selectedBatch.term}`}
               {selectedBatch.createdAt && (
                 <> · Created {formatDate(selectedBatch.createdAt)}</>
               )}
@@ -895,10 +985,6 @@ export default function Batches() {
         ) : listError ? (
           <div className="flex flex-col items-center justify-center py-16 px-6 text-center gap-2">
             <p className="text-sm font-medium text-red-700">{listError}</p>
-            <p className="text-xs text-slate-500">
-              Check Firestore rules and that a composite index exists for batches (uid +
-              createdAt).
-            </p>
           </div>
         ) : batches.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -932,7 +1018,10 @@ export default function Batches() {
               <thead className="bg-slate-50/90">
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                    Batch Name
+                    Batch
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                    Course
                   </th>
                   <th className="px-6 py-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wider">
                     Students
@@ -952,19 +1041,22 @@ export default function Batches() {
                         </div>
                         <div>
                           <div className="text-sm font-medium text-slate-900 group-hover:text-emerald-600 transition-colors">
-                            {batch.label || 'Untitled Batch'}
+                            {batch.batch_name || 'Untitled Batch'}
                           </div>
-                          {batch.createdAt && (
+                          {batch.academic_year && (
                             <div className="text-xs text-slate-500">
-                              Created: {formatDate(batch.createdAt)}
+                              {batch.academic_year}{batch.term ? ` · ${batch.term}` : ''}
                             </div>
                           )}
                         </div>
                       </div>
                     </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className="text-sm text-slate-600">{batch.course_name || '—'}</span>
+                    </td>
                     <td className="px-6 py-4 whitespace-nowrap text-center">
                       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-800 group-hover:bg-emerald-50 group-hover:text-emerald-700 transition-colors">
-                        {batch.studentCount} student{batch.studentCount === 1 ? '' : 's'}
+                        {batch.student_count} student{batch.student_count === 1 ? '' : 's'}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">

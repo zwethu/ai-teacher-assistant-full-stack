@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from routers.auth import router as auth_router
+from routers.batches import router as batches_router
 from routers.email import router as email_router
 from services.email_scheduler import shutdown_scheduler, start_scheduler
 
@@ -30,6 +31,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router, prefix="", tags=["auth"])
+app.include_router(batches_router)
 app.include_router(email_router, prefix="", tags=["email"])
 
 

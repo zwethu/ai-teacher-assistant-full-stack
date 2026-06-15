@@ -9,6 +9,7 @@ from services.batch_service import (
     delete_batch,
     get_batch,
     list_batches,
+    list_students,
     remove_student_from_batch,
 )
 from utils.firebase_auth import CurrentUser, get_current_user
@@ -69,6 +70,18 @@ from pydantic import BaseModel
 class StudentBody(BaseModel):
     name: str
     email: str
+
+
+@router.get("/{batch_id}/students", response_model=list[dict])
+async def list_students_endpoint(
+    batch_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> list[dict]:
+    lecturer_id: str = current_user["uid"]
+    batch = get_batch(batch_id, lecturer_id)
+    if batch is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch not found")
+    return list_students(batch_id, lecturer_id)
 
 
 @router.post("/{batch_id}/students", response_model=dict, status_code=status.HTTP_201_CREATED)

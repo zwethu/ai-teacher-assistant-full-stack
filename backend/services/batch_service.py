@@ -179,6 +179,40 @@ def remove_student_from_batch(
     _txn()
 
 
+def list_students(batch_id: str, lecturer_id: str) -> list[dict[str, Any]]:
+    """Return all students for a batch (after verifying lecturer ownership)."""
+    db = get_firestore()
+    batch_ref = db.collection(BATCHES_COLLECTION).document(batch_id)
+    snap = batch_ref.get()
+    if not snap.exists or (snap.to_dict() or {}).get("lecturer_id") != lecturer_id:
+        return []
+
+    students_ref = batch_ref.collection(STUDENTS_SUBCOLLECTION)
+    results: list[dict[str, Any]] = []
+    for doc in students_ref.order_by("created_at").stream():
+        data = doc.to_dict() or {}
+        created = data.get("created_at")
+        updated = data.get("updated_at")
+        results.append(
+            {
+                "id": doc.id,
+                "batch_id": str(data.get("batch_id") or batch_id),
+                "lecturer_id": str(data.get("lecturer_id") or ""),
+                "name": str(data.get("name") or ""),
+                "email": str(data.get("email") or ""),
+                "email_normalized": str(data.get("email_normalized") or ""),
+                "status": str(data.get("status") or "active"),
+                "created_at": (
+                    created.isoformat() if hasattr(created, "isoformat") else (str(created) if created else None)
+                ),
+                "updated_at": (
+                    updated.isoformat() if hasattr(updated, "isoformat") else (str(updated) if updated else None)
+                ),
+            }
+        )
+    return results
+
+
 def delete_batch(batch_id: str, lecturer_id: str) -> bool:
     """Delete students subcollection then the batch document. Returns False if not found/owned."""
     db = get_firestore()

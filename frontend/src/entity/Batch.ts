@@ -18,7 +18,12 @@ export type Batch = {
 
 export type BatchStudent = {
   id: string
+  batch_id: string
+  lecturer_id: string
   name: string
   email: string
+  email_normalized: string
+  status: string
   createdAt: Date | null
+  updatedAt: Date | null
 }

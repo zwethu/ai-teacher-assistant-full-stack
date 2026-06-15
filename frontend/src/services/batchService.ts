@@ -1,16 +1,5 @@
-import {
-  collection,
-  doc,
-  getDocs,
-  deleteDoc,
-  query,
-  orderBy,
-} from 'firebase/firestore'
-import { db } from '../lib/firebase'
 import api from '../lib/api'
 import type { Batch, BatchStudent } from '../entity/Batch'
-
-const BATCHES_COLLECTION = 'batches'
 
 export type CreateBatchPayload = {
   batch_name: string
@@ -71,18 +60,18 @@ export async function getBatchById(batchId: string): Promise<Batch | null> {
 }
 
 export async function listBatchStudents(batchId: string): Promise<BatchStudent[]> {
-  const studentsRef = collection(db, BATCHES_COLLECTION, batchId, 'students')
-  const q = query(studentsRef, orderBy('created_at', 'asc'))
-  const snap = await getDocs(q)
-  return snap.docs.map((d) => {
-    const data = d.data()
-    return {
-      id: d.id,
-      name: data.name ?? '',
-      email: data.email ?? '',
-      createdAt: data.created_at ? data.created_at.toDate?.() ?? null : null,
-    }
-  })
+  const res = await api.get<Record<string, unknown>[]>(`/batches/${batchId}/students`)
+  return res.data.map((d) => ({
+    id: String(d.id ?? ''),
+    batch_id: String(d.batch_id ?? batchId),
+    lecturer_id: String(d.lecturer_id ?? ''),
+    name: String(d.name ?? ''),
+    email: String(d.email ?? ''),
+    email_normalized: String(d.email_normalized ?? ''),
+    status: String(d.status ?? 'active'),
+    createdAt: d.created_at ? new Date(d.created_at as string) : null,
+    updatedAt: d.updated_at ? new Date(d.updated_at as string) : null,
+  }))
 }
 
 export async function addStudentToBatch(

@@ -3,10 +3,10 @@ import AppLayout from './components/layout/AppLayout'
 import ProtectedRoute from './components/layout/ProtectedRoute'
 import AuthCallback from './pages/AuthCallback'
 import Login from './pages/Login'
-import Chat from './pages/Chat'
+import Chat from './pages/chat'
 import Assessments from './pages/Assessments'
 import LessonPlans from './pages/LessonPlans'
-import Batches from './pages/Batches'
+import Batches from './pages/batches'
 import Email from './pages/Email'
 
 export default function App() {

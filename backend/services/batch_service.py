@@ -3,7 +3,8 @@ import logging
 import os
 from typing import Any
 
-from google.cloud.firestore import FieldValue, SERVER_TIMESTAMP
+from google.cloud.firestore import SERVER_TIMESTAMP
+from google.cloud.firestore_v1 import Increment
 
 from entity.Batch import BatchCreate, BatchModel
 from utils.firestore_client import get_firestore
@@ -145,7 +146,7 @@ def add_student_to_batch(
         )
         transaction.update(
             db.collection(BATCHES_COLLECTION).document(batch_id),
-            {"student_count": FieldValue.increment(1), "updated_at": SERVER_TIMESTAMP},
+            {"student_count": Increment(1), "updated_at": SERVER_TIMESTAMP},
         )
 
     _txn()
@@ -171,7 +172,7 @@ def remove_student_from_batch(
         transaction.update(
             db.collection(BATCHES_COLLECTION).document(batch_id),
             {
-                "student_count": FieldValue.increment(-1),
+                "student_count": Increment(-1),
                 "updated_at": SERVER_TIMESTAMP,
             },
         )

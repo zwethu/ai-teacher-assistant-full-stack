@@ -18,6 +18,7 @@ dependencies = [
     "pydantic",
     "google-cloud-storage",
     "google-cloud-discoveryengine",
+    "google-cloud-aiplatform[adk,agent-engines]",
     "python-multipart",
 ]
 

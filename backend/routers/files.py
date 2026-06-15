@@ -1,12 +1,12 @@
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 
 from entity.File import BatchFile
 from services.batch_service import get_batch
 from services.file_service import (
     delete_batch_file,
-    index_batch_file,
+    enqueue_index_batch_file,
     list_batch_files,
     upload_batch_file,
 )
@@ -32,7 +32,6 @@ MAX_FILE_SIZE_MB = 50
 @router.post("", response_model=BatchFile, status_code=status.HTTP_201_CREATED)
 async def upload_file_endpoint(
     batch_id: str,
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     file_title: str = Form(""),
     current_user: CurrentUser = Depends(get_current_user),
@@ -69,8 +68,7 @@ async def upload_file_endpoint(
         batch_name=batch.batch_name,
     )
 
-    background_tasks.add_task(
-        index_batch_file,
+    enqueue_index_batch_file(
         file_id=record.file_id,
         batch_id=batch_id,
         gcs_path=record.gcs_path,

@@ -11,6 +11,7 @@ export type BatchFile = {
   vertex_doc_id: string
   index_status: IndexStatus
   index_error: string
+  index_message: string
   created_at: string | null
   updated_at: string | null
 }

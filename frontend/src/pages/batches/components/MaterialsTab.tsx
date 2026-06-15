@@ -238,6 +238,11 @@ export function MaterialsTab({
                           </div>
                           <div className="mt-1">
                             <IndexStatusBadge status={f.index_status} />
+                            {f.index_status === 'indexing' && (
+                              <p className="text-xs text-slate-500 mt-1 animate-pulse">
+                                {f.index_message || 'Indexing in progress…'}
+                              </p>
+                            )}
                           </div>
                           {f.created_at && (
                             <span className="flex items-center gap-1 text-xs text-slate-400 mt-1">

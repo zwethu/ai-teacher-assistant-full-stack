@@ -1,15 +1,13 @@
 """Chat and message endpoints for batch-scoped conversations."""
 
 import logging
-import os
 
-import httpx
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel
 
+from services.agent_gateway import start_chat_run
 from services.batch_service import get_batch
 from services.chat_service import (
-    add_message,
     create_chat,
     delete_chat,
     get_chat,
@@ -23,8 +21,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/batches/{batch_id}/chats", tags=["chats"])
 
-_AGENT_ENGINE_URL = os.getenv("AGENT_ENGINE_URL", "").strip()
-
 
 class CreateChatBody(BaseModel):
     title: str = "New Chat"
@@ -32,6 +28,7 @@ class CreateChatBody(BaseModel):
 
 class SendMessageBody(BaseModel):
     content: str
+    enable_web_search: bool = True
 
 
 class UpdateTitleBody(BaseModel):
@@ -108,11 +105,22 @@ async def send_message_endpoint(
     batch_id: str,
     chat_id: str,
     body: SendMessageBody,
+    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
-    """
-    Persist the user message, call the Agent Engine (if configured),
-    persist the assistant reply, and return both.
+    """Send a message, create a run, start the agent in the background.
+
+    Returns immediately with run_id so the frontend can subscribe to the RTDB
+    event stream before the agent finishes.
+
+    Response:
+        user_message   — the persisted user message
+        run_id         — unique identifier for this agent execution
+        rtdb_run_path  — agentRuns/{run_id}, root of the live event stream
+        status         — "running"
+
+    The assistant message is persisted to Firestore asynchronously and also
+    written to agentRuns/{run_id}/messages/{id} in RTDB when complete.
     """
     lecturer_id: str = current_user["uid"]
 
@@ -120,67 +128,12 @@ async def send_message_endpoint(
     if chat is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
 
-    batch = get_batch(batch_id, lecturer_id)
-    if batch is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch not found")
-
-    user_msg = add_message(batch_id, chat_id, "user", body.content, lecturer_id)
-
-    reply_content = await _call_agent(
+    return await start_chat_run(
         user_message=body.content,
-        batch=batch,
+        batch_id=batch_id,
         chat_id=chat_id,
         lecturer_id=lecturer_id,
-        token=current_user.get("token", ""),
+        lecturer_email=current_user.get("email", ""),
+        enable_web_search=body.enable_web_search,
+        background_tasks=background_tasks,
     )
-
-    assistant_msg = add_message(batch_id, chat_id, "assistant", reply_content, lecturer_id)
-
-    return {
-        "user_message": user_msg,
-        "assistant_message": assistant_msg,
-    }
-
-
-async def _call_agent(
-    user_message: str,
-    batch,
-    chat_id: str,
-    lecturer_id: str,
-    token: str,
-) -> str:
-    """Call Agent Engine and return the assistant reply text. Falls back to placeholder."""
-    if not _AGENT_ENGINE_URL:
-        return f"(Agent Engine not configured) You said: {user_message!r}"
-
-    payload = {
-        "message": user_message,
-        "session_id": chat_id,
-        "batch_id": batch.batch_id,
-        "batch_name": batch.batch_name,
-        "course_name": batch.course_name,
-        "lecturer_id": lecturer_id,
-        "lecturer_email": batch.lecturer_email,
-        "datastore_id": batch.datastore_id,
-        "academic_year": batch.academic_year,
-        "term": batch.term,
-    }
-    try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            resp = await client.post(
-                _AGENT_ENGINE_URL,
-                json=payload,
-                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            return str(
-                data.get("text")
-                or data.get("content")
-                or data.get("response")
-                or data.get("output")
-                or "(no response from agent)"
-            )
-    except Exception as exc:
-        logger.warning("Agent Engine call failed: %s", exc)
-        return f"(Agent temporarily unavailable) You said: {user_message!r}"

@@ -121,17 +121,19 @@ export function useBatchesPage() {
     }
   }, [selectedBatch])
 
-  const refreshFiles = useCallback(async () => {
+  const refreshFiles = useCallback(async (options?: { silent?: boolean }) => {
     if (!selectedBatch) return
-    setFilesLoading(true)
+    if (!options?.silent) setFilesLoading(true)
     try {
       const data = await listBatchFiles(selectedBatch.id)
       setFiles(data)
     } catch (err) {
       console.error(err)
-      showToast('error', getErrorMessage(err, 'Could not load files.'))
+      if (!options?.silent) {
+        showToast('error', getErrorMessage(err, 'Could not load files.'))
+      }
     } finally {
-      setFilesLoading(false)
+      if (!options?.silent) setFilesLoading(false)
     }
   }, [selectedBatch]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -161,7 +163,7 @@ export function useBatchesPage() {
     const transitional: IndexStatus[] = ['uploading', 'indexing', 'deleting']
     const needsPolling = files.some((f) => transitional.includes(f.index_status))
     if (!needsPolling || !selectedBatch) return
-    pollingRef.current = setInterval(() => void refreshFiles(), 4000)
+    pollingRef.current = setInterval(() => void refreshFiles({ silent: true }), 4000)
     return () => {
       if (pollingRef.current) clearInterval(pollingRef.current)
     }
@@ -338,7 +340,10 @@ export function useBatchesPage() {
     setFileUploading(true)
     try {
       const uploaded = await uploadBatchFile(selectedBatch.id, file, file.name)
-      setFiles((prev) => [uploaded, ...prev])
+      setFiles((prev) => [
+        { ...uploaded, index_message: uploaded.index_message || 'Starting document import…' },
+        ...prev,
+      ])
       showToast('success', `"${file.name}" uploaded — indexing started.`)
     } catch (err) {
       console.error(err)

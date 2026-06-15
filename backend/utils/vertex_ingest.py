@@ -4,7 +4,9 @@ import hashlib
 import json
 import logging
 import os
+import time
 import uuid
+from collections.abc import Callable
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -58,6 +60,7 @@ def ingest_file(
     file_title: str,
     course_name: str = "",
     batch_name: str = "",
+    on_progress: Callable[[str], None] | None = None,
 ) -> str:
     """
     Upload a JSONL manifest and trigger Vertex AI Search ImportDocuments.
@@ -115,9 +118,91 @@ def ingest_file(
         reconciliation_mode=ImportDocumentsRequest.ReconciliationMode.INCREMENTAL,
     )
     operation = de_client.import_documents(request=request)
-    operation.result(timeout=3600)
+
+    deadline = time.time() + 3600
+    last_message = ""
+    if on_progress:
+        on_progress("Waiting for Vertex import to start…")
+        last_message = "Waiting for Vertex import to start…"
+
+    while time.time() < deadline:
+        try:
+            operation.reload()
+        except Exception:
+            pass
+
+        if operation.done():
+            break
+
+        if on_progress:
+            try:
+                msg = _extract_progress_message(operation.metadata)
+                if not msg:
+                    msg = "Indexing in progress…"
+                if msg != last_message:
+                    last_message = msg
+                    on_progress(msg)
+            except Exception:
+                pass
+        time.sleep(5)
+
+    operation.result(timeout=60)
     logger.info("Indexed %s (doc_id=%s) into %s", gcs_path, doc_id, datastore_id)
     return doc_id
+
+
+def _extract_progress_message(meta) -> str:
+    """Extract human-readable progress from ImportDocumentsMetadata."""
+    if meta is None:
+        return ""
+
+    state_map = {
+        0: "Preparing document import…",
+        1: "Document crawling has finished.",
+        2: "Document parsing is working in progress.",
+        3: "Document segmentation will start later.",
+        4: "Indexing complete.",
+        "STATE_UNSPECIFIED": "Preparing document import…",
+        "IMPORTING": "Importing documents…",
+        "SUCCEEDED": "Indexing complete.",
+        "FAILED": "Import failed.",
+        "CANCELLED": "Import cancelled.",
+    }
+
+    try:
+        state = getattr(meta, "state", None)
+        if state is not None:
+            state_name = getattr(state, "name", None)
+            if state_name and state_name in state_map:
+                return state_map[state_name]
+            try:
+                state_val = int(state)
+                if state_val in state_map:
+                    return state_map[state_val]
+            except (TypeError, ValueError):
+                pass
+
+        statuses = getattr(meta, "individual_import_statuses", None) or []
+        for item in statuses:
+            doc_id = getattr(item, "document_id", "") or getattr(item, "documentId", "")
+            item_state = getattr(item, "state", None)
+            item_name = getattr(item_state, "name", str(item_state)) if item_state else ""
+            if doc_id:
+                return f"Processing {doc_id} ({item_name or 'running'})…"
+
+        try:
+            from google.protobuf.json_format import MessageToDict
+
+            data = MessageToDict(meta._pb) if hasattr(meta, "_pb") else MessageToDict(meta)
+            for key in ("progressMessage", "progress_message", "message"):
+                if data.get(key):
+                    return str(data[key])
+        except Exception:
+            pass
+    except Exception:
+        return ""
+
+    return ""
 
 
 def delete_document(doc_id: str) -> None:

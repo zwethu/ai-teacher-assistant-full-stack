@@ -14,5 +14,6 @@ class BatchFile(BaseModel):
     vertex_doc_id: str = ""
     index_status: str = "uploading"
     index_error: str = ""
+    index_message: str = ""
     created_at: str | None = None
     updated_at: str | None = None

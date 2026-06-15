@@ -1,6 +1,7 @@
 """File upload pipeline: GCS → Firestore record → Vertex AI Search indexing."""
 
 import logging
+import threading
 import uuid
 from typing import Any
 
@@ -41,6 +42,7 @@ def _doc_to_model(doc_id: str, data: dict[str, Any]) -> BatchFile:
         vertex_doc_id=str(data.get("vertex_doc_id") or ""),
         index_status=str(data.get("index_status") or "uploading"),
         index_error=str(data.get("index_error") or ""),
+        index_message=str(data.get("index_message") or ""),
         created_at=str(created.isoformat()) if hasattr(created, "isoformat") else (str(created) if created else None),
         updated_at=str(updated.isoformat()) if hasattr(updated, "isoformat") else (str(updated) if updated else None),
     )
@@ -80,6 +82,7 @@ def upload_batch_file(
             "vertex_doc_id": "",
             "index_status": "indexing",
             "index_error": "",
+            "index_message": "",
             "created_at": SERVER_TIMESTAMP,
             "updated_at": SERVER_TIMESTAMP,
         }
@@ -88,6 +91,33 @@ def upload_batch_file(
 
     snap = file_doc.get()
     return _doc_to_model(file_id, snap.to_dict() or {})
+
+
+def enqueue_index_batch_file(
+    file_id: str,
+    batch_id: str,
+    gcs_path: str,
+    lecturer_id: str,
+    file_title: str,
+    course_name: str = "",
+    batch_name: str = "",
+) -> None:
+    """Run indexing in a daemon thread so uploads/reloads are not blocked."""
+    thread = threading.Thread(
+        target=index_batch_file,
+        kwargs={
+            "file_id": file_id,
+            "batch_id": batch_id,
+            "gcs_path": gcs_path,
+            "lecturer_id": lecturer_id,
+            "file_title": file_title,
+            "course_name": course_name,
+            "batch_name": batch_name,
+        },
+        daemon=True,
+        name=f"index-{file_id[:8]}",
+    )
+    thread.start()
 
 
 def index_batch_file(
@@ -101,7 +131,15 @@ def index_batch_file(
 ) -> None:
     """Run Vertex indexing in a background worker and update the Firestore record."""
     file_doc = _file_ref(batch_id, file_id)
+
+    def _on_progress(message: str) -> None:
+        try:
+            file_doc.update({"index_message": message, "updated_at": SERVER_TIMESTAMP})
+        except Exception:
+            pass
+
     try:
+        _on_progress("Starting document import…")
         doc_id = ingest_file(
             gcs_path=gcs_path,
             lecturer_id=lecturer_id,
@@ -109,11 +147,13 @@ def index_batch_file(
             file_title=file_title,
             course_name=course_name,
             batch_name=batch_name,
+            on_progress=_on_progress,
         )
         file_doc.update(
             {
                 "vertex_doc_id": doc_id,
                 "index_status": "indexed",
+                "index_message": "",
                 "index_error": "",
                 "updated_at": SERVER_TIMESTAMP,
             }
@@ -126,6 +166,7 @@ def index_batch_file(
             {
                 "index_status": "failed",
                 "index_error": err_msg,
+                "index_message": "",
                 "updated_at": SERVER_TIMESTAMP,
             }
         )

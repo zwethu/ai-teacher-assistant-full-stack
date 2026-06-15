@@ -1,56 +1,49 @@
-import {
-  addDoc,
-  collection,
-  getDocs,
-  orderBy,
-  query,
-  serverTimestamp,
-} from 'firebase/firestore'
-import { db } from '../lib/firebase'
-import type { ChatMessage } from '../entity/Chat'
+import type { Chat, ChatMessage } from '../entity/Chat'
+import api from '../lib/api'
 
-const CHATS_COLLECTION = 'chats'
+// ---------------------------------------------------------------------------
+// Chat CRUD
+// ---------------------------------------------------------------------------
 
-export async function createChat(
-  uid: string,
+export async function createChat(batchId: string, title: string = 'New Chat'): Promise<Chat> {
+  const res = await api.post<Chat>(`/batches/${batchId}/chats`, { title })
+  return res.data
+}
+
+export async function listChats(batchId: string): Promise<Chat[]> {
+  const res = await api.get<Chat[]>(`/batches/${batchId}/chats`)
+  return res.data
+}
+
+export async function deleteChat(batchId: string, chatId: string): Promise<void> {
+  await api.delete(`/batches/${batchId}/chats/${chatId}`)
+}
+
+export async function updateChatTitle(
   batchId: string,
-  batchLabel: string,
-): Promise<string> {
-  const ref = collection(db, CHATS_COLLECTION)
-  const docRef = await addDoc(ref, {
-    uid,
-    batchId,
-    batchLabel,
-    title: batchLabel,
-    createdAt: serverTimestamp(),
-  })
-  return docRef.id
-}
-
-export async function getMessages(chatId: string): Promise<ChatMessage[]> {
-  const ref = collection(db, CHATS_COLLECTION, chatId, 'messages')
-  const q = query(ref, orderBy('createdAt', 'asc'))
-  const snap = await getDocs(q)
-  return snap.docs.map((d) => {
-    const data = d.data()
-    return {
-      id: d.id,
-      role: data.role as 'user' | 'assistant',
-      content: data.content ?? '',
-      createdAt: data.createdAt ? data.createdAt.toDate?.() ?? null : null,
-    }
-  })
-}
-
-export async function addMessage(
   chatId: string,
-  role: 'user' | 'assistant',
-  content: string,
+  title: string,
 ): Promise<void> {
-  const ref = collection(db, CHATS_COLLECTION, chatId, 'messages')
-  await addDoc(ref, {
-    role,
-    content,
-    createdAt: serverTimestamp(),
-  })
+  await api.patch(`/batches/${batchId}/chats/${chatId}/title`, { title })
+}
+
+// ---------------------------------------------------------------------------
+// Messages
+// ---------------------------------------------------------------------------
+
+export async function listMessages(batchId: string, chatId: string): Promise<ChatMessage[]> {
+  const res = await api.get<ChatMessage[]>(`/batches/${batchId}/chats/${chatId}/messages`)
+  return res.data
+}
+
+export async function sendMessage(
+  batchId: string,
+  chatId: string,
+  content: string,
+): Promise<{ user_message: ChatMessage; assistant_message: ChatMessage }> {
+  const res = await api.post<{
+    user_message: ChatMessage
+    assistant_message: ChatMessage
+  }>(`/batches/${batchId}/chats/${chatId}/messages`, { content })
+  return res.data
 }

@@ -1,0 +1,163 @@
+"""Chat persistence service — batches/{batch_id}/chats/{chat_id}/messages/{msg_id}."""
+
+import logging
+import uuid
+from typing import Any
+
+from google.cloud.firestore import SERVER_TIMESTAMP
+
+from utils.firestore_client import get_firestore
+
+logger = logging.getLogger(__name__)
+
+BATCHES_COLLECTION = "batches"
+CHATS_SUBCOLLECTION = "chats"
+MESSAGES_SUBCOLLECTION = "messages"
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _chats_col(batch_id: str):
+    return (
+        get_firestore()
+        .collection(BATCHES_COLLECTION)
+        .document(batch_id)
+        .collection(CHATS_SUBCOLLECTION)
+    )
+
+
+def _messages_col(batch_id: str, chat_id: str):
+    return _chats_col(batch_id).document(chat_id).collection(MESSAGES_SUBCOLLECTION)
+
+
+def _chat_to_dict(doc_id: str, data: dict[str, Any]) -> dict[str, Any]:
+    created = data.get("created_at")
+    updated = data.get("updated_at")
+    return {
+        "chat_id": doc_id,
+        "batch_id": str(data.get("batch_id") or ""),
+        "lecturer_id": str(data.get("lecturer_id") or ""),
+        "title": str(data.get("title") or "New Chat"),
+        "created_at": (created.isoformat() if hasattr(created, "isoformat") else (str(created) if created else None)),
+        "updated_at": (updated.isoformat() if hasattr(updated, "isoformat") else (str(updated) if updated else None)),
+    }
+
+
+def _msg_to_dict(doc_id: str, data: dict[str, Any]) -> dict[str, Any]:
+    created = data.get("created_at")
+    return {
+        "message_id": doc_id,
+        "chat_id": str(data.get("chat_id") or ""),
+        "role": str(data.get("role") or "user"),
+        "content": str(data.get("content") or ""),
+        "created_at": (created.isoformat() if hasattr(created, "isoformat") else (str(created) if created else None)),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Chat CRUD
+# ---------------------------------------------------------------------------
+
+def create_chat(batch_id: str, lecturer_id: str, title: str = "New Chat") -> dict[str, Any]:
+    col = _chats_col(batch_id)
+    chat_id = str(uuid.uuid4())
+    doc = col.document(chat_id)
+    doc.set(
+        {
+            "chat_id": chat_id,
+            "batch_id": batch_id,
+            "lecturer_id": lecturer_id,
+            "title": title.strip() or "New Chat",
+            "created_at": SERVER_TIMESTAMP,
+            "updated_at": SERVER_TIMESTAMP,
+        }
+    )
+    return {"chat_id": chat_id, "batch_id": batch_id, "lecturer_id": lecturer_id, "title": title}
+
+
+def list_chats(batch_id: str, lecturer_id: str) -> list[dict[str, Any]]:
+    """Return chats for a batch ordered newest first, filtered by lecturer_id."""
+    col = _chats_col(batch_id)
+    docs = col.where("lecturer_id", "==", lecturer_id).order_by("created_at", direction="DESCENDING").stream()
+    return [_chat_to_dict(doc.id, doc.to_dict() or {}) for doc in docs]
+
+
+def get_chat(batch_id: str, chat_id: str, lecturer_id: str) -> dict[str, Any] | None:
+    doc = _chats_col(batch_id).document(chat_id).get()
+    if not doc.exists:
+        return None
+    data = doc.to_dict() or {}
+    if data.get("lecturer_id") != lecturer_id:
+        return None
+    return _chat_to_dict(doc.id, data)
+
+
+def delete_chat(batch_id: str, chat_id: str, lecturer_id: str) -> bool:
+    chat_ref = _chats_col(batch_id).document(chat_id)
+    snap = chat_ref.get()
+    if not snap.exists or (snap.to_dict() or {}).get("lecturer_id") != lecturer_id:
+        return False
+    for msg in _messages_col(batch_id, chat_id).stream():
+        msg.reference.delete()
+    chat_ref.delete()
+    return True
+
+
+def delete_all_batch_chats(batch_id: str) -> None:
+    """Delete all chats and their messages for a batch (used during batch deletion)."""
+    col = _chats_col(batch_id)
+    for chat_doc in col.stream():
+        for msg in _messages_col(batch_id, chat_doc.id).stream():
+            msg.reference.delete()
+        chat_doc.reference.delete()
+    logger.info("Deleted all chats for batch %s", batch_id)
+
+
+# ---------------------------------------------------------------------------
+# Message CRUD
+# ---------------------------------------------------------------------------
+
+def add_message(
+    batch_id: str,
+    chat_id: str,
+    role: str,
+    content: str,
+    lecturer_id: str,
+) -> dict[str, Any]:
+    """Persist one message and bump chat updated_at."""
+    msg_id = str(uuid.uuid4())
+    col = _messages_col(batch_id, chat_id)
+    col.document(msg_id).set(
+        {
+            "message_id": msg_id,
+            "chat_id": chat_id,
+            "role": role,
+            "content": content,
+            "created_at": SERVER_TIMESTAMP,
+        }
+    )
+    _chats_col(batch_id).document(chat_id).update({"updated_at": SERVER_TIMESTAMP})
+    return {"message_id": msg_id, "role": role, "content": content}
+
+
+def list_messages(batch_id: str, chat_id: str, lecturer_id: str) -> list[dict[str, Any]]:
+    """Return messages for a chat oldest-first, after ownership check."""
+    chat = get_chat(batch_id, chat_id, lecturer_id)
+    if chat is None:
+        return []
+    col = _messages_col(batch_id, chat_id)
+    return [
+        _msg_to_dict(doc.id, doc.to_dict() or {})
+        for doc in col.order_by("created_at").stream()
+    ]
+
+
+def update_chat_title(batch_id: str, chat_id: str, lecturer_id: str, title: str) -> bool:
+    chat_ref = _chats_col(batch_id).document(chat_id)
+    snap = chat_ref.get()
+    if not snap.exists or (snap.to_dict() or {}).get("lecturer_id") != lecturer_id:
+        return False
+    chat_ref.update({"title": title.strip() or "New Chat", "updated_at": SERVER_TIMESTAMP})
+    return True

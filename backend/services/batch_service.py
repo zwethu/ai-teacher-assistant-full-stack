@@ -214,20 +214,52 @@ def list_students(batch_id: str, lecturer_id: str) -> list[dict[str, Any]]:
 
 
 def delete_batch(batch_id: str, lecturer_id: str) -> bool:
-    """Delete students subcollection then the batch document. Returns False if not found/owned."""
+    """
+    Full batch teardown:
+      1. Delete all files (GCS objects + Vertex docs + Firestore records)
+      2. Delete GCS prefix remainder (manifests, artifacts, etc.)
+      3. Delete all chats + messages
+      4. Delete students subcollection
+      5. Delete the batch document itself
+    Returns False if not found or not owned by lecturer_id.
+    """
     db = get_firestore()
     batch_ref = db.collection(BATCHES_COLLECTION).document(batch_id)
     snap = batch_ref.get()
     if not snap.exists:
         return False
-    if (snap.to_dict() or {}).get("lecturer_id") != lecturer_id:
+    data = snap.to_dict() or {}
+    if data.get("lecturer_id") != lecturer_id:
         return False
 
-    students_ref = batch_ref.collection(STUDENTS_SUBCOLLECTION)
-    for student_doc in students_ref.stream():
+    # 1. Files: GCS blobs + Vertex docs + Firestore records
+    try:
+        from services.file_service import delete_all_batch_files
+        delete_all_batch_files(batch_id, lecturer_id)
+    except Exception as exc:
+        logger.warning("Error deleting batch files for %s: %s", batch_id, exc)
+
+    # 2. GCS prefix (manifests, artifacts, leftover uploads)
+    try:
+        from utils.gcs import delete_prefix
+        delete_prefix(lecturer_id, batch_id)
+    except Exception as exc:
+        logger.warning("Error deleting GCS prefix for %s: %s", batch_id, exc)
+
+    # 3. Chats + messages
+    try:
+        from services.chat_service import delete_all_batch_chats
+        delete_all_batch_chats(batch_id)
+    except Exception as exc:
+        logger.warning("Error deleting batch chats for %s: %s", batch_id, exc)
+
+    # 4. Students
+    for student_doc in batch_ref.collection(STUDENTS_SUBCOLLECTION).stream():
         student_doc.reference.delete()
 
+    # 5. Batch document
     batch_ref.delete()
+    logger.info("Deleted batch %s and all associated data", batch_id)
     return True
 
 

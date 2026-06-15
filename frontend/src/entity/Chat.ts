@@ -1,15 +1,16 @@
 export type ChatMessage = {
-  id: string
+  message_id: string
+  chat_id: string
   role: 'user' | 'assistant'
   content: string
-  createdAt: Date | null
+  created_at: string | null
 }
 
 export type Chat = {
-  id: string
-  uid: string
-  batchId: string
-  batchLabel: string
+  chat_id: string
+  batch_id: string
+  lecturer_id: string
   title: string
-  createdAt: Date | null
+  created_at: string | null
+  updated_at: string | null
 }

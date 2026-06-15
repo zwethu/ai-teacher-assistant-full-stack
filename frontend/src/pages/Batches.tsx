@@ -1,11 +1,16 @@
-import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import type { ToastMessage } from '../types'
 import type { Batch, BatchStudent } from '../entity/Batch'
+import type { BatchFile, IndexStatus } from '../entity/File'
 import Toast from '../components/ui/Toast'
 import { getErrorMessage } from '../utils/errors'
 import {
   ArrowLeft,
+  BookOpen,
+  CheckCircle2,
+  Clock,
   Eye,
+  FileText,
   Loader2,
   Plus,
   Search,
@@ -14,6 +19,7 @@ import {
   UserPlus,
   Users,
   X,
+  XCircle,
 } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import {
@@ -24,7 +30,10 @@ import {
   listBatchStudents,
   removeStudentFromBatch,
 } from '../services/batchService'
+import { deleteBatchFile, listBatchFiles, uploadBatchFile } from '../services/fileService'
 import { formatDate } from '../utils/formatDate'
+
+type DetailTab = 'students' | 'materials'
 
 type CreateStep = 'details' | 'method' | 'manual' | 'csv'
 type StudentRow = { name: string; email: string }
@@ -109,12 +118,20 @@ export default function Batches() {
   const [createStatus, setCreateStatus] = useState<string | null>(null)
 
   const [selectedBatch, setSelectedBatch] = useState<Batch | null>(null)
+  const [detailTab, setDetailTab] = useState<DetailTab>('students')
   const [students, setStudents] = useState<BatchStudent[]>([])
   const [studentsLoading, setStudentsLoading] = useState(false)
 
   const [studentForm, setStudentForm] = useState({ name: '', email: '' })
   const [addingStudent, setAddingStudent] = useState(false)
   const [csvUploading, setCsvUploading] = useState(false)
+
+  // Course materials state
+  const [files, setFiles] = useState<BatchFile[]>([])
+  const [filesLoading, setFilesLoading] = useState(false)
+  const [fileUploading, setFileUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const [searchQuery, setSearchQuery] = useState('')
 
@@ -181,6 +198,20 @@ export default function Batches() {
     }
   }, [selectedBatch])
 
+  const refreshFiles = useCallback(async () => {
+    if (!selectedBatch) return
+    setFilesLoading(true)
+    try {
+      const data = await listBatchFiles(selectedBatch.id)
+      setFiles(data)
+    } catch (err) {
+      console.error(err)
+      showToast('error', getErrorMessage(err, 'Could not load files.'))
+    } finally {
+      setFilesLoading(false)
+    }
+  }, [selectedBatch]) // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (!user?.uid) {
       setBatches([])
@@ -193,10 +224,24 @@ export default function Batches() {
   useEffect(() => {
     if (!selectedBatch) {
       setStudents([])
+      setFiles([])
+      if (pollingRef.current) clearInterval(pollingRef.current)
       return
     }
+    setDetailTab('students')
     refreshStudents()
-  }, [selectedBatch, refreshStudents])
+    refreshFiles()
+  }, [selectedBatch, refreshStudents, refreshFiles])
+
+  // Poll files while any are in transitional states
+  useEffect(() => {
+    if (pollingRef.current) clearInterval(pollingRef.current)
+    const transitional: IndexStatus[] = ['uploading', 'indexing', 'deleting']
+    const needsPolling = files.some((f) => transitional.includes(f.index_status))
+    if (!needsPolling || !selectedBatch) return
+    pollingRef.current = setInterval(() => void refreshFiles(), 4000)
+    return () => { if (pollingRef.current) clearInterval(pollingRef.current) }
+  }, [files, selectedBatch, refreshFiles])
 
   function isDetailsComplete(): boolean {
     return (
@@ -358,6 +403,38 @@ export default function Batches() {
       showToast('error', getErrorMessage(err, 'Failed to import CSV.'))
     } finally {
       setCsvUploading(false)
+    }
+  }
+
+  async function handleFileUpload(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file || !selectedBatch) return
+
+    setFileUploading(true)
+    try {
+      const uploaded = await uploadBatchFile(selectedBatch.id, file, file.name)
+      setFiles((prev) => [uploaded, ...prev])
+      showToast('success', `"${file.name}" uploaded — indexing started.`)
+    } catch (err) {
+      console.error(err)
+      showToast('error', getErrorMessage(err, 'Failed to upload file.'))
+    } finally {
+      setFileUploading(false)
+    }
+  }
+
+  async function handleDeleteFile(batchFile: BatchFile) {
+    if (!selectedBatch) return
+    if (!window.confirm(`Delete "${batchFile.file_name}"? This will also remove it from the search index.`)) return
+
+    try {
+      await deleteBatchFile(selectedBatch.id, batchFile.file_id)
+      setFiles((prev) => prev.filter((f) => f.file_id !== batchFile.file_id))
+      showToast('success', 'File deleted.')
+    } catch (err) {
+      console.error(err)
+      showToast('error', getErrorMessage(err, 'Failed to delete file.'))
     }
   }
 
@@ -737,12 +814,29 @@ export default function Batches() {
     )
   }
 
+  function statusBadge(status: IndexStatus) {
+    const map: Record<IndexStatus, { label: string; icon: React.ReactNode; cls: string }> = {
+      uploading: { label: 'Uploading', icon: <Loader2 className="w-3 h-3 animate-spin" />, cls: 'bg-sky-50 text-sky-700 border-sky-100' },
+      indexing:  { label: 'Indexing',  icon: <Loader2 className="w-3 h-3 animate-spin" />, cls: 'bg-amber-50 text-amber-700 border-amber-100' },
+      indexed:   { label: 'Indexed',   icon: <CheckCircle2 className="w-3 h-3" />,         cls: 'bg-emerald-50 text-emerald-700 border-emerald-100' },
+      failed:    { label: 'Failed',    icon: <XCircle className="w-3 h-3" />,              cls: 'bg-red-50 text-red-700 border-red-100' },
+      deleting:  { label: 'Deleting',  icon: <Loader2 className="w-3 h-3 animate-spin" />, cls: 'bg-slate-50 text-slate-500 border-slate-200' },
+    }
+    const { label, icon, cls } = map[status] ?? map.failed
+    return (
+      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${cls}`}>
+        {icon}{label}
+      </span>
+    )
+  }
+
   if (selectedBatch) {
     return (
       <div>
         <Toast toast={toast} onDismiss={() => setToast(null)} />
 
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div>
             <div className="flex items-center gap-3 flex-wrap">
               <h1 className="text-2xl font-bold text-slate-800 tracking-tight">
@@ -765,11 +859,7 @@ export default function Batches() {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setSelectedBatch(null)}
-              className={BTN_SECONDARY}
-            >
+            <button type="button" onClick={() => setSelectedBatch(null)} className={BTN_SECONDARY}>
               <ArrowLeft className="w-4 h-4 mr-1" />
               Back
             </button>
@@ -779,156 +869,267 @@ export default function Batches() {
               className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-md border border-red-200 text-red-700 bg-white hover:bg-red-50 transition-colors"
             >
               <Trash2 className="w-4 h-4" />
-              Delete
+              Delete Batch
             </button>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-1 space-y-5">
-            <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
-              <h2 className="text-sm font-semibold text-slate-800 mb-4 flex items-center gap-2">
-                <UserPlus className="w-4 h-4 text-emerald-600" />
-                Add student
-              </h2>
-              <form onSubmit={handleAddStudent} className="space-y-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">
-                    Name
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={studentForm.name}
-                    onChange={(e) =>
-                      setStudentForm((f) => ({ ...f, name: e.target.value }))
-                    }
-                    placeholder="e.g. Jane Smith"
-                    className="block w-full rounded-md border border-slate-300 shadow-sm py-2 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">
-                    Email
-                  </label>
-                  <input
-                    type="email"
-                    required
-                    value={studentForm.email}
-                    onChange={(e) =>
-                      setStudentForm((f) => ({ ...f, email: e.target.value }))
-                    }
-                    placeholder="e.g. jane@school.edu"
-                    className="block w-full rounded-md border border-slate-300 shadow-sm py-2 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500"
-                  />
-                </div>
-                <button
-                  type="submit"
-                  disabled={addingStudent}
-                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm disabled:opacity-70"
-                >
-                  {addingStudent ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Plus className="w-4 h-4" />
-                  )}
+        {/* Tabs */}
+        <div className="flex gap-1 mb-6 border-b border-slate-200">
+          <button
+            type="button"
+            onClick={() => setDetailTab('students')}
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              detailTab === 'students'
+                ? 'border-emerald-600 text-emerald-700'
+                : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            <Users className="w-4 h-4" />
+            Students
+          </button>
+          <button
+            type="button"
+            onClick={() => setDetailTab('materials')}
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              detailTab === 'materials'
+                ? 'border-emerald-600 text-emerald-700'
+                : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            <BookOpen className="w-4 h-4" />
+            Course Materials
+            {files.length > 0 && (
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600">
+                {files.length}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {/* ── Students Tab ── */}
+        {detailTab === 'students' && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-1 space-y-5">
+              <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
+                <h2 className="text-sm font-semibold text-slate-800 mb-4 flex items-center gap-2">
+                  <UserPlus className="w-4 h-4 text-emerald-600" />
                   Add student
-                </button>
-              </form>
+                </h2>
+                <form onSubmit={handleAddStudent} className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">Name</label>
+                    <input
+                      type="text"
+                      required
+                      value={studentForm.name}
+                      onChange={(e) => setStudentForm((f) => ({ ...f, name: e.target.value }))}
+                      placeholder="e.g. Jane Smith"
+                      className="block w-full rounded-md border border-slate-300 shadow-sm py-2 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">Email</label>
+                    <input
+                      type="email"
+                      required
+                      value={studentForm.email}
+                      onChange={(e) => setStudentForm((f) => ({ ...f, email: e.target.value }))}
+                      placeholder="e.g. jane@school.edu"
+                      className="block w-full rounded-md border border-slate-300 shadow-sm py-2 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={addingStudent}
+                    className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm disabled:opacity-70"
+                  >
+                    {addingStudent ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                    Add student
+                  </button>
+                </form>
+              </div>
+
+              <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
+                <h2 className="text-sm font-semibold text-slate-800 mb-2 flex items-center gap-2">
+                  <Upload className="w-4 h-4 text-emerald-600" />
+                  Bulk import (CSV)
+                </h2>
+                <p className="text-xs text-slate-500 mb-3">
+                  Upload a CSV with <code className="text-slate-700">name</code> and{' '}
+                  <code className="text-slate-700">email</code> columns.
+                </p>
+                <label className="relative inline-flex w-full cursor-pointer">
+                  <input type="file" accept=".csv" onChange={handleCsvUpload} disabled={csvUploading} className="sr-only" />
+                  <span className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-md border border-slate-300 text-slate-700 bg-white hover:bg-slate-50 transition-colors disabled:opacity-70">
+                    {csvUploading ? (
+                      <><Loader2 className="w-4 h-4 animate-spin" />Importing…</>
+                    ) : (
+                      <><Upload className="w-4 h-4" />Choose CSV file</>
+                    )}
+                  </span>
+                </label>
+              </div>
             </div>
 
-            <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
-              <h2 className="text-sm font-semibold text-slate-800 mb-2 flex items-center gap-2">
-                <Upload className="w-4 h-4 text-emerald-600" />
-                Bulk import (CSV)
-              </h2>
-              <p className="text-xs text-slate-500 mb-3">
-                Upload a CSV with <code className="text-slate-700">name</code> and{' '}
-                <code className="text-slate-700">email</code> columns.
+            <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+              {studentsLoading ? (
+                <div className="flex flex-col items-center justify-center py-20 gap-3">
+                  <Loader2 className="w-8 h-8 text-emerald-600 animate-spin" />
+                  <p className="text-sm text-slate-500">Loading students…</p>
+                </div>
+              ) : students.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-center px-6">
+                  <Users className="w-8 h-8 text-slate-300 mb-2" />
+                  <span className="text-sm font-medium text-slate-500">No students in this batch yet.</span>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-slate-100">
+                    <thead className="bg-slate-50/90">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Name</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Email</th>
+                        <th className="relative px-6 py-3"><span className="sr-only">Actions</span></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {students.map((student) => (
+                        <tr key={student.id} className="group hover:bg-slate-50/90 transition-colors">
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm font-medium text-slate-900 group-hover:text-emerald-600 transition-colors">{student.name}</div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">{student.email}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveStudent(student)}
+                              className="inline-flex items-center px-3 py-1.5 border border-slate-300 shadow-sm text-xs font-medium rounded-md text-slate-700 bg-white hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-all"
+                            >
+                              <Trash2 className="w-3 h-3 mr-1.5" />
+                              Remove
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── Course Materials Tab ── */}
+        {detailTab === 'materials' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-slate-500">
+                Upload course materials — PDFs, documents, and text files are indexed for AI search.
               </p>
-              <label className="relative inline-flex w-full cursor-pointer">
+              <div>
                 <input
+                  ref={fileInputRef}
                   type="file"
-                  accept=".csv"
-                  onChange={handleCsvUpload}
-                  disabled={csvUploading}
+                  accept=".pdf,.txt,.md,.docx,.json"
+                  onChange={handleFileUpload}
+                  disabled={fileUploading}
                   className="sr-only"
                 />
-                <span className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-md border border-slate-300 text-slate-700 bg-white hover:bg-slate-50 transition-colors disabled:opacity-70">
-                  {csvUploading ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      Importing…
-                    </>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={fileUploading}
+                  className={BTN_PRIMARY}
+                >
+                  {fileUploading ? (
+                    <><Loader2 className="w-4 h-4 animate-spin" />Uploading…</>
                   ) : (
-                    <>
-                      <Upload className="w-4 h-4" />
-                      Choose CSV file
-                    </>
+                    <><Upload className="w-4 h-4" />Upload File</>
                   )}
-                </span>
-              </label>
+                </button>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+              {filesLoading && files.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-20 gap-3">
+                  <Loader2 className="w-8 h-8 text-emerald-600 animate-spin" />
+                  <p className="text-sm text-slate-500">Loading files…</p>
+                </div>
+              ) : files.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-center px-6">
+                  <FileText className="w-8 h-8 text-slate-300 mb-2" />
+                  <span className="text-sm font-medium text-slate-500">No course materials uploaded yet.</span>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Upload PDFs, Word docs, or text files to make them searchable by the AI assistant.
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-slate-100">
+                    <thead className="bg-slate-50/90">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">File</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Uploaded</th>
+                        <th className="relative px-6 py-3"><span className="sr-only">Actions</span></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {files.map((f) => (
+                        <tr key={f.file_id} className="group hover:bg-slate-50/90 transition-colors">
+                          <td className="px-6 py-4">
+                            <div className="flex items-center gap-2">
+                              <FileText className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                              <div className="min-w-0">
+                                <div className="text-sm font-medium text-slate-900 truncate max-w-[260px]" title={f.file_name}>
+                                  {f.file_title || f.file_name}
+                                </div>
+                                {f.file_title !== f.file_name && (
+                                  <div className="text-xs text-slate-400 truncate max-w-[260px]">{f.file_name}</div>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="space-y-1">
+                              {statusBadge(f.index_status)}
+                              {f.index_status === 'failed' && f.index_error && (
+                                <p className="text-xs text-red-500 max-w-[220px] truncate" title={f.index_error}>
+                                  {f.index_error}
+                                </p>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                            {f.created_at ? (
+                              <span className="flex items-center gap-1">
+                                <Clock className="w-3 h-3" />
+                                {formatDate(new Date(f.created_at))}
+                              </span>
+                            ) : '—'}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteFile(f)}
+                              disabled={f.index_status === 'deleting'}
+                              className="inline-flex items-center px-3 py-1.5 border border-slate-300 shadow-sm text-xs font-medium rounded-md text-slate-700 bg-white hover:bg-red-50 hover:text-red-600 hover:border-red-200 disabled:opacity-50 transition-all"
+                            >
+                              <Trash2 className="w-3 h-3 mr-1.5" />
+                              Delete
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
-
-          <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-            {studentsLoading ? (
-              <div className="flex flex-col items-center justify-center py-20 gap-3">
-                <Loader2 className="w-8 h-8 text-emerald-600 animate-spin" />
-                <p className="text-sm text-slate-500">Loading students…</p>
-              </div>
-            ) : students.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-center px-6">
-                <Users className="w-8 h-8 text-slate-300 mb-2" />
-                <span className="text-sm font-medium text-slate-500">
-                  No students in this batch yet.
-                </span>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-slate-100">
-                  <thead className="bg-slate-50/90">
-                    <tr>
-                      <th className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                        Name
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                        Email
-                      </th>
-                      <th className="relative px-6 py-3">
-                        <span className="sr-only">Actions</span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {students.map((student) => (
-                      <tr key={student.id} className="group hover:bg-slate-50/90 transition-colors">
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm font-medium text-slate-900 group-hover:text-emerald-600 transition-colors">
-                            {student.name}
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                          {student.email}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveStudent(student)}
-                            className="inline-flex items-center px-3 py-1.5 border border-slate-300 shadow-sm text-xs font-medium rounded-md text-slate-700 bg-white hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-all"
-                          >
-                            <Trash2 className="w-3 h-3 mr-1.5" />
-                            Remove
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </div>
+        )}
       </div>
     )
   }

@@ -16,6 +16,9 @@ dependencies = [
     "apscheduler",
     "httpx",
     "pydantic",
+    "google-cloud-storage",
+    "google-cloud-discoveryengine",
+    "python-multipart",
 ]
 
 [build-system]

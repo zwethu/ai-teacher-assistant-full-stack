@@ -10,6 +10,28 @@ type Props = {
   onNavigate?: () => void
 }
 
+function sessionsExpandedClass(isActive: boolean): string {
+  const layout = 'gap-3 px-3 py-2.5 w-full'
+  if (isActive) {
+    return `relative flex items-center ${layout} text-sm font-medium rounded-xl whitespace-nowrap group text-emerald-800 bg-gradient-to-r from-emerald-100 to-white border border-emerald-300 shadow-md -translate-y-0.5 transition-all`
+  }
+  return `flex items-center ${layout} text-sm font-medium rounded-xl whitespace-nowrap group text-slate-600 hover:text-slate-900 hover:bg-gradient-to-r hover:from-white hover:via-emerald-50/60 hover:to-white border border-transparent hover:border-slate-200 hover:shadow-sm hover:-translate-y-0.5 transition-all`
+}
+
+function sessionsCollapsedClass(isActive: boolean): string {
+  const layout = 'justify-center items-center p-2 w-10 h-10 mx-auto shrink-0'
+  if (isActive) {
+    return `relative flex ${layout} text-sm font-medium rounded-xl group text-emerald-800 bg-emerald-100/90 border border-emerald-300 shadow-md -translate-y-0.5 transition-all`
+  }
+  return `flex ${layout} text-sm font-medium rounded-xl group text-slate-600 hover:text-slate-900 hover:bg-gradient-to-r hover:from-white hover:via-emerald-50/60 hover:to-white border border-transparent hover:border-slate-200 hover:shadow-sm hover:-translate-y-0.5 transition-all`
+}
+
+function iconClass(isActive: boolean): string {
+  return isActive
+    ? 'text-emerald-700'
+    : 'text-slate-500 group-hover:text-emerald-600'
+}
+
 function SessionList({
   sessions,
   loading,
@@ -155,10 +177,6 @@ export function SessionsNavItem({ collapsed, onNavigate }: Props) {
     }
   }, [previewVisible, collapsed, updatePreviewPosition])
 
-  const rowClass = isActive
-    ? 'bg-gradient-to-r from-emerald-100 to-white border-emerald-300 text-emerald-800 shadow-md'
-    : 'border-transparent text-slate-600 hover:text-slate-900 hover:bg-gradient-to-r hover:from-white hover:via-emerald-50/60 hover:to-white hover:border-slate-200 hover:shadow-sm'
-
   if (collapsed) {
     return (
       <>
@@ -168,15 +186,11 @@ export function SessionsNavItem({ collapsed, onNavigate }: Props) {
           onClick={goToHistory}
           onMouseEnter={showPreview}
           onMouseLeave={scheduleHidePreview}
-          className={`flex items-center justify-center w-10 h-10 mx-auto rounded-xl border transition-all ${
-            isActive
-              ? 'bg-emerald-100/90 border-emerald-300 text-emerald-700 shadow-md'
-              : 'border-transparent text-slate-500 hover:text-emerald-600 hover:bg-emerald-50/60 hover:border-slate-200'
-          }`}
+          className={sessionsCollapsedClass(isActive)}
           title="Sessions"
           aria-label="Go to sessions"
         >
-          <Clock className="w-5 h-5" />
+          <Clock className={`w-5 h-5 flex-shrink-0 ${iconClass(isActive)}`} />
         </button>
 
         {previewVisible &&
@@ -209,42 +223,41 @@ export function SessionsNavItem({ collapsed, onNavigate }: Props) {
     )
   }
 
-  const showChevron = hovering || inlineOpen
+  const showArrow = hovering || inlineOpen
 
   return (
     <div
       onMouseEnter={() => setHovering(true)}
       onMouseLeave={() => setHovering(false)}
     >
-      <div className={`group flex items-center w-full rounded-xl border transition-all ${rowClass}`}>
+      <div className={sessionsExpandedClass(isActive)}>
         <button
           type="button"
-          onClick={goToHistory}
-          className="flex flex-1 items-center gap-3 px-3 py-2.5 min-w-0 text-sm font-medium rounded-l-xl"
+          onClick={toggleInline}
+          className="flex-shrink-0 rounded-md hover:bg-emerald-50/50 transition-colors"
+          aria-label={inlineOpen ? 'Collapse sessions' : 'Expand sessions'}
+          aria-expanded={inlineOpen}
         >
-          <Clock
-            className={`w-5 h-5 flex-shrink-0 ${isActive ? 'text-emerald-700' : 'text-slate-500 group-hover:text-emerald-600'}`}
-          />
-          <span className="truncate text-left">Sessions</span>
+          {showArrow ? (
+            <ChevronRight
+              className={`w-5 h-5 flex-shrink-0 transition-transform duration-200 ${iconClass(isActive)} ${inlineOpen ? 'rotate-90' : ''}`}
+            />
+          ) : (
+            <Clock className={`w-5 h-5 flex-shrink-0 ${iconClass(isActive)}`} />
+          )}
         </button>
 
         <button
           type="button"
-          onClick={toggleInline}
-          className={`flex-shrink-0 px-2 py-2.5 rounded-r-xl text-slate-400 hover:text-emerald-600 hover:bg-emerald-50/40 transition-all ${
-            showChevron ? 'opacity-100 w-8' : 'opacity-0 w-0 px-0 overflow-hidden pointer-events-none'
-          }`}
-          aria-label={inlineOpen ? 'Collapse recent sessions' : 'Expand recent sessions'}
-          aria-expanded={inlineOpen}
+          onClick={goToHistory}
+          className="flex-1 min-w-0 text-left truncate sidebar-text"
         >
-          <ChevronRight
-            className={`w-4 h-4 transition-transform duration-200 ${inlineOpen ? 'rotate-90' : ''}`}
-          />
+          Sessions
         </button>
       </div>
 
       {inlineOpen && (
-        <div className="mt-0.5 ml-1 mr-1 rounded-lg border border-slate-100 bg-white/60 overflow-hidden">
+        <div className="mt-0.5 ml-3 mr-1 rounded-lg border border-slate-100 bg-white/60 overflow-hidden">
           <SessionList
             sessions={sessions}
             loading={loading}

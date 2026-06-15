@@ -2,7 +2,8 @@
 
 import logging
 import os
-from typing import Iterator
+import re
+from pathlib import PurePath
 
 logger = logging.getLogger(__name__)
 
@@ -19,8 +20,21 @@ def _get_client():
     return storage.Client()
 
 
-def batch_upload_blob_path(lecturer_id: str, batch_id: str, file_name: str) -> str:
-    return f"lecturers/{lecturer_id}/batches/{batch_id}/uploads/{file_name}"
+def safe_file_name(file_name: str) -> str:
+    """Strip path components and replace unsafe characters."""
+    name = PurePath(file_name or "upload").name
+    name = re.sub(r"[^\w.\- ]", "_", name).strip()
+    return name or "upload"
+
+
+def batch_upload_blob_path(
+    lecturer_id: str,
+    batch_id: str,
+    file_id: str,
+    file_name: str,
+) -> str:
+    safe_name = safe_file_name(file_name)
+    return f"lecturers/{lecturer_id}/batches/{batch_id}/uploads/{file_id}/{safe_name}"
 
 
 def upload_bytes(

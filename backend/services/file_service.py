@@ -57,14 +57,13 @@ def upload_batch_file(
     batch_name: str = "",
 ) -> BatchFile:
     """
-    Upload file to GCS, write Firestore record (status=uploading),
-    trigger Vertex indexing as a background side-effect.
-    Returns the BatchFile model after GCS upload (before indexing completes).
+    Upload file to GCS and write Firestore record with index_status=indexing.
+    Returns immediately; call index_batch_file via BackgroundTasks to index.
     """
     db = get_firestore()
     file_id = str(uuid.uuid4())
 
-    blob_path = batch_upload_blob_path(lecturer_id, batch_id, file_name)
+    blob_path = batch_upload_blob_path(lecturer_id, batch_id, file_id, file_name)
     gcs_path = upload_bytes(blob_path, file_bytes, content_type)
 
     batch_ref = db.collection(BATCHES_COLLECTION).document(batch_id)
@@ -85,32 +84,22 @@ def upload_batch_file(
             "updated_at": SERVER_TIMESTAMP,
         }
     )
-    logger.info("Created file record %s for batch %s", file_id, batch_id)
-
-    _index_file_sync(
-        file_id=file_id,
-        batch_id=batch_id,
-        gcs_path=gcs_path,
-        lecturer_id=lecturer_id,
-        file_title=file_title or file_name,
-        course_name=course_name,
-        batch_name=batch_name,
-    )
+    logger.info("Created file record %s for batch %s (indexing queued)", file_id, batch_id)
 
     snap = file_doc.get()
     return _doc_to_model(file_id, snap.to_dict() or {})
 
 
-def _index_file_sync(
+def index_batch_file(
     file_id: str,
     batch_id: str,
     gcs_path: str,
     lecturer_id: str,
     file_title: str,
-    course_name: str,
-    batch_name: str,
+    course_name: str = "",
+    batch_name: str = "",
 ) -> None:
-    """Run Vertex indexing synchronously and update the Firestore record."""
+    """Run Vertex indexing in a background worker and update the Firestore record."""
     file_doc = _file_ref(batch_id, file_id)
     try:
         doc_id = ingest_file(

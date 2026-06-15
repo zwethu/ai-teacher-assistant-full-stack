@@ -44,6 +44,10 @@ def _mime_type(file_name: str) -> str:
         return "text/plain"
     if lower.endswith(".json"):
         return "application/json"
+    if lower.endswith(".docx"):
+        return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    if lower.endswith(".doc"):
+        return "application/msword"
     return "application/octet-stream"
 
 

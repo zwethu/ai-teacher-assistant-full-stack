@@ -7,6 +7,8 @@ import { MessageRow, ThinkingIndicator } from './MessageRow'
 type Props = {
   input: string
   sending: boolean
+  disabled?: boolean
+  dimmed?: boolean
   textareaRef: RefObject<HTMLTextAreaElement | null>
   onInputChange: (value: string) => void
   onInputKeyDown: (e: KeyboardEvent<HTMLTextAreaElement>) => void
@@ -17,6 +19,8 @@ type Props = {
 export function ChatInput({
   input,
   sending,
+  disabled = false,
+  dimmed = false,
   textareaRef,
   onInputChange,
   onInputKeyDown,
@@ -24,7 +28,11 @@ export function ChatInput({
   onSend,
 }: Props) {
   return (
-    <footer className="relative z-10 px-4 pb-5 pt-2 bg-gradient-to-t from-white/60 via-white/30 to-transparent backdrop-blur-sm flex-shrink-0">
+    <footer
+      className={`relative z-10 px-4 pb-5 pt-2 bg-gradient-to-t from-white/60 via-white/30 to-transparent backdrop-blur-sm flex-shrink-0 transition-opacity ${
+        dimmed ? 'opacity-40 pointer-events-none' : ''
+      }`}
+    >
       <div className="max-w-3xl mx-auto">
         <div className="flex items-end gap-2 p-2 rounded-[28px] bg-white/55 border border-white/60 shadow-[0_8px_32px_rgba(15,23,42,0.08)]">
           <textarea
@@ -35,13 +43,13 @@ export function ChatInput({
             onInput={onTextareaInput}
             onKeyDown={onInputKeyDown}
             placeholder="Message your teaching assistant…"
-            disabled={sending}
+            disabled={disabled || sending}
             className="flex-1 resize-none bg-transparent px-4 py-3 text-[15px] text-slate-800 placeholder:text-slate-400 focus:outline-none disabled:cursor-not-allowed max-h-40 overflow-y-auto leading-6"
           />
           <button
             type="button"
             onClick={onSend}
-            disabled={!input.trim() || sending}
+            disabled={!input.trim() || disabled || sending}
             className="flex-shrink-0 inline-flex items-center justify-center w-10 h-10 mb-0.5 mr-1 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-600/25 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
             aria-label="Send message"
           >

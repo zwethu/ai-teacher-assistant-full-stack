@@ -6,6 +6,7 @@ import {
   BarChart3,
   BookOpen,
   ChevronDown,
+  Clock,
   LogOut,
   Mail,
   Menu,
@@ -17,6 +18,7 @@ import {
 import { useAuth } from '../../hooks/useAuth'
 import { getStress, type StressState } from '../../services/wellnessService'
 import WellnessPopover from '../wellness/WellnessPopover'
+import { SessionsNavItem } from './SessionsNavItem'
 
 const NAV_ITEMS: {
   to: string
@@ -29,6 +31,7 @@ const NAV_ITEMS: {
   { to: '/lesson-plans', label: 'Lesson Plans', icon: BookOpen },
   { to: '/assessments', label: 'Assessments', icon: BarChart3 },
   { to: '/email', label: 'Send Emails', icon: Mail },
+  { to: '/chat-history', label: 'Sessions', icon: Clock },
 ]
 
 function stressLabel(score: number): string {
@@ -139,38 +142,52 @@ function navLinkClass(
 
 interface NavItemsProps {
   showLabels: boolean
+  collapsed?: boolean
   onNavigate?: () => void
 }
 
-function NavItems({ showLabels, onNavigate }: NavItemsProps) {
+function NavItems({ showLabels, collapsed = false, onNavigate }: NavItemsProps) {
   return (
     <>
-      {NAV_ITEMS.map(({ to, label, icon: Icon, end }) => (
-        <NavLink
-          key={to}
-          to={to}
-          end={end}
-          className={(props) => navLinkClass(props, showLabels)}
-          onClick={onNavigate}
-        >
-          {({ isActive }) => (
-            <>
-              <Icon
-                className={`w-5 h-5 flex-shrink-0 transition-colors ${
-                  isActive
-                    ? 'text-emerald-700'
-                    : 'text-slate-500 group-hover:text-emerald-600'
-                }`}
-              />
-              {showLabels && (
-                <span className="sidebar-text transition-opacity duration-200">
-                  {label}
-                </span>
-              )}
-            </>
-          )}
-        </NavLink>
-      ))}
+      {NAV_ITEMS.map(({ to, label, icon: Icon, end }) => {
+        if (to === '/chat-history') {
+          return (
+            <SessionsNavItem
+              key={to}
+              showLabels={showLabels}
+              collapsed={collapsed}
+              onNavigate={onNavigate}
+            />
+          )
+        }
+
+        return (
+          <NavLink
+            key={to}
+            to={to}
+            end={end}
+            className={(props) => navLinkClass(props, showLabels)}
+            onClick={onNavigate}
+          >
+            {({ isActive }) => (
+              <>
+                <Icon
+                  className={`w-5 h-5 flex-shrink-0 transition-colors ${
+                    isActive
+                      ? 'text-emerald-700'
+                      : 'text-slate-500 group-hover:text-emerald-600'
+                  }`}
+                />
+                {showLabels && (
+                  <span className="sidebar-text transition-opacity duration-200">
+                    {label}
+                  </span>
+                )}
+              </>
+            )}
+          </NavLink>
+        )
+      })}
     </>
   )
 }
@@ -344,7 +361,7 @@ export default function Sidebar({
         </div>
 
         <nav className="flex-1 space-y-2 px-5 pt-2 pb-4 overflow-y-auto">
-          <NavItems showLabels onNavigate={onMobileClose} />
+          <NavItems showLabels onNavigate={onMobileClose} collapsed={false} />
         </nav>
 
         {uid && (
@@ -391,7 +408,7 @@ export default function Sidebar({
         </div>
 
         <nav className={`flex-1 pt-2 pb-4 space-y-2 overflow-y-auto overflow-x-hidden ${collapsed ? 'px-0 flex flex-col items-center' : 'px-5'}`}>
-          <NavItems showLabels={!collapsed} />
+          <NavItems showLabels={!collapsed} collapsed={collapsed} />
         </nav>
 
         {!collapsed && uid && (

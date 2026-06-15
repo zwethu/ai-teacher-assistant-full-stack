@@ -1,7 +1,7 @@
 import type { ToastMessage } from '../../../types'
 import type { Batch } from '../../../entity/Batch'
 import Toast from '../../../components/ui/Toast'
-import { Eye, Loader2, Plus, Search, Trash2, Users, X } from 'lucide-react'
+import { Loader2, Plus, Search, Trash2, Users, X } from 'lucide-react'
 import { BTN_PRIMARY } from '../constants'
 import type { BatchWithCount } from '../types'
 
@@ -123,7 +123,11 @@ export function BatchListView({
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filteredBatches.map((batch) => (
-                  <tr key={batch.id} className="group transition-all duration-150 hover:bg-slate-50/80">
+                  <tr
+                    key={batch.id}
+                    onClick={() => setSelectedBatch(batch)}
+                    className="group cursor-pointer transition-all duration-150 hover:bg-emerald-50/60"
+                  >
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
                         <div className="flex-shrink-0 h-8 w-8 rounded bg-emerald-50 text-emerald-600 flex items-center justify-center mr-3 border border-emerald-100 group-hover:shadow-sm transition-shadow">
@@ -151,24 +155,17 @@ export function BatchListView({
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setSelectedBatch(batch)}
-                          className="inline-flex items-center px-3 py-1.5 border border-slate-300 shadow-sm text-xs font-medium rounded-md text-slate-700 bg-white hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500 transition-all"
-                        >
-                          <Eye className="w-3 h-3 mr-1.5 text-slate-500" />
-                          View Students
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteBatch(batch)}
-                          className="inline-flex items-center px-3 py-1.5 border border-red-300 shadow-sm text-xs font-medium rounded-md text-red-700 bg-white hover:bg-red-50 focus:outline-none transition-all"
-                        >
-                          <Trash2 className="w-3 h-3 mr-1.5 text-red-500" />
-                          Delete
-                        </button>
-                      </div>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleDeleteBatch(batch)
+                        }}
+                        className="inline-flex items-center px-3 py-1.5 border border-red-300 shadow-sm text-xs font-medium rounded-md text-red-700 bg-white hover:bg-red-50 focus:outline-none transition-all"
+                      >
+                        <Trash2 className="w-3 h-3 mr-1.5 text-red-500" />
+                        Delete
+                      </button>
                     </td>
                   </tr>
                 ))}

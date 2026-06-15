@@ -5,6 +5,7 @@ import {
   useState,
   type KeyboardEvent,
 } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import type { Batch } from '../../../entity/Batch'
 import type { Chat, ChatMessage } from '../../../entity/Chat'
 import { useAuth } from '../../../hooks/useAuth'
@@ -17,9 +18,21 @@ import {
   sendMessage,
   updateChatTitle,
 } from '../../../services/chatService'
+import { emitChatCreated } from '../../../utils/chatEvents'
+
+type ChatLocationState = {
+  batchId?: string
+  chatId?: string
+  initialMessage?: string
+}
 
 export function useChatPage() {
   const { user } = useAuth()
+  const location = useLocation()
+  const navigate = useNavigate()
+  const appliedRouteStateRef = useRef<string | null>(null)
+  const pendingChatIdRef = useRef<string | null>(null)
+  const pendingInitialMessageRef = useRef<string | null>(null)
 
   const [batches, setBatches] = useState<Batch[]>([])
   const [batchesLoading, setBatchesLoading] = useState(true)
@@ -27,7 +40,6 @@ export function useChatPage() {
 
   const [chats, setChats] = useState<Chat[]>([])
   const [chatsLoading, setChatsLoading] = useState(false)
-  const [sidebarOpen, setSidebarOpen] = useState(true)
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
 
@@ -51,13 +63,41 @@ export function useChatPage() {
       .finally(() => setBatchesLoading(false))
   }, [user])
 
+  useEffect(() => {
+    const routeState = location.state as ChatLocationState | null
+    if (!routeState?.batchId || batches.length === 0) return
+
+    const stateKey = `${routeState.batchId}:${routeState.chatId ?? ''}`
+    if (appliedRouteStateRef.current === stateKey) return
+
+    const batch = batches.find((b) => b.id === routeState.batchId)
+    if (!batch) return
+
+    setSelectedBatch(batch)
+    pendingChatIdRef.current = routeState.chatId ?? null
+    pendingInitialMessageRef.current = routeState.initialMessage ?? null
+    appliedRouteStateRef.current = stateKey
+    navigate(location.pathname, { replace: true, state: null })
+  }, [batches, location.pathname, location.state, navigate])
+
+  useEffect(() => {
+    if (!selectedBatch || !pendingChatIdRef.current || chats.length === 0) return
+    const chat = chats.find((c) => c.chat_id === pendingChatIdRef.current)
+    if (chat) {
+      setActiveChat(chat)
+      pendingChatIdRef.current = null
+    }
+  }, [selectedBatch, chats])
+
   const loadChats = useCallback(async (batchId: string) => {
     setChatsLoading(true)
     try {
       const data = await listChats(batchId)
       setChats(data)
+      return data
     } catch (err) {
       console.error(err)
+      return []
     } finally {
       setChatsLoading(false)
     }
@@ -89,24 +129,33 @@ export function useChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, sending])
 
-  async function handleNewChat() {
-    if (!selectedBatch) return
-    const chat = await createChat(selectedBatch.id, 'New Chat')
+  async function handleNewChat(title = 'New Chat') {
+    if (!selectedBatch) return null
+    const chat = await createChat(selectedBatch.id, title)
     setChats((prev) => [chat, ...prev])
     setActiveChat(chat)
     setMessages([])
+    emitChatCreated()
+    return chat
   }
 
   async function handleSend(text?: string) {
     const content = (text ?? input).trim()
-    if (!content || !activeChat || !selectedBatch || sending) return
+    if (!content || !selectedBatch || sending) return
+
+    let chat = activeChat
+    if (!chat) {
+      chat = await handleNewChat(content.slice(0, 50) || 'New Chat')
+      if (!chat) return
+    }
+
     setInput('')
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
     setSending(true)
 
     const optimisticUser: ChatMessage = {
       message_id: crypto.randomUUID(),
-      chat_id: activeChat.chat_id,
+      chat_id: chat.chat_id,
       role: 'user',
       content,
       created_at: new Date().toISOString(),
@@ -116,18 +165,16 @@ export function useChatPage() {
     try {
       const { assistant_message } = await sendMessage(
         selectedBatch.id,
-        activeChat.chat_id,
+        chat.chat_id,
         content,
       )
       setMessages((prev) => [...prev, assistant_message])
 
-      if (activeChat.title === 'New Chat') {
+      if (chat.title === 'New Chat') {
         const newTitle = content.slice(0, 50)
-        void updateChatTitle(selectedBatch.id, activeChat.chat_id, newTitle).then(() => {
+        void updateChatTitle(selectedBatch.id, chat.chat_id, newTitle).then(() => {
           setChats((prev) =>
-            prev.map((c) =>
-              c.chat_id === activeChat.chat_id ? { ...c, title: newTitle } : c,
-            ),
+            prev.map((c) => (c.chat_id === chat!.chat_id ? { ...c, title: newTitle } : c)),
           )
           setActiveChat((prev) => (prev ? { ...prev, title: newTitle } : prev))
         })
@@ -136,7 +183,7 @@ export function useChatPage() {
       console.error(err)
       const errMsg: ChatMessage = {
         message_id: crypto.randomUUID(),
-        chat_id: activeChat.chat_id,
+        chat_id: chat.chat_id,
         role: 'assistant',
         content: 'Sorry, something went wrong. Please try again.',
         created_at: new Date().toISOString(),
@@ -146,6 +193,13 @@ export function useChatPage() {
       setSending(false)
     }
   }
+
+  useEffect(() => {
+    if (!activeChat || !pendingInitialMessageRef.current || messagesLoading) return
+    const message = pendingInitialMessageRef.current
+    pendingInitialMessageRef.current = null
+    void handleSend(message)
+  }, [activeChat, messagesLoading, messages])
 
   function handleInputKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -187,10 +241,17 @@ export function useChatPage() {
       setActiveChat(null)
       setMessages([])
     }
+    emitChatCreated()
   }
 
   const showWelcome =
-    !!activeChat && messages.length === 0 && !messagesLoading && !sending
+    !!selectedBatch &&
+    !!activeChat &&
+    messages.length === 0 &&
+    !messagesLoading &&
+    !sending
+
+  const inputDisabled = !selectedBatch || sending
 
   return {
     batches,
@@ -199,8 +260,6 @@ export function useChatPage() {
     setSelectedBatch,
     chats,
     chatsLoading,
-    sidebarOpen,
-    setSidebarOpen,
     renamingId,
     setRenamingId,
     renameValue,
@@ -212,6 +271,7 @@ export function useChatPage() {
     input,
     setInput,
     sending,
+    inputDisabled,
     messagesEndRef,
     textareaRef,
     renameInputRef,

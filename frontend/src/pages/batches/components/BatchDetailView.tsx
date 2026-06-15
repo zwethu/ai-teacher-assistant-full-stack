@@ -4,7 +4,7 @@ import type { BatchFile } from '../../../entity/File'
 import Toast from '../../../components/ui/Toast'
 import type { ToastMessage } from '../../../types'
 import { formatDate } from '../../../utils/formatDate'
-import { ArrowLeft, BookOpen, Trash2, Users } from 'lucide-react'
+import { ArrowLeft, Clock, Trash2, Users } from 'lucide-react'
 import { BTN_SECONDARY } from '../constants'
 import type { DetailTab } from '../types'
 import { MaterialsTab } from './MaterialsTab'
@@ -121,8 +121,8 @@ export function BatchDetailView({
               : 'border-transparent text-slate-500 hover:text-slate-700'
           }`}
         >
-          <BookOpen className="w-4 h-4" />
-          Course Materials
+          <Clock className="w-4 h-4" />
+          Sessions
           {files.length > 0 && (
             <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600">
               {files.length}
@@ -147,6 +147,7 @@ export function BatchDetailView({
 
       {detailTab === 'materials' && (
         <MaterialsTab
+          batchId={selectedBatch.id}
           files={files}
           filesLoading={filesLoading}
           fileUploading={fileUploading}

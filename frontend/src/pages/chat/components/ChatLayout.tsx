@@ -1,75 +1,50 @@
+import { Sparkles } from 'lucide-react'
 import type { ChatPageState } from '../hooks/useChatPage'
-import { ChatHeader } from './ChatHeader'
-import { ChatSidebar } from './ChatSidebar'
+import { BatchSelectorBar } from './BatchSelectorBar'
 import { ChatInput, ChatMessagesPanel } from './ChatConversation'
 import { ChatWelcomeScreen } from './ChatWelcomeScreen'
-import { EmptyChatPrompt } from './EmptyChatPrompt'
 
 type Props = Pick<
   ChatPageState,
+  | 'batches'
+  | 'batchesLoading'
   | 'selectedBatch'
   | 'setSelectedBatch'
-  | 'sidebarOpen'
-  | 'setSidebarOpen'
-  | 'chats'
-  | 'chatsLoading'
   | 'activeChat'
-  | 'setActiveChat'
-  | 'renamingId'
-  | 'setRenamingId'
-  | 'renameValue'
-  | 'setRenameValue'
   | 'messages'
   | 'messagesLoading'
   | 'input'
   | 'setInput'
   | 'sending'
+  | 'inputDisabled'
   | 'messagesEndRef'
   | 'textareaRef'
-  | 'renameInputRef'
-  | 'handleNewChat'
   | 'handleSend'
   | 'handleInputKeyDown'
   | 'handleTextareaInput'
-  | 'startRename'
-  | 'commitRename'
-  | 'handleDeleteChat'
   | 'showWelcome'
 >
 
 export function ChatLayout(props: Props) {
   const {
+    batches,
+    batchesLoading,
     selectedBatch,
     setSelectedBatch,
-    sidebarOpen,
-    setSidebarOpen,
-    chats,
-    chatsLoading,
     activeChat,
-    setActiveChat,
-    renamingId,
-    setRenamingId,
-    renameValue,
-    setRenameValue,
     messages,
     messagesLoading,
     input,
     setInput,
     sending,
+    inputDisabled,
     messagesEndRef,
     textareaRef,
-    renameInputRef,
-    handleNewChat,
     handleSend,
     handleInputKeyDown,
     handleTextareaInput,
-    startRename,
-    commitRename,
-    handleDeleteChat,
     showWelcome,
   } = props
-
-  if (!selectedBatch) return null
 
   return (
     <div className="relative flex flex-col flex-1 min-h-0 -mx-4 md:-mx-8 -my-4 md:-my-8 overflow-hidden">
@@ -78,64 +53,65 @@ export function ChatLayout(props: Props) {
         <div className="absolute bottom-20 right-1/4 w-96 h-96 rounded-full bg-sky-200/25 blur-3xl" />
       </div>
 
-      <ChatHeader
-        selectedBatch={selectedBatch}
-        sidebarOpen={sidebarOpen}
-        onBack={() => setSelectedBatch(null)}
-        onToggleSidebar={() => setSidebarOpen((v) => !v)}
-      />
+      <div className="relative z-0 flex flex-col flex-1 min-h-0">
+        {!selectedBatch ? (
+          <main className="flex-1 overflow-y-auto">
+            <div className="max-w-3xl mx-auto px-4 py-8 min-h-full flex flex-col items-center justify-center text-center">
+              <div className="w-14 h-14 rounded-2xl bg-white/50 border border-white/60 shadow-lg flex items-center justify-center mb-6">
+                <Sparkles className="w-7 h-7 text-emerald-600" />
+              </div>
+              <h2 className="text-2xl font-semibold text-slate-800 mb-2">AI Teaching Assistant</h2>
+              <p className="text-slate-500 text-sm max-w-sm">
+                Select a batch below to start chatting about lesson plans, assessments, and more.
+              </p>
+            </div>
+          </main>
+        ) : !activeChat ? (
+          <main className="flex-1 overflow-y-auto">
+            <div className="max-w-3xl mx-auto px-4 py-8 min-h-full flex flex-col items-center justify-center text-center">
+              <div className="w-12 h-12 rounded-2xl bg-white/50 border border-white/60 shadow-lg flex items-center justify-center mb-4">
+                <Sparkles className="w-6 h-6 text-emerald-600" />
+              </div>
+              <h3 className="text-lg font-semibold text-slate-700 mb-1">Start a conversation</h3>
+              <p className="text-sm text-slate-500 mb-4 max-w-xs">
+                Type a message below to begin a new chat in {selectedBatch.batch_name}.
+              </p>
+            </div>
+          </main>
+        ) : (
+          <ChatMessagesPanel
+            messages={messages}
+            messagesLoading={messagesLoading}
+            showWelcome={showWelcome}
+            sending={sending}
+            messagesEndRef={messagesEndRef}
+            welcomeContent={
+              <ChatWelcomeScreen
+                activeChat={activeChat}
+                onSuggestionClick={(text) => void handleSend(text)}
+              />
+            }
+          />
+        )}
 
-      <div className="relative z-0 flex flex-1 min-h-0">
-        <ChatSidebar
-          sidebarOpen={sidebarOpen}
-          chats={chats}
-          chatsLoading={chatsLoading}
-          activeChat={activeChat}
-          renamingId={renamingId}
-          renameValue={renameValue}
-          renameInputRef={renameInputRef}
-          onNewChat={() => void handleNewChat()}
-          onSelectChat={setActiveChat}
-          onRenameValueChange={setRenameValue}
-          onCommitRename={commitRename}
-          onCancelRename={() => setRenamingId(null)}
-          onStartRename={startRename}
-          onDeleteChat={handleDeleteChat}
+        <BatchSelectorBar
+          batches={batches}
+          batchesLoading={batchesLoading}
+          selectedBatch={selectedBatch}
+          onSelectBatch={setSelectedBatch}
         />
 
-        <div className="flex flex-col flex-1 min-w-0 min-h-0">
-          {!activeChat ? (
-            <EmptyChatPrompt
-              batchName={selectedBatch.batch_name}
-              onNewChat={() => void handleNewChat()}
-            />
-          ) : (
-            <>
-              <ChatMessagesPanel
-                messages={messages}
-                messagesLoading={messagesLoading}
-                showWelcome={showWelcome}
-                sending={sending}
-                messagesEndRef={messagesEndRef}
-                welcomeContent={
-                  <ChatWelcomeScreen
-                    activeChat={activeChat}
-                    onSuggestionClick={(text) => void handleSend(text)}
-                  />
-                }
-              />
-              <ChatInput
-                input={input}
-                sending={sending}
-                textareaRef={textareaRef}
-                onInputChange={setInput}
-                onInputKeyDown={handleInputKeyDown}
-                onTextareaInput={handleTextareaInput}
-                onSend={() => void handleSend()}
-              />
-            </>
-          )}
-        </div>
+        <ChatInput
+          input={input}
+          sending={sending}
+          disabled={inputDisabled}
+          dimmed={!selectedBatch}
+          textareaRef={textareaRef}
+          onInputChange={setInput}
+          onInputKeyDown={handleInputKeyDown}
+          onTextareaInput={handleTextareaInput}
+          onSend={() => void handleSend()}
+        />
       </div>
     </div>
   )

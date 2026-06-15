@@ -4,12 +4,38 @@ load_dotenv()
 
 import logging
 import os
+from pathlib import Path
+
+
+def _configure_gcp_credentials() -> None:
+    """Resolve GCP credentials to an existing file under the backend directory."""
+    backend_dir = Path(__file__).resolve().parent
+    raw = (os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or "gcp-service-account.json").strip()
+    path = Path(raw)
+    if not path.is_absolute():
+        path = backend_dir / path
+    if not path.is_file():
+        fallback = backend_dir / "gcp-service-account.json"
+        if fallback.is_file():
+            path = fallback
+    if path.is_file():
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(path.resolve())
+        logging.getLogger(__name__).info("Using GCP credentials: %s", path)
+    else:
+        logging.getLogger(__name__).warning(
+            "GCP credentials file not found (tried %s). GCS/Vertex uploads will fail.",
+            raw,
+        )
+
+
+_configure_gcp_credentials()
 
 logging.basicConfig(level=logging.INFO)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from routers.agent import router as agent_router
 from routers.auth import router as auth_router
 from routers.batches import router as batches_router
 from routers.chats import router as chats_router
@@ -37,6 +63,7 @@ app.include_router(batches_router)
 app.include_router(files_router)
 app.include_router(chats_router)
 app.include_router(email_router, prefix="", tags=["email"])
+app.include_router(agent_router, prefix="/agent", tags=["agent"])
 
 
 @app.on_event("startup")

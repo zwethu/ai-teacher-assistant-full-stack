@@ -17,7 +17,8 @@ def _get_bucket_name() -> str:
 
 def _get_client():
     from google.cloud import storage  # type: ignore[import-untyped]
-    return storage.Client()
+    project = (os.getenv("GOOGLE_CLOUD_PROJECT") or "").strip() or None
+    return storage.Client(project=project)
 
 
 def safe_file_name(file_name: str) -> str:

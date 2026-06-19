@@ -40,10 +40,17 @@ export async function sendMessage(
   batchId: string,
   chatId: string,
   content: string,
-): Promise<{ user_message: ChatMessage; assistant_message: ChatMessage }> {
+): Promise<{
+  user_message: ChatMessage
+  run_id: string
+  rtdb_run_path: string
+  status: 'running' | 'done' | 'failed'
+}> {
   const res = await api.post<{
     user_message: ChatMessage
-    assistant_message: ChatMessage
+    run_id: string
+    rtdb_run_path: string
+    status: 'running' | 'done' | 'failed'
   }>(`/batches/${batchId}/chats/${chatId}/messages`, { content })
   return res.data
 }

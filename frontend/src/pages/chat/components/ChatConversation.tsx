@@ -81,6 +81,8 @@ export function ChatMessagesPanel({
   messagesEndRef,
   welcomeContent,
 }: MessagesPanelProps) {
+  const safeMessages = messages.filter(Boolean)
+
   return (
     <main className="flex-1 overflow-y-auto">
       <div className="max-w-3xl mx-auto px-4 py-8 min-h-full flex flex-col">
@@ -92,7 +94,7 @@ export function ChatMessagesPanel({
           welcomeContent
         ) : (
           <div className="space-y-6 pb-4">
-            {messages.map((msg) => (
+            {safeMessages.map((msg) => (
               <MessageRow key={msg.message_id} msg={msg} />
             ))}
             {sending && <ThinkingIndicator />}

@@ -6,6 +6,7 @@ from typing import Any
 
 from google.cloud.firestore import SERVER_TIMESTAMP
 
+from services.agent_sessions import make_agent_session_id
 from utils.firestore_client import get_firestore
 
 logger = logging.getLogger(__name__)
@@ -40,6 +41,12 @@ def _chat_to_dict(doc_id: str, data: dict[str, Any]) -> dict[str, Any]:
         "batch_id": str(data.get("batch_id") or ""),
         "lecturer_id": str(data.get("lecturer_id") or ""),
         "title": str(data.get("title") or "New Chat"),
+        "agent_session_id": str(data.get("agent_session_id") or ""),
+        "agent_user_id": str(data.get("agent_user_id") or ""),
+        "active_run_id": str(data.get("active_run_id") or ""),
+        "last_run_id": str(data.get("last_run_id") or ""),
+        "last_run_status": str(data.get("last_run_status") or ""),
+        "agent_engine_resource_name": str(data.get("agent_engine_resource_name") or ""),
         "created_at": (created.isoformat() if hasattr(created, "isoformat") else (str(created) if created else None)),
         "updated_at": (updated.isoformat() if hasattr(updated, "isoformat") else (str(updated) if updated else None)),
     }
@@ -63,18 +70,36 @@ def _msg_to_dict(doc_id: str, data: dict[str, Any]) -> dict[str, Any]:
 def create_chat(batch_id: str, lecturer_id: str, title: str = "New Chat") -> dict[str, Any]:
     col = _chats_col(batch_id)
     chat_id = str(uuid.uuid4())
+    agent_session_id = make_agent_session_id(chat_id)
     doc = col.document(chat_id)
     doc.set(
         {
             "chat_id": chat_id,
             "batch_id": batch_id,
             "lecturer_id": lecturer_id,
+            "agent_session_id": agent_session_id,
+            "agent_user_id": lecturer_id,
+            "active_run_id": "",
+            "last_run_id": "",
+            "last_run_status": "",
+            "agent_engine_resource_name": "",
             "title": title.strip() or "New Chat",
             "created_at": SERVER_TIMESTAMP,
             "updated_at": SERVER_TIMESTAMP,
         }
     )
-    return {"chat_id": chat_id, "batch_id": batch_id, "lecturer_id": lecturer_id, "title": title}
+    return {
+        "chat_id": chat_id,
+        "batch_id": batch_id,
+        "lecturer_id": lecturer_id,
+        "agent_session_id": agent_session_id,
+        "agent_user_id": lecturer_id,
+        "active_run_id": "",
+        "last_run_id": "",
+        "last_run_status": "",
+        "agent_engine_resource_name": "",
+        "title": title,
+    }
 
 
 def list_chats(batch_id: str, lecturer_id: str) -> list[dict[str, Any]]:

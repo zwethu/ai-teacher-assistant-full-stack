@@ -1,7 +1,9 @@
 import { Bot, User } from 'lucide-react'
 import type { ChatMessage } from '../../../entity/Chat'
 
-export function MessageRow({ msg }: { msg: ChatMessage }) {
+export function MessageRow({ msg }: { msg?: ChatMessage | null }) {
+  if (!msg) return null
+
   const isUser = msg.role === 'user'
   return (
     <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : ''}`}>

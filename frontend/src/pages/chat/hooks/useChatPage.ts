@@ -18,6 +18,7 @@ import {
   sendMessage,
   updateChatTitle,
 } from '../../../services/chatService'
+import { subscribeAgentRun } from '../../../services/agentRunStream'
 import { emitChatCreated } from '../../../utils/chatEvents'
 
 type ChatLocationState = {
@@ -33,6 +34,8 @@ export function useChatPage() {
   const appliedRouteStateRef = useRef<string | null>(null)
   const pendingChatIdRef = useRef<string | null>(null)
   const pendingInitialMessageRef = useRef<string | null>(null)
+  const runUnsubscribeRef = useRef<(() => void) | null>(null)
+  const runFallbackTimerRef = useRef<number | null>(null)
 
   const [batches, setBatches] = useState<Batch[]>([])
   const [batchesLoading, setBatchesLoading] = useState(true)
@@ -49,6 +52,7 @@ export function useChatPage() {
 
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
+  const [currentRunId, setCurrentRunId] = useState<string | null>(null)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -126,6 +130,15 @@ export function useChatPage() {
   }, [activeChat, selectedBatch])
 
   useEffect(() => {
+    return () => {
+      runUnsubscribeRef.current?.()
+      if (runFallbackTimerRef.current) {
+        window.clearTimeout(runFallbackTimerRef.current)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, sending])
 
@@ -163,12 +176,97 @@ export function useChatPage() {
     setMessages((prev) => [...prev, optimisticUser])
 
     try {
-      const { assistant_message } = await sendMessage(
+      const result = await sendMessage(
         selectedBatch.id,
         chat.chat_id,
         content,
       )
-      setMessages((prev) => [...prev, assistant_message])
+      const pendingId = `pending-${result.run_id}`
+      setCurrentRunId(result.run_id)
+      setMessages((prev) => [
+        ...prev.filter(Boolean),
+        {
+          message_id: pendingId,
+          chat_id: chat.chat_id,
+          role: 'assistant',
+          content: 'Working...',
+          created_at: new Date().toISOString(),
+          status: 'pending',
+          run_id: result.run_id,
+          pending: true,
+        },
+      ])
+
+      runUnsubscribeRef.current?.()
+      if (runFallbackTimerRef.current) {
+        window.clearTimeout(runFallbackTimerRef.current)
+      }
+      runUnsubscribeRef.current = subscribeAgentRun(result.run_id, {
+        onMessage: (message) => {
+          setMessages((prev) =>
+            prev
+              .filter(Boolean)
+              .map((msg) =>
+                msg.message_id === pendingId
+                  ? { ...message, chat_id: chat!.chat_id, status: 'done', pending: false }
+                  : msg,
+              ),
+          )
+          setSending(false)
+        },
+        onStatus: (status) => {
+          if (status === 'failed') {
+            setMessages((prev) =>
+              prev
+                .filter(Boolean)
+                .map((msg) =>
+                  msg.message_id === pendingId
+                    ? {
+                        ...msg,
+                        content: 'The agent run failed. Please try again.',
+                        status: 'failed',
+                        pending: false,
+                      }
+                    : msg,
+                ),
+            )
+            setSending(false)
+            return
+          }
+
+          if (status === 'done') {
+            window.setTimeout(() => {
+              setMessages((prev) => {
+                const stillPending = prev.some((msg) => msg?.message_id === pendingId)
+                if (!stillPending || !selectedBatch) return prev
+                void listMessages(selectedBatch.id, chat!.chat_id)
+                  .then(setMessages)
+                  .catch(console.error)
+                  .finally(() => setSending(false))
+                return prev
+              })
+            }, 1500)
+          }
+        },
+        onError: (error) => {
+          console.error(error)
+        },
+      })
+      runFallbackTimerRef.current = window.setTimeout(() => {
+        setMessages((prev) =>
+          prev
+            .filter(Boolean)
+            .map((msg) =>
+              msg.message_id === pendingId
+                ? {
+                    ...msg,
+                    content: 'Still working. The live update stream is not connected yet.',
+                  }
+                : msg,
+            ),
+        )
+        setSending(false)
+      }, 30000)
 
       if (chat.title === 'New Chat') {
         const newTitle = content.slice(0, 50)
@@ -189,7 +287,6 @@ export function useChatPage() {
         created_at: new Date().toISOString(),
       }
       setMessages((prev) => [...prev, errMsg])
-    } finally {
       setSending(false)
     }
   }
@@ -271,6 +368,7 @@ export function useChatPage() {
     input,
     setInput,
     sending,
+    currentRunId,
     inputDisabled,
     messagesEndRef,
     textareaRef,

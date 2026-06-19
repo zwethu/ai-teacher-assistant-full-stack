@@ -1,4 +1,4 @@
-import { SubjectPack } from './types';
+import type { SubjectPack } from './types';
 
 export const SUBJECT_PACKS: SubjectPack[] = [
   {

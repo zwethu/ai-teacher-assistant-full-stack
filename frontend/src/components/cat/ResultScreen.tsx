@@ -1,60 +1,105 @@
+import { useEffect, useState } from 'react';
 import type { AnswerRecord } from '../../types/catGame.types';
 
 type Props = {
   answers: AnswerRecord[];
   totalQuestions: number;
   happiness: number;
-  coins: number;
+  fish: number;
   onRestart: () => void;
 };
 
-export default function ResultScreen({ answers, totalQuestions, happiness, coins, onRestart }: Props) {
+export default function ResultScreen({ answers, totalQuestions, happiness, fish, onRestart }: Props) {
   const correct = answers.filter(a => a.correct).length;
   const accuracy = totalQuestions > 0 ? Math.round((correct / totalQuestions) * 100) : 0;
+
+  const [phase, setPhase] = useState<'intro' | 'treating' | 'done'>('intro');
+  const [remainingFish, setRemainingFish] = useState(fish);
+  const [catMood, setCatMood] = useState<'waiting' | 'eating' | 'full'>('waiting');
+
+  useEffect(() => {
+    const t1 = setTimeout(() => {
+      setPhase('treating');
+      setCatMood('eating');
+      let count = fish;
+      const interval = setInterval(() => {
+        count -= 1;
+        setRemainingFish(c => Math.max(0, c - 1));
+        if (count <= 0) {
+          clearInterval(interval);
+          setTimeout(() => {
+            setCatMood('full');
+            setPhase('done');
+          }, 600);
+        }
+      }, Math.max(60, 1200 / (fish || 1)));
+      return () => clearInterval(interval);
+    }, 900);
+    return () => clearTimeout(t1);
+  }, [fish]);
 
   const badge =
     accuracy >= 80 ? '🏆 Best Cat Caretaker!' :
     accuracy >= 50 ? '🐾 Good Study Friend!' :
-    '💪 Needs More Practice!';
+    '💪 Keep Practicing!';
 
-  const catFinal =
-    happiness >= 70 ? '😸' :
-    happiness >= 40 ? '😺' :
-    '😿';
+  const catEmoji =
+    catMood === 'eating' ? '😋' :
+    catMood === 'full'   ? (happiness >= 60 ? '😸' : '😺') :
+    '😺';
 
-  const catStatus =
-    happiness >= 70 ? 'Very Happy Cat!' :
-    happiness >= 40 ? 'Happy Cat' :
-    'Needs More Cuddles';
+  const catLabel =
+    catMood === 'eating' ? 'Nom nom nom...' :
+    catMood === 'full'   ? (happiness >= 70 ? 'So full and happy! ♡' : 'Thank you~') :
+    'Waiting for treats...';
 
   return (
     <div className="result-screen">
       <div className="result-card">
-        <div className="result-cat">{catFinal}</div>
-        <h2 className="result-badge">{badge}</h2>
 
-        <div className="result-stats">
-          <div className="stat-row">
-            <span className="stat-label">✅ Correct</span>
-            <span className="stat-value">{correct} / {totalQuestions}</span>
+        <div className={`result-cat-wrap ${catMood}`}>
+          <div className="result-cat-emoji">{catEmoji}</div>
+          <div className="result-cat-bowl">
+            {catMood === 'eating' && <span className="bowl-fish">🐟</span>}
+            🥣
           </div>
-          <div className="stat-row">
-            <span className="stat-label">🎯 Accuracy</span>
-            <span className="stat-value">{accuracy}%</span>
-          </div>
-          <div className="stat-row">
-            <span className="stat-label">🐟 Fish earned</span>
-            <span className="stat-value">{coins}</span>
-          </div>
-          <div className="stat-row">
-            <span className="stat-label">😺 Cat mood</span>
-            <span className="stat-value">{catStatus}</span>
-          </div>
+          <p className="result-cat-label">{catLabel}</p>
         </div>
 
-        <button className="restart-btn" onClick={onRestart}>
-          🔄 Play Again
-        </button>
+        {phase === 'treating' && (
+          <div className="treating-counter">
+            <span className="treating-fish">🐟</span>
+            <span className="treating-number">× {remainingFish}</span>
+            <span className="treating-sub">feeding...</span>
+          </div>
+        )}
+
+        {phase === 'done' && (
+          <>
+            <h2 className="result-badge">{badge}</h2>
+            <div className="result-stats">
+              <div className="stat-row">
+                <span className="stat-label">✅ Correct</span>
+                <span className="stat-value">{correct} / {totalQuestions}</span>
+              </div>
+              <div className="stat-row">
+                <span className="stat-label">🎯 Accuracy</span>
+                <span className="stat-value">{accuracy}%</span>
+              </div>
+              <div className="stat-row">
+                <span className="stat-label">🐟 Fish given</span>
+                <span className="stat-value">{fish}</span>
+              </div>
+              <div className="stat-row">
+                <span className="stat-label">💛 Happiness</span>
+                <span className="stat-value">{happiness} / 100</span>
+              </div>
+            </div>
+            <button className="restart-btn" onClick={onRestart}>
+              🔄 Play Again
+            </button>
+          </>
+        )}
       </div>
     </div>
   );

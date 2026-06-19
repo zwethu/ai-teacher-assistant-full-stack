@@ -11,12 +11,17 @@ import './CatGame.css';
 export default function CatGame() {
   const [gameState, setGameState] = useState<GameState>('playing_a');
   const [happiness, setHappiness] = useState(60);
-  const [coins, setCoins] = useState(0);
+  const [fish, setFish] = useState(0);
   const [answers, setAnswers] = useState<AnswerRecord[]>([]);
-  const [catMood, setCatMood] = useState<'idle' | 'happy' | 'confused' | 'playful'>('idle');
+  const [catMood, setCatMood] = useState<'idle' | 'happy' | 'confused' | 'playful' | 'eating'>('idle');
 
   const totalQuestions = MOCK_MCQ.length + MOCK_MATCHING.reduce((acc, q) => acc + q.pairs.length, 0);
   const answered = answers.length;
+
+  function triggerMood(mood: 'happy' | 'confused' | 'playful', duration = 1400) {
+    setCatMood(mood);
+    setTimeout(() => setCatMood('idle'), duration);
+  }
 
   function handleMCQComplete(newAnswers: AnswerRecord[]) {
     setAnswers(prev => [...prev, ...newAnswers]);
@@ -29,29 +34,26 @@ export default function CatGame() {
   }
 
   function handleCorrect() {
-    setCatMood('happy');
+    triggerMood('happy');
     setHappiness(h => Math.min(100, h + 10));
-    setCoins(c => c + 5);
-    setTimeout(() => setCatMood('idle'), 1200);
+    setFish(f => f + 5);
   }
 
   function handleWrong() {
-    setCatMood('confused');
+    triggerMood('confused');
     setHappiness(h => Math.max(0, h - 5));
-    setTimeout(() => setCatMood('idle'), 1200);
   }
 
   function handleMatchPlay() {
-    setCatMood('playful');
-    setCoins(c => c + 5);
+    triggerMood('playful');
+    setFish(f => f + 5);
     setHappiness(h => Math.min(100, h + 8));
-    setTimeout(() => setCatMood('idle'), 1200);
   }
 
   function handleRestart() {
     setGameState('playing_a');
     setHappiness(60);
-    setCoins(0);
+    setFish(0);
     setAnswers([]);
     setCatMood('idle');
   }
@@ -62,7 +64,7 @@ export default function CatGame() {
         answers={answers}
         totalQuestions={totalQuestions}
         happiness={happiness}
-        coins={coins}
+        fish={fish}
         onRestart={handleRestart}
       />
     );
@@ -70,26 +72,26 @@ export default function CatGame() {
 
   return (
     <div className="cat-game-container">
-      {/* Decorative room background elements */}
+      {/* Cozy room decorations */}
       <div className="room-deco window">🪟</div>
       <div className="room-deco plant">🪴</div>
-      <div className="room-deco pillow">🛋️</div>
+      <div className="room-deco shelf">🕯️ 📚</div>
+      <div className="room-deco rug">🟫</div>
 
       <HUD
         happiness={happiness}
         answered={answered}
         totalQuestions={totalQuestions}
-        coins={coins}
+        fish={fish}
       />
 
       <div className="cat-center-area">
         <CatSprite mood={catMood} />
-        {gameState === 'playing_a' && (
-          <p className="mode-label">🐾 Pet & Choose – Answer to earn treats!</p>
-        )}
-        {gameState === 'playing_b' && (
-          <p className="mode-label">🧩 Match & Treat – Find the right pairs!</p>
-        )}
+        <div className="mode-pill">
+          {gameState === 'playing_a'
+            ? '🐾 Answer questions to earn 🐟 fish!'
+            : '🧩 Match the pairs for more 🐟 fish!'}
+        </div>
       </div>
 
       <div className="interaction-area">

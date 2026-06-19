@@ -228,7 +228,9 @@ async def _run_agent_background(
         ):
             final_text_parts.append(chunk)
 
-        final_text = "".join(final_text_parts).strip() or "(no response)"
+        final_text = "".join(final_text_parts).strip()
+        if not final_text:
+            raise RuntimeError("Agent Engine stream completed without any assistant text")
 
         # Persist assistant message to Firestore
         final_msg = add_message(batch_id, chat_id, "assistant", final_text, lecturer_id)

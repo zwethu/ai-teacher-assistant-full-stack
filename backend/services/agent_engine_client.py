@@ -29,7 +29,6 @@ PHASE 2 — Agent Engine deployed.
         user_id=lecturer_id,
         session_id=session_id,          # safe Agent Platform session id
         message=user_message,
-        state=session_state,            # trusted batch context + run telemetry keys
     ):
         text_chunk = event.get("text") or ""
         ...
@@ -45,6 +44,10 @@ Google's ADK session docs say:
 For PNAI we use a sanitized agent_session_id derived from chat_id so
 conversation history is preserved across runs without exposing raw Firestore
 UUIDs to Agent Platform session ids.
+
+Trusted run/batch state is managed through Agent Platform Sessions, not
+async_stream_query(state=...).  AGENT_APP_NAME defaults to
+pnai-teacher-assistant for session service calls.
 """
 
 from __future__ import annotations
@@ -54,6 +57,8 @@ import os
 from collections.abc import AsyncIterator
 from typing import Any
 from urllib.parse import urlparse
+
+from services.agent_platform_sessions import ensure_session_with_state
 
 logger = logging.getLogger(__name__)
 
@@ -152,11 +157,7 @@ async def ensure_session(
         return
 
     try:
-        await _create_or_get_session(
-            session_id=session_id,
-            lecturer_id=lecturer_id,
-            resource_name=resource_name,
-        )
+        await ensure_session_with_state(resource_name, lecturer_id, session_id, {})
     except Exception as exc:
         logger.warning("ensure_session failed for session_id=%s: %s", session_id, exc)
 
@@ -188,39 +189,97 @@ async def _sdk_stream(
 
     agent = _get_agent(vertexai, resource_name)
 
-    # Ensure the session exists (creates it if this is the first message).
-    await _create_or_get_session(
-        session_id=session_id,
-        lecturer_id=lecturer_id,
-        agent=agent,
+    await ensure_session_with_state(
         resource_name=resource_name,
+        user_id=lecturer_id,
+        session_id=session_id,
+        state=session_state,
+    )
+    logger.info(
+        "Agent Platform session state applied before stream resource=%s user_id=%s "
+        "session_id=%s state_keys=%s",
+        resource_name,
+        lecturer_id,
+        session_id,
+        sorted(session_state.keys()),
     )
 
-    # Stream the response.
+    # Stream the response. State is deliberately not passed here; deployed ADK
+    # templates call Runner.run_async(), which accepts session-backed state but
+    # not an async_stream_query state kwarg.
     # The agent writes nested RTDB events directly during this call via telemetry.py.
     stream_kwargs = {
         "user_id": lecturer_id,
         "session_id": session_id,
         "message": user_message,
-        "state": session_state,
     }
+    logger.info(
+        "Agent Engine async_stream_query start resource=%s user_id=%s session_id=%s",
+        resource_name,
+        lecturer_id,
+        session_id,
+    )
     try:
         stream = agent.async_stream_query(**stream_kwargs)  # type: ignore[attr-defined]
     except TypeError as exc:
         logger.exception(
-            "Agent Engine async_stream_query rejected state/session args for "
-            "resource=%s session_id=%s",
+            "Agent Engine async_stream_query rejected documented args for "
+            "resource=%s user_id=%s session_id=%s",
             resource_name,
+            lecturer_id,
             session_id,
         )
         raise RuntimeError(
-            "Agent Engine async_stream_query rejected the trusted session_state payload"
+            "Agent Engine async_stream_query rejected documented user_id/session_id/message args"
         ) from exc
+    except Exception:
+        logger.exception(
+            "Agent Engine async_stream_query failed before streaming resource=%s "
+            "user_id=%s session_id=%s",
+            resource_name,
+            lecturer_id,
+            session_id,
+        )
+        raise
 
-    async for event in stream:
-        chunk = _event_text(event)
-        if chunk:
-            yield chunk
+    try:
+        event_count = 0
+        chunk_count = 0
+        last_event_summary = ""
+        async for event in stream:
+            event_count += 1
+            last_event_summary = _event_summary(event)
+            error = _event_error(event)
+            if error:
+                raise RuntimeError(f"Agent Engine returned an error event: {error}")
+            chunk = _event_text(event)
+            if chunk:
+                chunk_count += 1
+                yield chunk
+        if event_count and not chunk_count:
+            raise RuntimeError(
+                "Agent Engine stream produced events but no assistant text. "
+                f"Last event: {last_event_summary}"
+            )
+    except TypeError as exc:
+        logger.exception(
+            "Agent Engine async_stream_query stream failed with TypeError for "
+            "resource=%s user_id=%s session_id=%s",
+            resource_name,
+            lecturer_id,
+            session_id,
+        )
+        raise RuntimeError(
+            "Agent Engine async_stream_query stream failed after session state was applied"
+        ) from exc
+    except Exception:
+        logger.exception(
+            "Agent Engine async_stream_query stream failed resource=%s user_id=%s session_id=%s",
+            resource_name,
+            lecturer_id,
+            session_id,
+        )
+        raise
 
 
 async def _create_or_get_session(
@@ -230,7 +289,13 @@ async def _create_or_get_session(
     resource_name: str,
     agent: Any = None,
 ) -> None:
-    """Create the Agent Platform session if it doesn't exist yet."""
+    """Create the Agent Platform session if it doesn't exist yet.
+
+    This helper is intentionally idempotent. A get_session failure may be a
+    not-found response, a transient SDK issue, or an API shape mismatch; if the
+    subsequent create reports that the session already exists, that is a
+    successful outcome for the caller.
+    """
     if agent is None:
         import vertexai
         agent = _get_agent(vertexai, resource_name)
@@ -240,12 +305,45 @@ async def _create_or_get_session(
             user_id=lecturer_id,
             session_id=session_id,
         )
-    except Exception:
-        # Session doesn't exist — create it.
+        logger.debug("Agent Engine session exists user_id=%s session_id=%s", lecturer_id, session_id)
+        return
+    except Exception as get_exc:
+        if _is_not_found_error(get_exc):
+            logger.info(
+                "Agent Engine session not found; creating user_id=%s session_id=%s",
+                lecturer_id,
+                session_id,
+            )
+        else:
+            logger.warning(
+                "Agent Engine get_session failed; attempting create user_id=%s session_id=%s: %s",
+                lecturer_id,
+                session_id,
+                get_exc,
+            )
+
+    try:
         await agent.async_create_session(  # type: ignore[attr-defined]
             user_id=lecturer_id,
             session_id=session_id,
         )
+        logger.info("Agent Engine session created user_id=%s session_id=%s", lecturer_id, session_id)
+    except Exception as create_exc:
+        if _is_already_exists_error(create_exc):
+            logger.info(
+                "Agent Engine create_session reported already exists; continuing "
+                "user_id=%s session_id=%s: %s",
+                lecturer_id,
+                session_id,
+                create_exc,
+            )
+            return
+        logger.exception(
+            "Agent Engine create_session failed user_id=%s session_id=%s",
+            lecturer_id,
+            session_id,
+        )
+        raise
 
 
 def _get_agent(vertexai_module: Any, resource_name: str) -> Any:
@@ -266,8 +364,102 @@ def _get_agent(vertexai_module: Any, resource_name: str) -> Any:
 
 def _event_text(event: Any) -> str:
     if isinstance(event, dict):
-        return str(event.get("text") or event.get("content") or "")
-    return str(getattr(event, "text", "") or getattr(event, "content", "") or "")
+        text = event.get("text")
+        if text:
+            return str(text)
+        return _content_text(event.get("content"))
+    text = getattr(event, "text", None)
+    if text:
+        return str(text)
+    return _content_text(getattr(event, "content", None))
+
+
+def _content_text(content: Any) -> str:
+    if not content:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, dict):
+        direct_text = content.get("text")
+        if direct_text:
+            return str(direct_text)
+        parts = content.get("parts") or []
+    else:
+        parts = getattr(content, "parts", None) or []
+
+    texts: list[str] = []
+    for part in parts:
+        if isinstance(part, dict):
+            text = part.get("text")
+        else:
+            text = getattr(part, "text", None)
+        if text:
+            texts.append(str(text))
+    return "".join(texts)
+
+
+def _event_error(event: Any) -> str:
+    if isinstance(event, dict):
+        for key in ("error", "error_message", "exception"):
+            value = event.get(key)
+            if value:
+                return _short_repr(value)
+    for key in ("error", "error_message", "exception"):
+        value = getattr(event, key, None)
+        if value:
+            return _short_repr(value)
+    return ""
+
+
+def _event_summary(event: Any) -> str:
+    return _short_repr(event)
+
+
+def _short_repr(value: Any, limit: int = 1000) -> str:
+    text = repr(value)
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}..."
+
+
+def _is_already_exists_error(exc: Exception) -> bool:
+    return _error_matches(
+        exc,
+        codes={"ALREADY_EXISTS", "already_exists", "409"},
+        phrases={"already exists", "alreadyexists", "already_exists"},
+    )
+
+
+def _is_not_found_error(exc: Exception) -> bool:
+    return _error_matches(
+        exc,
+        codes={"NOT_FOUND", "not_found", "404"},
+        phrases={"not found", "notfound", "not_found", "does not exist"},
+    )
+
+
+def _error_matches(exc: Exception, *, codes: set[str], phrases: set[str]) -> bool:
+    candidates: list[str] = [
+        str(exc),
+        exc.__class__.__name__,
+    ]
+    for attr in ("code", "status", "reason"):
+        value = getattr(exc, attr, None)
+        if value is None:
+            continue
+        try:
+            value = value() if callable(value) else value
+        except TypeError:
+            pass
+        candidates.append(str(value))
+
+    joined = " ".join(candidates)
+    normalized = joined.lower().replace("-", "_")
+    compact = normalized.replace(" ", "").replace("_", "")
+    return any(code.lower() in normalized for code in codes) or any(
+        phrase in normalized or phrase.replace(" ", "").replace("_", "") in compact
+        for phrase in phrases
+    )
 
 
 # ---------------------------------------------------------------------------

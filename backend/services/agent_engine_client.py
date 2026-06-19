@@ -86,17 +86,17 @@ async def stream_agent_response(
         yield _placeholder(user_message)
         return
 
-    try:
-        async for chunk in _sdk_stream(
-            user_message=user_message,
-            session_id=session_id,
-            lecturer_id=lecturer_id,
-            session_state=session_state,
-        ):
-            yield chunk
-    except Exception as exc:
-        logger.error("Agent Engine stream failed: %s", exc)
-        yield f"(Agent temporarily unavailable) Your message was received."
+    # When AGENT_ENGINE_RESOURCE_NAME is set, let SDK exceptions bubble up.
+    # _run_agent_background() already catches them and sets RTDB status=failed.
+    # Silently swallowing errors would make a real deployment failure look like
+    # a successful run with a placeholder message.
+    async for chunk in _sdk_stream(
+        user_message=user_message,
+        session_id=session_id,
+        lecturer_id=lecturer_id,
+        session_state=session_state,
+    ):
+        yield chunk
 
 
 async def ensure_session(

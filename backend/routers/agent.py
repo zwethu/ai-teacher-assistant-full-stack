@@ -19,7 +19,6 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from services.agent_gateway import start_chat_run
-from services.batch_service import get_batch
 from services.chat_service import get_chat
 from utils.firebase_auth import CurrentUser, get_current_user
 

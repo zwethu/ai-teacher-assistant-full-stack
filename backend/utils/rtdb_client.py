@@ -97,6 +97,7 @@ def create_run_meta(
         run_path = f"agentRuns/{run_id}"
         _ref(f"{run_path}/meta").set({
             "run_id": run_id,
+            "rtdb_run_path": run_path,
             "chat_id": chat_id,
             "batch_id": batch_id,
             "lecturer_id": lecturer_id,

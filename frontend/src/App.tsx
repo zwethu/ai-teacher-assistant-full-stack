@@ -8,6 +8,7 @@ import Assessments from './pages/Assessments'
 import LessonPlans from './pages/LessonPlans'
 import Batches from './pages/Batches'
 import Email from './pages/Email'
+import CatThemePickerPage from './pages/CatThemePickerPage'
 
 export default function App() {
   return (
@@ -15,6 +16,9 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/auth/callback" element={<AuthCallback />} />
+
+        {/* Public cat theme preview — no login needed */}
+        <Route path="/cat-themes" element={<CatThemePickerPage />} />
 
         <Route element={<ProtectedRoute />}>
           <Route element={<AppLayout />}>

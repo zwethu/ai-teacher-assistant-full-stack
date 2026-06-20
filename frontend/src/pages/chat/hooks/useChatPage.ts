@@ -5,6 +5,7 @@ import {
   useState,
   type KeyboardEvent,
 } from 'react'
+import axios from 'axios'
 import { useLocation, useNavigate } from 'react-router-dom'
 import type { Batch } from '../../../entity/Batch'
 import type { Chat, ChatMessage } from '../../../entity/Chat'
@@ -25,6 +26,29 @@ type ChatLocationState = {
   batchId?: string
   chatId?: string
   initialMessage?: string
+}
+
+function connectorErrorMessage(err: unknown): string {
+  if (!axios.isAxiosError(err)) {
+    return 'Sorry, something went wrong. Please try again.'
+  }
+
+  const detail = err.response?.data?.detail
+  const code = typeof detail?.code === 'string' ? detail.code : ''
+  const message = typeof detail?.message === 'string' ? detail.message : ''
+  const connectUrl = typeof detail?.connect_url === 'string' ? detail.connect_url : ''
+
+  if (code === 'GOOGLE_OAUTH_REQUIRED') {
+    const base =
+      'Google Workspace is not connected or needs re-consent. Please connect Google Workspace, then try again.'
+    return connectUrl ? `${base}\n\n[Connect Google Workspace](${connectUrl})` : base
+  }
+
+  if (code === 'GOOGLE_CONNECTOR_DISABLED') {
+    return 'Google Workspace connector is disabled. Enable it in chat connectors to export Docs, Forms, Gmail, or Calendar.'
+  }
+
+  return message || 'Sorry, something went wrong. Please try again.'
 }
 
 export function useChatPage() {
@@ -289,7 +313,7 @@ export function useChatPage() {
         message_id: crypto.randomUUID(),
         chat_id: chat.chat_id,
         role: 'assistant',
-        content: 'Sorry, something went wrong. Please try again.',
+        content: connectorErrorMessage(err),
         created_at: new Date().toISOString(),
       }
       setMessages((prev) => [...prev, errMsg])

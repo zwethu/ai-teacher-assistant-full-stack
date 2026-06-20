@@ -31,6 +31,7 @@ export default function Batches() {
         handleCsvUpload={state.handleCsvUpload}
         handleFileUpload={state.handleFileUpload}
         handleDeleteFile={state.handleDeleteFile}
+        handleRefreshFiles={state.handleRefreshFiles}
       />
     )
   }

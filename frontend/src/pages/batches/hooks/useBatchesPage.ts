@@ -12,7 +12,12 @@ import {
   listBatchStudents,
   removeStudentFromBatch,
 } from '../../../services/batchService'
-import { deleteBatchFile, listBatchFiles, uploadBatchFile } from '../../../services/fileService'
+import {
+  deleteBatchFile,
+  listBatchFiles,
+  syncBatchFileIndexStatus,
+  uploadBatchFile,
+} from '../../../services/fileService'
 import type { BatchDetails, BatchWithCount, CreateStep, DetailTab, StudentRow } from '../types'
 import { parseCsv } from '../utils/parseCsv'
 
@@ -137,6 +142,33 @@ export function useBatchesPage() {
     }
   }, [selectedBatch]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const syncStuckFiles = useCallback(async () => {
+    if (!selectedBatch) return
+    const now = Date.now()
+    const transitional: IndexStatus[] = ['uploading', 'indexing', 'deleting']
+    const stuck = files.filter((file) => {
+      if (!transitional.includes(file.index_status)) return false
+      const timestamp = file.updated_at || file.created_at
+      if (!timestamp) return true
+      return now - new Date(timestamp).getTime() > 60_000
+    })
+    if (stuck.length === 0) return
+
+    const synced = await Promise.all(
+      stuck.map((file) =>
+        syncBatchFileIndexStatus(selectedBatch.id, file.file_id).catch((err) => {
+          console.error(err)
+          return null
+        }),
+      ),
+    )
+    const updates = synced.filter(Boolean) as BatchFile[]
+    if (updates.length === 0) return
+    setFiles((prev) =>
+      prev.map((file) => updates.find((updated) => updated.file_id === file.file_id) ?? file),
+    )
+  }, [files, selectedBatch])
+
   useEffect(() => {
     if (!user?.uid) {
       setBatches([])
@@ -163,11 +195,19 @@ export function useBatchesPage() {
     const transitional: IndexStatus[] = ['uploading', 'indexing', 'deleting']
     const needsPolling = files.some((f) => transitional.includes(f.index_status))
     if (!needsPolling || !selectedBatch) return
-    pollingRef.current = setInterval(() => void refreshFiles({ silent: true }), 4000)
+    pollingRef.current = setInterval(() => {
+      void refreshFiles({ silent: true })
+      void syncStuckFiles()
+    }, 4000)
     return () => {
       if (pollingRef.current) clearInterval(pollingRef.current)
     }
-  }, [files, selectedBatch, refreshFiles])
+  }, [files, selectedBatch, refreshFiles, syncStuckFiles])
+
+  async function handleRefreshFiles() {
+    await refreshFiles()
+    await syncStuckFiles()
+  }
 
   function isDetailsComplete(): boolean {
     return (
@@ -424,6 +464,7 @@ export function useBatchesPage() {
     handleCsvUpload,
     handleFileUpload,
     handleDeleteFile,
+    handleRefreshFiles,
   }
 }
 

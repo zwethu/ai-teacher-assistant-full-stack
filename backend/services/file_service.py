@@ -11,6 +11,8 @@ from entity.File import BatchFile
 from utils.firestore_client import get_firestore
 from utils.gcs import batch_upload_blob_path, delete_blob, upload_bytes
 from utils.vertex_ingest import delete_document, ingest_file
+from utils.vertex_ingest import _doc_id as vertex_doc_id_for_file
+from utils.vertex_ingest import _root_datastore_id
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +104,11 @@ def enqueue_index_batch_file(
     course_name: str = "",
     batch_name: str = "",
 ) -> None:
-    """Run indexing in a daemon thread so uploads/reloads are not blocked."""
+    """Run indexing in a daemon thread so uploads/reloads are not blocked.
+
+    TODO: Move production indexing to Cloud Tasks, a Cloud Run job, or a
+    dedicated worker so it does not rely on process-local daemon threads.
+    """
     thread = threading.Thread(
         target=index_batch_file,
         kwargs={
@@ -187,6 +193,91 @@ def list_batch_files(batch_id: str, lecturer_id: str) -> list[BatchFile]:
         _doc_to_model(doc.id, doc.to_dict() or {})
         for doc in col.order_by("created_at").stream()
     ]
+
+
+def get_batch_file(batch_id: str, file_id: str, lecturer_id: str) -> BatchFile | None:
+    """Return a single batch file after ownership verification."""
+    snap = _file_ref(batch_id, file_id).get()
+    if not snap.exists:
+        return None
+    data = snap.to_dict() or {}
+    if data.get("lecturer_id") != lecturer_id:
+        return None
+    return _doc_to_model(snap.id, data)
+
+
+def sync_index_status(batch_id: str, file_id: str, lecturer_id: str) -> BatchFile | None:
+    """Reconcile Firestore index state with Vertex AI Search visibility."""
+    file_ref = _file_ref(batch_id, file_id)
+    snap = file_ref.get()
+    if not snap.exists:
+        return None
+
+    data = snap.to_dict() or {}
+    if data.get("lecturer_id") != lecturer_id:
+        return None
+
+    status = str(data.get("index_status") or "")
+    if status in {"indexed", "failed", "deleting"}:
+        return _doc_to_model(snap.id, data)
+
+    gcs_path = str(data.get("gcs_path") or "")
+    datastore_id = _root_datastore_id()
+    if not datastore_id or not gcs_path:
+        data["index_message"] = "Index status cannot be synced yet."
+        data["index_error"] = "Missing Vertex datastore id or GCS path."
+        return _doc_to_model(snap.id, data)
+
+    doc_id = vertex_doc_id_for_file(lecturer_id, batch_id, gcs_path)
+    doc_name = f"{datastore_id.rstrip('/')}/branches/0/documents/{doc_id}"
+
+    try:
+        from google.api_core import exceptions as google_exceptions  # type: ignore[import-untyped]
+        from google.cloud import discoveryengine_v1 as discoveryengine  # type: ignore[import-untyped]
+
+        client = discoveryengine.DocumentServiceClient()
+        client.get_document(name=doc_name)
+    except Exception as exc:
+        if "google_exceptions" in locals() and isinstance(exc, google_exceptions.NotFound):
+            file_ref.update(
+                {
+                    "index_status": "indexing",
+                    "index_message": "Waiting for Vertex index visibility...",
+                    "updated_at": SERVER_TIMESTAMP,
+                }
+            )
+            data.update(
+                {
+                    "index_status": "indexing",
+                    "index_message": "Waiting for Vertex index visibility...",
+                }
+            )
+            return _doc_to_model(snap.id, data)
+
+        err_msg = str(exc)[:500]
+        logger.warning("Vertex index sync failed for file %s: %s", file_id, err_msg)
+        data["index_message"] = "Could not verify Vertex index status yet."
+        data["index_error"] = err_msg
+        return _doc_to_model(snap.id, data)
+
+    file_ref.update(
+        {
+            "vertex_doc_id": doc_id,
+            "index_status": "indexed",
+            "index_message": "",
+            "index_error": "",
+            "updated_at": SERVER_TIMESTAMP,
+        }
+    )
+    data.update(
+        {
+            "vertex_doc_id": doc_id,
+            "index_status": "indexed",
+            "index_message": "",
+            "index_error": "",
+        }
+    )
+    return _doc_to_model(snap.id, data)
 
 
 def delete_batch_file(

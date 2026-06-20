@@ -25,6 +25,8 @@ export default function Chat() {
         handleInputKeyDown={state.handleInputKeyDown}
         handleTextareaInput={state.handleTextareaInput}
         showWelcome={state.showWelcome}
+        connectors={state.connectors}
+        setConnectors={state.setConnectors}
       />
     </ChatErrorBoundary>
   )

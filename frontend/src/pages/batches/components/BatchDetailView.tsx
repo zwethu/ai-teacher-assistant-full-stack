@@ -33,6 +33,7 @@ type Props = {
   handleCsvUpload: (e: React.ChangeEvent<HTMLInputElement>) => void
   handleFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void
   handleDeleteFile: (file: BatchFile) => void
+  handleRefreshFiles: () => void
 }
 
 export function BatchDetailView({
@@ -58,6 +59,7 @@ export function BatchDetailView({
   handleCsvUpload,
   handleFileUpload,
   handleDeleteFile,
+  handleRefreshFiles,
 }: Props) {
   return (
     <div>
@@ -154,6 +156,7 @@ export function BatchDetailView({
           fileInputRef={fileInputRef}
           onFileUpload={handleFileUpload}
           onDeleteFile={handleDeleteFile}
+          onRefreshFiles={handleRefreshFiles}
         />
       )}
     </div>

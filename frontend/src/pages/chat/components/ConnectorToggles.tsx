@@ -20,16 +20,26 @@ export function ConnectorToggles({ connectors, onChange, disabled }: Props) {
     checkGoogleAuthStatus().then(setGoogleStatus).catch(console.error)
   }, [])
   
-  const handleGoogleToggle = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.checked) {
-      if (!googleStatus?.has_google_scopes) {
+  const handleGoogleToggle = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const checked = e.target.checked
+    if (checked) {
+      let status = googleStatus
+      try {
+        status = await checkGoogleAuthStatus()
+        setGoogleStatus(status)
+      } catch (err) {
+        console.error(err)
+        status = null
+      }
+      if (!status?.has_google_scopes || !status.valid) {
         if (window.confirm("Google Workspace connection is required. Connect now?")) {
           startGoogleOAuth()
         }
-        return // Don't turn on if not valid
+        onChange('google_workspace', false)
+        return
       }
     }
-    onChange('google_workspace', e.target.checked)
+    onChange('google_workspace', checked)
   }
   
   return (

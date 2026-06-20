@@ -10,7 +10,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 import type { BatchFile } from '../../../entity/File'
 import type { Chat } from '../../../entity/Chat'
-import { Clock, FileText, Loader2, MessageCircle, Trash2, Upload } from 'lucide-react'
+import { Clock, FileText, Loader2, MessageCircle, RefreshCw, Trash2, Upload } from 'lucide-react'
 import { createChat, listChats, listMessages } from '../../../services/chatService'
 import { formatDateTime } from '../../../utils/formatDate'
 import { emitChatCreated } from '../../../utils/chatEvents'
@@ -25,6 +25,7 @@ type Props = {
   fileInputRef: RefObject<HTMLInputElement | null>
   onFileUpload: (e: ChangeEvent<HTMLInputElement>) => void
   onDeleteFile: (file: BatchFile) => void
+  onRefreshFiles: () => void
 }
 
 type ChatWithPreview = Chat & { preview: string }
@@ -37,6 +38,7 @@ export function MaterialsTab({
   fileInputRef,
   onFileUpload,
   onDeleteFile,
+  onRefreshFiles,
 }: Props) {
   const navigate = useNavigate()
   const [chats, setChats] = useState<ChatWithPreview[]>([])
@@ -205,13 +207,25 @@ export function MaterialsTab({
           </div>
 
           <div className="flex-1 min-h-0 flex flex-col">
-            <h3 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
-              <FileText className="w-4 h-4 text-emerald-600" />
-              Uploaded Files
-              {files.length > 0 && (
-                <span className="text-xs font-normal text-slate-400">({files.length})</span>
-              )}
-            </h3>
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+                <FileText className="w-4 h-4 text-emerald-600" />
+                Uploaded Files
+                {files.length > 0 && (
+                  <span className="text-xs font-normal text-slate-400">({files.length})</span>
+                )}
+              </h3>
+              <button
+                type="button"
+                onClick={onRefreshFiles}
+                disabled={filesLoading}
+                className="inline-flex items-center justify-center rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50"
+                aria-label="Refresh files"
+                title="Refresh files"
+              >
+                <RefreshCw className={`w-4 h-4 ${filesLoading ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
             <div className="flex-1 overflow-y-auto bg-white rounded-2xl shadow-sm border border-slate-100">
               {filesLoading && files.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 gap-3">
@@ -238,9 +252,14 @@ export function MaterialsTab({
                           </div>
                           <div className="mt-1">
                             <IndexStatusBadge status={f.index_status} />
-                            {f.index_status === 'indexing' && (
+                            {['uploading', 'indexing', 'deleting'].includes(f.index_status) && (
                               <p className="text-xs text-slate-500 mt-1 animate-pulse">
-                                {f.index_message || 'Indexing in progress…'}
+                                {f.index_message || 'Indexing in progress...'}
+                              </p>
+                            )}
+                            {f.index_error && (
+                              <p className="text-xs text-red-600 mt-1 break-words">
+                                {f.index_error}
                               </p>
                             )}
                           </div>

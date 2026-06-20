@@ -7,7 +7,9 @@ from services.batch_service import get_batch
 from services.file_service import (
     delete_batch_file,
     enqueue_index_batch_file,
+    get_batch_file,
     list_batch_files,
+    sync_index_status,
     upload_batch_file,
 )
 from utils.firebase_auth import CurrentUser, get_current_user
@@ -87,6 +89,36 @@ async def list_files_endpoint(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> list[BatchFile]:
     return list_batch_files(batch_id, current_user["uid"])
+
+
+@router.get("/{file_id}", response_model=BatchFile)
+async def get_file_endpoint(
+    batch_id: str,
+    file_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> BatchFile:
+    record = get_batch_file(batch_id, file_id, current_user["uid"])
+    if record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File not found or access denied",
+        )
+    return record
+
+
+@router.post("/{file_id}/sync-index-status", response_model=BatchFile)
+async def sync_index_status_endpoint(
+    batch_id: str,
+    file_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> BatchFile:
+    record = sync_index_status(batch_id, file_id, current_user["uid"])
+    if record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File not found or access denied",
+        )
+    return record
 
 
 @router.delete("/{file_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -20,6 +20,16 @@ export async function listBatchFiles(batchId: string): Promise<BatchFile[]> {
   return res.data
 }
 
+export async function getBatchFile(batchId: string, fileId: string): Promise<BatchFile> {
+  const res = await api.get<BatchFile>(`/batches/${batchId}/files/${fileId}`)
+  return res.data
+}
+
+export async function syncBatchFileIndexStatus(batchId: string, fileId: string): Promise<BatchFile> {
+  const res = await api.post<BatchFile>(`/batches/${batchId}/files/${fileId}/sync-index-status`)
+  return res.data
+}
+
 export async function deleteBatchFile(batchId: string, fileId: string): Promise<void> {
   await api.delete(`/batches/${batchId}/files/${fileId}`)
 }

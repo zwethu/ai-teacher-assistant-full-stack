@@ -230,8 +230,13 @@ def save_quiz_artifact(
         "course_name": course_name,
         "doc_url": form_url,
         "doc_id": form_id,
+        "form_url": form_url,
+        "form_id": form_id,
         "week": week,
         "created_by": lecturer_email,
-        "metadata": {},
+        "metadata": {
+            "form_url": form_url,
+            "form_id": form_id,
+        },
     }
     return save_versioned_artifact(batch_id, artifact_data)

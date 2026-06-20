@@ -61,8 +61,23 @@ def build_question_request(question: dict[str, Any], index: int) -> dict[str, An
 
     question_type = question.get("question_type", "multiple_choice")
     question_text = question.get("question_text", "")
-    options = question.get("options") or []
+    raw_options = question.get("options") or []
+    options = [
+        str(opt.get("text", ""))
+        if isinstance(opt, dict)
+        else str(opt)
+        for opt in raw_options
+    ]
     correct_answer = str(question.get("correct_answer", ""))
+    if not correct_answer:
+        correct_answer = next(
+            (
+                str(opt.get("text", ""))
+                for opt in raw_options
+                if isinstance(opt, dict) and opt.get("is_correct")
+            ),
+            "",
+        )
     points = int(question.get("points", 1))
     explanation = question.get("explanation") or ""
 

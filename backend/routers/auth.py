@@ -31,6 +31,10 @@ def _frontend_base_url() -> str:
     return (os.getenv("FRONTEND_URL") or "http://localhost:5173").rstrip("/")
 
 
+def _google_connect_url() -> str:
+    return "/auth/google-scopes"
+
+
 def _build_flow() -> Flow:
     """Build a Google OAuth Flow (client config, redirect URI, scopes)."""
     return get_google_flow()
@@ -223,6 +227,7 @@ async def google_status(
             "scopes": [],
             "missing_scopes": GOOGLE_SCOPES,
             "message": "Not connected",
+            "connect_url": _google_connect_url(),
         }
         
     try:
@@ -243,6 +248,7 @@ async def google_status(
         "scopes": current_scopes,
         "missing_scopes": missing_scopes,
         "message": message,
+        "connect_url": _google_connect_url(),
     }
 
 

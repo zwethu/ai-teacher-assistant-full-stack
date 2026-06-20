@@ -38,6 +38,16 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/internal/agent/google")
 
+GOOGLE_CONNECTOR_DISABLED_DETAIL = {
+    "code": "GOOGLE_CONNECTOR_DISABLED",
+    "message": "Google Workspace connector is not enabled.",
+}
+GOOGLE_OAUTH_REQUIRED_DETAIL = {
+    "code": "GOOGLE_OAUTH_REQUIRED",
+    "message": "Google OAuth connection is required for Google Workspace actions.",
+    "connect_url": "/auth/google-scopes",
+}
+
 
 def _verify_secret(secret: str) -> None:
     expected = os.getenv("PNAI_AGENT_SHARED_SECRET")
@@ -85,7 +95,7 @@ def _validate_run_and_oauth(
     if not connectors.get("google_workspace"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="GOOGLE_CONNECTOR_DISABLED",
+            detail=GOOGLE_CONNECTOR_DISABLED_DETAIL,
         )
 
     # Check OAuth validity
@@ -94,7 +104,7 @@ def _validate_run_and_oauth(
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="GOOGLE_OAUTH_REQUIRED",
+            detail=GOOGLE_OAUTH_REQUIRED_DETAIL,
         ) from exc
 
 

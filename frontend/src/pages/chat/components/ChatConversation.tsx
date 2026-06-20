@@ -3,6 +3,7 @@ import type { KeyboardEvent } from 'react'
 import type { ChatMessage } from '../../../entity/Chat'
 import { Loader2, Send } from 'lucide-react'
 import { MessageRow, ThinkingIndicator } from './MessageRow'
+import { ConnectorToggles, type ConnectorsState } from './ConnectorToggles'
 
 type Props = {
   input: string
@@ -14,6 +15,8 @@ type Props = {
   onInputKeyDown: (e: KeyboardEvent<HTMLTextAreaElement>) => void
   onTextareaInput: () => void
   onSend: () => void
+  connectors: ConnectorsState
+  onConnectorsChange: (key: keyof ConnectorsState, value: boolean) => void
 }
 
 export function ChatInput({
@@ -26,6 +29,8 @@ export function ChatInput({
   onInputKeyDown,
   onTextareaInput,
   onSend,
+  connectors,
+  onConnectorsChange,
 }: Props) {
   return (
     <footer
@@ -34,6 +39,11 @@ export function ChatInput({
       }`}
     >
       <div className="max-w-3xl mx-auto">
+        <ConnectorToggles 
+          connectors={connectors}
+          onChange={onConnectorsChange}
+          disabled={disabled || sending}
+        />
         <div className="flex items-end gap-2 p-2 rounded-[28px] bg-white/55 border border-white/60 shadow-[0_8px_32px_rgba(15,23,42,0.08)]">
           <textarea
             ref={textareaRef}

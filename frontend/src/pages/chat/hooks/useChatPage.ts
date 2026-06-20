@@ -57,6 +57,11 @@ export function useChatPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const renameInputRef = useRef<HTMLInputElement>(null)
+  
+  const [connectors, setConnectors] = useState({
+    web_search: true,
+    google_workspace: false,
+  })
 
   useEffect(() => {
     if (!user) return
@@ -180,6 +185,7 @@ export function useChatPage() {
         selectedBatch.id,
         chat.chat_id,
         content,
+        connectors,
       )
       const pendingId = `pending-${result.run_id}`
       setCurrentRunId(result.run_id)
@@ -381,6 +387,8 @@ export function useChatPage() {
     commitRename,
     handleDeleteChat,
     showWelcome,
+    connectors,
+    setConnectors,
   }
 }
 

@@ -19,6 +19,7 @@ GOOGLE_SCOPES = [
 
     # Gmail: create drafts + send emails
     "https://www.googleapis.com/auth/gmail.compose",
+    "https://www.googleapis.com/auth/gmail.send",
 
     # Calendar: read events + create/update schedules
     "https://www.googleapis.com/auth/calendar.events",

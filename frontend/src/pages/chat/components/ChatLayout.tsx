@@ -23,6 +23,8 @@ type Props = Pick<
   | 'handleInputKeyDown'
   | 'handleTextareaInput'
   | 'showWelcome'
+  | 'connectors'
+  | 'setConnectors'
 >
 
 export function ChatLayout(props: Props) {
@@ -44,6 +46,8 @@ export function ChatLayout(props: Props) {
     handleInputKeyDown,
     handleTextareaInput,
     showWelcome,
+    connectors,
+    setConnectors,
   } = props
 
   return (
@@ -111,6 +115,8 @@ export function ChatLayout(props: Props) {
           onInputKeyDown={handleInputKeyDown}
           onTextareaInput={handleTextareaInput}
           onSend={() => void handleSend()}
+          connectors={connectors}
+          onConnectorsChange={(key, value) => setConnectors(prev => ({ ...prev, [key]: value }))}
         />
       </div>
     </div>

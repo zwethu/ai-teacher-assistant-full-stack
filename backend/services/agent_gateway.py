@@ -33,6 +33,7 @@ import uuid
 from typing import Any
 
 from fastapi import BackgroundTasks, HTTPException, status
+import os
 
 from entity.Batch import BatchModel
 from services.agent_engine_client import get_agent_engine_resource_name, stream_agent_response
@@ -60,7 +61,7 @@ async def start_chat_run(
     chat_id: str,
     lecturer_id: str,
     lecturer_email: str,
-    enable_web_search: bool = True,
+    connectors: dict,
     background_tasks: BackgroundTasks,
 ) -> dict[str, Any]:
     """Persist the user message, create a run, start the agent in the background.
@@ -83,6 +84,20 @@ async def start_chat_run(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Batch not found or access denied",
         )
+
+    # --- 1b. Preflight check for Google Workspace ---
+    google_oauth_status = "missing"
+    if connectors.get("google_workspace"):
+        from services.google_workspace.credentials import assert_google_oauth_valid, GoogleOAuthRequiredError, GoogleOAuthInvalidError
+        try:
+            assert_google_oauth_valid(lecturer_id)
+            google_oauth_status = "valid"
+        except (GoogleOAuthRequiredError, GoogleOAuthInvalidError) as exc:
+            google_oauth_status = "invalid"
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="GOOGLE_OAUTH_REQUIRED",
+            ) from exc
 
     agent_engine_resource_name = get_agent_engine_resource_name()
 
@@ -115,6 +130,7 @@ async def start_chat_run(
         rtdb_run_path=rtdb_run_path,
         message_preview=user_message,
         agent_engine_resource_name=agent_engine_resource_name,
+        connectors=connectors,
     )
 
     # --- 5. Build trusted session state for the agent ---
@@ -126,7 +142,8 @@ async def start_chat_run(
         batch=batch,
         lecturer_id=lecturer_id,
         lecturer_email=lecturer_email,
-        enable_web_search=enable_web_search,
+        connectors=connectors,
+        google_oauth_status=google_oauth_status,
     )
 
     # --- 6. Schedule background agent task ---
@@ -168,7 +185,8 @@ def _build_session_state(
     batch: BatchModel,
     lecturer_id: str,
     lecturer_email: str,
-    enable_web_search: bool,
+    connectors: dict,
+    google_oauth_status: str,
 ) -> dict[str, Any]:
     """Build the trusted session state payload sent to the agent.
 
@@ -192,7 +210,10 @@ def _build_session_state(
         "academic_year": batch.academic_year,
         "term": batch.term,
         # Feature flags
-        "enable_web_search": enable_web_search,
+        "enable_web_search": connectors.get("web_search", True),
+        "google_workspace_enabled": connectors.get("google_workspace", False),
+        "google_oauth_status": google_oauth_status,
+        "backend_internal_url": os.getenv("PNAI_BACKEND_INTERNAL_URL") or os.getenv("BACKEND_PUBLIC_URL", ""),
     }
 
 

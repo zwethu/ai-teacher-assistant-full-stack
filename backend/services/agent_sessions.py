@@ -60,7 +60,9 @@ def create_agent_run_record(
     rtdb_run_path: str,
     message_preview: str,
     agent_engine_resource_name: str,
+    connectors: dict | None = None,
 ) -> None:
+    connectors = connectors or {}
     run_ref = _run_ref(batch_id, chat_id, run_id)
     run_ref.set(
         {
@@ -73,6 +75,8 @@ def create_agent_run_record(
             "status": "running",
             "message_preview": message_preview[:200],
             "agent_engine_resource_name": agent_engine_resource_name,
+            "connectors": connectors,
+            "google_workspace_enabled": connectors.get("google_workspace", False),
             "created_at": SERVER_TIMESTAMP,
             "updated_at": SERVER_TIMESTAMP,
         }

@@ -29,6 +29,7 @@ class CreateChatBody(BaseModel):
 class SendMessageBody(BaseModel):
     content: str
     enable_web_search: bool = True
+    connectors: dict = {"web_search": True, "google_workspace": False}
 
 
 class UpdateTitleBody(BaseModel):
@@ -134,6 +135,6 @@ async def send_message_endpoint(
         chat_id=chat_id,
         lecturer_id=lecturer_id,
         lecturer_email=current_user.get("email", ""),
-        enable_web_search=body.enable_web_search,
+        connectors=body.connectors,
         background_tasks=background_tasks,
     )

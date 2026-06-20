@@ -40,6 +40,7 @@ export async function sendMessage(
   batchId: string,
   chatId: string,
   content: string,
+  connectors: Record<string, boolean> = {},
 ): Promise<{
   user_message: ChatMessage
   run_id: string
@@ -51,6 +52,6 @@ export async function sendMessage(
     run_id: string
     rtdb_run_path: string
     status: 'running' | 'done' | 'failed'
-  }>(`/batches/${batchId}/chats/${chatId}/messages`, { content })
+  }>(`/batches/${batchId}/chats/${chatId}/messages`, { content, connectors })
   return res.data
 }

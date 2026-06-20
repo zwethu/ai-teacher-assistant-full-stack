@@ -5,6 +5,8 @@ import os
 import secrets
 from urllib.parse import urlencode
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
 from firebase_admin import auth as firebase_auth_module
@@ -15,7 +17,7 @@ from google.cloud.firestore import SERVER_TIMESTAMP
 
 from utils.firebase_auth import CurrentUser, get_current_user, init_firebase
 from utils.firestore_client import get_firestore
-from utils.google_credentials import get_google_flow
+from utils.google_credentials import get_google_flow, GOOGLE_SCOPES
 
 logger = logging.getLogger(__name__)
 
@@ -182,6 +184,10 @@ async def google_scopes_callback(
             "email": email,
             "display_name": name,
             "google_refresh_token": refresh_token,
+            "google_scopes": GOOGLE_SCOPES,
+            "google_token_status": "valid",
+            "google_oauth_provider": "google",
+            "google_email": email,
         }
         if picture:
             user_payload["photo_url"] = picture
@@ -196,6 +202,48 @@ async def google_scopes_callback(
 
     success_url = f"{frontend}/auth/callback?{urlencode({'custom_token': custom_token})}"
     return RedirectResponse(url=success_url, status_code=status.HTTP_302_FOUND)
+
+
+@router.get("/google/status")
+async def google_status(
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    uid = current_user["uid"]
+    
+    from services.google_workspace.credentials import get_user_google_record, assert_google_oauth_valid, GoogleOAuthInvalidError, GoogleOAuthRequiredError
+    
+    record = get_user_google_record(uid)
+    has_token = bool(record.get("google_refresh_token"))
+    
+    if not has_token:
+        return {
+            "connected": False,
+            "valid": False,
+            "has_google_scopes": False,
+            "scopes": [],
+            "missing_scopes": GOOGLE_SCOPES,
+            "message": "Not connected",
+        }
+        
+    try:
+        assert_google_oauth_valid(uid)
+        is_valid = True
+        message = "Connected and valid"
+    except (GoogleOAuthRequiredError, GoogleOAuthInvalidError):
+        is_valid = False
+        message = "Token invalid or expired"
+        
+    current_scopes = record.get("google_scopes") or []
+    missing_scopes = [s for s in GOOGLE_SCOPES if s not in current_scopes]
+    
+    return {
+        "connected": True,
+        "valid": is_valid,
+        "has_google_scopes": len(missing_scopes) == 0 and is_valid,
+        "scopes": current_scopes,
+        "missing_scopes": missing_scopes,
+        "message": message,
+    }
 
 
 @router.get("/check-permissions")

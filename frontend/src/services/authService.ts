@@ -10,6 +10,20 @@ export async function checkGooglePermissions(): Promise<{ has_google_scopes: boo
   }
 }
 
+export interface GoogleAuthStatus {
+  connected: boolean
+  valid: boolean
+  has_google_scopes: boolean
+  scopes: string[]
+  missing_scopes: string[]
+  message: string
+}
+
+export async function checkGoogleAuthStatus(): Promise<GoogleAuthStatus> {
+  const { data } = await api.get<GoogleAuthStatus>('/auth/google/status')
+  return data
+}
+
 export function startGoogleOAuth(): void {
   const user = auth.currentUser
   if (!user) {

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { SubjectPack, Question, CatMood, SessionResult } from './types';
+import type { SubjectPack, Question, CatMood, SessionResult } from './types';
 import { SUBJECT_PACKS } from './questions';
 import CatVisualizer from './components/CatVisualizer';
 import MiniHUD from './components/MiniHUD';
@@ -36,9 +36,8 @@ export default function CatGameApp() {
   };
 
   const handlePetCat = () => {
-    const addedTrust = 4;
     setTrustMeter((prev) => {
-      const next = Math.min(prev + addedTrust, 100);
+      const next = Math.min(prev + 4, 100);
       if (next >= 100 && prev < 100) { setCatAnimationAndAutoReset('purring', 4000); setCatHappiness((h) => Math.min(h + 10, 100)); }
       else if (prev < 100) { setCatAnimationAndAutoReset('purring', 1200); setCatHappiness((h) => Math.min(h + 0.5, 100)); }
       return next;
@@ -57,8 +56,8 @@ export default function CatGameApp() {
     setUserAnswers((prev) => ({ ...prev, [currentQ.id]: { isCorrect } }));
     if (isCorrect) {
       setSessionCorrectCount((c) => c + 1);
-      const finalCoinGains = trustMeter >= 100 ? 30 : 15;
-      setCoins((c) => c + finalCoinGains); setFish((f) => f + 1);
+      setCoins((c) => c + (trustMeter >= 100 ? 30 : 15));
+      setFish((f) => f + 1);
       setCatHappiness((h) => Math.min(h + 15, 100));
       setCatAnimationAndAutoReset('happy', 3000);
     } else {
@@ -97,7 +96,6 @@ export default function CatGameApp() {
       <div className="absolute top-0 right-0 w-2/5 h-2/5 bg-gradient-to-bl from-amber-200/10 to-transparent pointer-events-none rounded-bl-full rotate-12 blur-3xl" />
       <div className="absolute bottom-10 left-10 w-64 h-64 bg-pink-300/5 pointer-events-none rounded-full blur-3xl" />
 
-      {/* MENU */}
       {gameState === 'menu' && (
         <div className="flex-1 flex flex-col items-center justify-center max-w-4xl mx-auto w-full py-8 text-center relative z-10">
           <div className="mb-6 flex flex-col items-center">
@@ -147,7 +145,6 @@ export default function CatGameApp() {
         </div>
       )}
 
-      {/* PLAYING */}
       {gameState === 'playing' && currentQuestion && (
         <div className="flex-1 flex flex-col max-w-4xl mx-auto w-full gap-4 relative z-10">
           <MiniHUD
@@ -184,7 +181,6 @@ export default function CatGameApp() {
         </div>
       )}
 
-      {/* RESULTS */}
       {gameState === 'results' && (
         <div className="flex-1 max-w-3xl mx-auto w-full py-4 z-10 relative">
           <ResultScreen

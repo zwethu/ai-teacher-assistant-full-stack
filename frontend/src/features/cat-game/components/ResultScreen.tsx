@@ -1,5 +1,5 @@
-import { SessionResult, Question } from '../types';
-import { Award, RefreshCw, Sparkles, ChevronRight, History, Calendar, CheckCircle2, XCircle } from 'lucide-react';
+import type { SessionResult, Question } from '../types';
+import { RefreshCw, Sparkles, History, Calendar, CheckCircle2, XCircle } from 'lucide-react';
 import { catAudio } from '../audio';
 import { useState } from 'react';
 
@@ -21,7 +21,7 @@ export default function ResultScreen({ result, questions, userAnswers, sessionHi
     if (pct >= 90) return { tagline: '👑 Best Cat Caretaker!', color: 'text-amber-600 bg-amber-50 border-amber-200', message: 'Magnificent! The cat considers you their ultimate best friend.', character: '😸' };
     if (pct >= 70) return { tagline: '🌸 Good Study Friend!', color: 'text-rose-600 bg-rose-50 border-rose-200', message: 'Wonderful work! The kitty is purring with joy.', character: '😺' };
     if (pct >= 50) return { tagline: '🐱 Cozy Assistant!', color: 'text-indigo-600 bg-indigo-50 border-indigo-200', message: 'A nice cozy session! The cat looks forward to more playtime.', character: '😼' };
-    return { tagline: '🐾 Let\'s Practice More!', color: 'text-slate-600 bg-slate-50 border-slate-200', message: 'A valiant effort! Pet the cat more and try again.', character: '😿' };
+    return { tagline: "🐾 Let's Practice More!", color: 'text-slate-600 bg-slate-50 border-slate-200', message: 'A valiant effort! Pet the cat more and try again.', character: '😿' };
   };
 
   const vibe = getAccuracyVibe(result.percentage);

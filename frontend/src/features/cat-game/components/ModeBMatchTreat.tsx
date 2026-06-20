@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Question } from '../types';
+import type { Question } from '../types';
 import { catAudio } from '../audio';
 import { Sparkles, Trophy } from 'lucide-react';
 

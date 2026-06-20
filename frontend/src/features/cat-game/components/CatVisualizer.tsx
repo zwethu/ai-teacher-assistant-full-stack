@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { CatMood } from '../types';
+import type { CatMood } from '../types';
 import { catAudio } from '../audio';
 
 interface CatVisualizerProps {

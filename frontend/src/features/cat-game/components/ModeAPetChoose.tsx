@@ -1,4 +1,4 @@
-import { MCQOption, Question } from '../types';
+import type { Question } from '../types';
 import { catAudio } from '../audio';
 import { Sparkles, AlertCircle } from 'lucide-react';
 import { useState } from 'react';

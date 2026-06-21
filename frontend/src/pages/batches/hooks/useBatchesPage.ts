@@ -5,6 +5,13 @@ import type { BatchFile, IndexStatus } from '../../../entity/File'
 import { getErrorMessage } from '../../../utils/errors'
 import { useAuth } from '../../../hooks/useAuth'
 import {
+  deleteArtifact,
+  getArtifactSummary,
+  listArtifacts,
+  type Artifact,
+  type ArtifactSummary,
+} from '../../../services/artifactService'
+import {
   addStudentToBatch,
   createBatch,
   deleteBatch,
@@ -61,6 +68,9 @@ export function useBatchesPage() {
   const [fileUploading, setFileUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [artifacts, setArtifacts] = useState<Artifact[]>([])
+  const [artifactSummary, setArtifactSummary] = useState<ArtifactSummary | null>(null)
+  const [artifactsLoading, setArtifactsLoading] = useState(false)
 
   const [searchQuery, setSearchQuery] = useState('')
   const [toast, setToast] = useState<ToastMessage | null>(null)
@@ -142,6 +152,24 @@ export function useBatchesPage() {
     }
   }, [selectedBatch]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const refreshArtifacts = useCallback(async () => {
+    if (!selectedBatch) return
+    setArtifactsLoading(true)
+    try {
+      const [items, summary] = await Promise.all([
+        listArtifacts(selectedBatch.id),
+        getArtifactSummary(selectedBatch.id),
+      ])
+      setArtifacts(items)
+      setArtifactSummary(summary)
+    } catch (err) {
+      console.error(err)
+      showToast('error', getErrorMessage(err, 'Could not load artifacts.'))
+    } finally {
+      setArtifactsLoading(false)
+    }
+  }, [selectedBatch]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const syncStuckFiles = useCallback(async () => {
     if (!selectedBatch) return
     const now = Date.now()
@@ -182,13 +210,16 @@ export function useBatchesPage() {
     if (!selectedBatch) {
       setStudents([])
       setFiles([])
+      setArtifacts([])
+      setArtifactSummary(null)
       if (pollingRef.current) clearInterval(pollingRef.current)
       return
     }
     setDetailTab('students')
     refreshStudents()
     refreshFiles()
-  }, [selectedBatch, refreshStudents, refreshFiles])
+    refreshArtifacts()
+  }, [selectedBatch, refreshStudents, refreshFiles, refreshArtifacts])
 
   useEffect(() => {
     if (pollingRef.current) clearInterval(pollingRef.current)
@@ -413,6 +444,36 @@ export function useBatchesPage() {
     }
   }
 
+  async function handleDeleteArtifact(artifact: Artifact) {
+    if (!selectedBatch) return
+    const metadata = artifact.metadata || {}
+    const label =
+      artifact.drive_file_name ||
+      `v${String(artifact.version || 1).padStart(2, '0')} - ${
+        artifact.week ? `Week ${String(artifact.week).padStart(2, '0')} - ` : ''
+      }${artifact.title}`
+    const labNote = artifact.type === 'lab' ? '\n\nThis will delete both Lecturer Guide and Student Instructions.' : ''
+    if (
+      !window.confirm(
+        `Delete ${label}?\n\nThis removes the artifact record from PNAI and permanently deletes the Google Drive file. This cannot be undone.${labNote}`,
+      )
+    ) {
+      return
+    }
+
+    try {
+      await deleteArtifact(selectedBatch.id, artifact.id, true)
+      await refreshArtifacts()
+      showToast(
+        'success',
+        metadata.student_doc_id ? 'Artifact and linked Drive files deleted.' : 'Artifact deleted.',
+      )
+    } catch (err) {
+      console.error(err)
+      showToast('error', getErrorMessage(err, 'Could not delete artifact. Reconnect Google Workspace if Drive deletion failed.'))
+    }
+  }
+
   return {
     toast,
     setToast,
@@ -424,6 +485,9 @@ export function useBatchesPage() {
     studentsLoading,
     files,
     filesLoading,
+    artifacts,
+    artifactSummary,
+    artifactsLoading,
     fileUploading,
     fileInputRef,
     isCreateOpen,
@@ -465,6 +529,8 @@ export function useBatchesPage() {
     handleFileUpload,
     handleDeleteFile,
     handleRefreshFiles,
+    handleDeleteArtifact,
+    refreshArtifacts,
   }
 }
 

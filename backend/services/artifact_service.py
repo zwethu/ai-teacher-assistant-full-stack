@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from utils.firestore_client import get_firestore
+from services.google_workspace.drive_folders import delete_drive_file
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,26 @@ def _doc_to_dict(snapshot) -> dict[str, Any]:
     data = snapshot.to_dict() or {}
     data["id"] = snapshot.id
     return data
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _artifacts_col(batch_id: str):
+    return _batch_ref(batch_id).collection(ARTIFACTS_SUBCOLLECTION)
+
+
+def _batch_owned_by(batch_id: str, lecturer_id: str) -> bool:
+    snap = _batch_ref(batch_id).get()
+    return snap.exists and (snap.to_dict() or {}).get("lecturer_id") == lecturer_id
+
+
+def _same_scope(data: dict[str, Any], artifact_type: str, week: int | None) -> bool:
+    return (
+        (data.get("type") or data.get("artifact_type")) == artifact_type
+        and data.get("week") == week
+    )
 
 
 def save_artifact(batch_id: str, artifact_data: dict[str, Any]) -> str:
@@ -45,6 +66,110 @@ def save_artifact(batch_id: str, artifact_data: dict[str, Any]) -> str:
     )
     doc_ref.set(data)
     return artifact_id
+
+
+def reserve_artifact(
+    batch_id: str,
+    artifact_type: str,
+    week: int | None,
+    title: str,
+    created_by: str,
+    batch_name: str = "",
+    course_name: str = "",
+) -> dict[str, Any]:
+    """Reserve the next version before creating the Google file."""
+    col = _artifacts_col(batch_id)
+    existing = [
+        _doc_to_dict(doc)
+        for doc in col.stream()
+        if _same_scope(doc.to_dict() or {}, artifact_type, week)
+        and (doc.to_dict() or {}).get("status") == "confirmed"
+        and (doc.to_dict() or {}).get("is_current", True)
+    ]
+    current = max(existing, key=lambda item: int(item.get("version") or 1), default=None)
+    next_version = int((current or {}).get("version") or 0) + 1
+    artifact_id = str(uuid.uuid4())
+    data = {
+        "id": artifact_id,
+        "type": artifact_type,
+        "artifact_type": artifact_type,
+        "title": title,
+        "batch_id": batch_id,
+        "batch_name": batch_name,
+        "course_name": course_name,
+        "week": week,
+        "version": next_version,
+        "status": "creating",
+        "is_current": False,
+        "created_by": created_by,
+        "created_at": _now(),
+        "updated_at": _now(),
+        "supersedes_artifact_id": current["id"] if current else "",
+        "metadata": {},
+    }
+    col.document(artifact_id).set(data)
+    return {
+        "artifact_id": artifact_id,
+        "version": next_version,
+        "supersedes_artifact_id": data["supersedes_artifact_id"],
+    }
+
+
+def complete_artifact(
+    batch_id: str,
+    artifact_id: str,
+    artifact_updates: dict[str, Any],
+    make_current: bool = True,
+) -> str:
+    """Complete a previously reserved artifact."""
+    col = _artifacts_col(batch_id)
+    artifact_ref = col.document(artifact_id)
+    snap = artifact_ref.get()
+    if not snap.exists:
+        raise RuntimeError(f"Reserved artifact {artifact_id} not found")
+    reserved = snap.to_dict() or {}
+    artifact_type = reserved.get("type") or reserved.get("artifact_type")
+    week = reserved.get("week")
+
+    if make_current:
+        for doc in col.stream():
+            data = doc.to_dict() or {}
+            if (
+                doc.id != artifact_id
+                and _same_scope(data, artifact_type, week)
+                and data.get("status") == "confirmed"
+                and data.get("is_current", True)
+            ):
+                doc.reference.update(
+                    {
+                        "status": "superseded",
+                        "is_current": False,
+                        "superseded_by_artifact_id": artifact_id,
+                        "updated_at": _now(),
+                    }
+                )
+
+    updates = dict(artifact_updates)
+    updates.update(
+        {
+            "status": "confirmed" if make_current else "draft",
+            "is_current": bool(make_current),
+            "updated_at": _now(),
+        }
+    )
+    artifact_ref.update(updates)
+    return artifact_id
+
+
+def fail_reserved_artifact(batch_id: str, artifact_id: str, error: str) -> None:
+    _artifacts_col(batch_id).document(artifact_id).update(
+        {
+            "status": "failed",
+            "is_current": False,
+            "error": str(error)[:1000],
+            "updated_at": _now(),
+        }
+    )
 
 
 def get_current_artifact(
@@ -240,3 +365,186 @@ def save_quiz_artifact(
         },
     }
     return save_versioned_artifact(batch_id, artifact_data)
+
+
+def list_artifacts(
+    batch_id: str,
+    lecturer_id: str,
+    filters: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """List artifacts for a lecturer-owned batch."""
+    if not _batch_owned_by(batch_id, lecturer_id):
+        return []
+    filters = filters or {}
+    artifact_type = filters.get("type")
+    week = filters.get("week")
+    current = filters.get("current")
+    status_filter = filters.get("status")
+
+    items: list[dict[str, Any]] = []
+    for doc in _artifacts_col(batch_id).stream():
+        data = _doc_to_dict(doc)
+        if artifact_type and (data.get("type") or data.get("artifact_type")) != artifact_type:
+            continue
+        if week is not None and data.get("week") != week:
+            continue
+        if current is not None and bool(data.get("is_current")) is not bool(current):
+            continue
+        if status_filter and data.get("status") != status_filter:
+            continue
+        items.append(data)
+
+    return sorted(
+        items,
+        key=lambda item: (
+            int(item.get("week") or 0),
+            str(item.get("type") or item.get("artifact_type") or ""),
+            int(item.get("version") or 0),
+            str(item.get("created_at") or ""),
+        ),
+        reverse=True,
+    )
+
+
+def get_artifact(batch_id: str, artifact_id: str, lecturer_id: str) -> dict[str, Any] | None:
+    if not _batch_owned_by(batch_id, lecturer_id):
+        return None
+    snap = _artifacts_col(batch_id).document(artifact_id).get()
+    if not snap.exists:
+        return None
+    return _doc_to_dict(snap)
+
+
+def artifact_summary(batch_id: str, lecturer_id: str) -> dict[str, Any] | None:
+    batch_snap = _batch_ref(batch_id).get()
+    if not batch_snap.exists:
+        return None
+    batch = batch_snap.to_dict() or {}
+    if batch.get("lecturer_id") != lecturer_id:
+        return None
+
+    counts: dict[str, dict[str, int]] = {}
+    by_week_map: dict[int, dict[str, Any]] = {}
+    for item in list_artifacts(batch_id, lecturer_id):
+        item_type = str(item.get("type") or item.get("artifact_type") or "other")
+        bucket = counts.setdefault(item_type, {"current": 0, "total": 0})
+        bucket["total"] += 1
+        if item.get("is_current") and item.get("status") == "confirmed":
+            bucket["current"] += 1
+
+        week = item.get("week")
+        if week is not None:
+            row = by_week_map.setdefault(int(week), {"week": int(week), "artifacts": []})
+            row["artifacts"].append(item)
+
+    return {
+        "drive_root_folder_id": batch.get("drive_root_folder_id", ""),
+        "drive_root_folder_url": batch.get("drive_root_folder_url", ""),
+        "counts": counts,
+        "by_week": [by_week_map[key] for key in sorted(by_week_map)],
+    }
+
+
+def _drive_file_ids_for_artifact(artifact: dict[str, Any]) -> list[str]:
+    ids: list[str] = []
+    for key in ("doc_id", "form_id"):
+        value = str(artifact.get(key) or "").strip()
+        if value and value not in ids:
+            ids.append(value)
+    metadata = artifact.get("metadata") or {}
+    for key in ("student_doc_id", "form_id"):
+        value = str(metadata.get(key) or "").strip()
+        if value and value not in ids:
+            ids.append(value)
+    for value in metadata.get("extra_file_ids") or []:
+        file_id = str(value or "").strip()
+        if file_id and file_id not in ids:
+            ids.append(file_id)
+    return ids
+
+
+def _promote_latest_remaining(
+    batch_id: str,
+    artifact_type: str,
+    week: int | None,
+) -> str | None:
+    remaining = [
+        _doc_to_dict(doc)
+        for doc in _artifacts_col(batch_id).stream()
+        if _same_scope(doc.to_dict() or {}, artifact_type, week)
+        and (doc.to_dict() or {}).get("status") in {"confirmed", "superseded"}
+    ]
+    if not remaining:
+        return None
+    latest = max(
+        remaining,
+        key=lambda item: (int(item.get("version") or 0), str(item.get("created_at") or "")),
+    )
+    _artifacts_col(batch_id).document(latest["id"]).update(
+        {
+            "status": "confirmed",
+            "is_current": True,
+            "updated_at": _now(),
+        }
+    )
+    return str(latest["id"])
+
+
+def delete_artifact(
+    batch_id: str,
+    artifact_id: str,
+    lecturer_id: str,
+    delete_google: bool = True,
+) -> dict[str, Any] | None:
+    """Delete one artifact record and optionally its Google Drive file(s)."""
+    if not _batch_owned_by(batch_id, lecturer_id):
+        return None
+
+    col = _artifacts_col(batch_id)
+    artifact_ref = col.document(artifact_id)
+    snap = artifact_ref.get()
+    if not snap.exists:
+        return None
+
+    artifact = _doc_to_dict(snap)
+    file_ids = _drive_file_ids_for_artifact(artifact)
+    deleted_ids: list[str] = []
+    already_missing_ids: list[str] = []
+    errors: list[str] = []
+    if delete_google:
+        for file_id in file_ids:
+            try:
+                deleted = delete_drive_file(uid=lecturer_id, file_id=file_id)
+                (deleted_ids if deleted else already_missing_ids).append(file_id)
+            except Exception as exc:
+                errors.append(f"{file_id}: {exc}")
+    if errors:
+        raise RuntimeError("; ".join(errors))
+
+    deletion_id = str(uuid.uuid4())
+    _batch_ref(batch_id).collection("artifact_deletions").document(deletion_id).set(
+        {
+            "artifact_id": artifact_id,
+            "deleted_artifact_snapshot": artifact,
+            "deleted_drive_file_ids": deleted_ids,
+            "already_missing_drive_file_ids": already_missing_ids,
+            "delete_google": delete_google,
+            "deleted_by": lecturer_id,
+            "deleted_at": _now(),
+        }
+    )
+
+    was_current = bool(artifact.get("is_current"))
+    artifact_type = str(artifact.get("type") or artifact.get("artifact_type") or "")
+    week = artifact.get("week")
+    artifact_ref.delete()
+    promoted_id = _promote_latest_remaining(batch_id, artifact_type, week) if was_current else None
+
+    return {
+        "artifact_id": artifact_id,
+        "deleted_drive_file_ids": deleted_ids,
+        "already_missing_drive_file_ids": already_missing_ids,
+        "delete_google": delete_google,
+        "promoted_artifact_id": promoted_id,
+        "deletion_id": deletion_id,
+    }

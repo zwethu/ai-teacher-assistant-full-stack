@@ -14,9 +14,13 @@ from fastapi import APIRouter, Header, HTTPException, status, Response
 from pydantic import BaseModel
 
 from services.artifact_service import (
-    save_lab_artifact,
-    save_lesson_plan_artifact,
-    save_quiz_artifact,
+    complete_artifact,
+    fail_reserved_artifact,
+    reserve_artifact,
+)
+from services.google_workspace.drive_folders import (
+    build_artifact_file_name,
+    ensure_batch_artifact_folders,
 )
 from services.google_workspace.calendar_service import create_calendar_event_for_user
 from services.google_workspace.credentials import assert_google_oauth_valid
@@ -168,26 +172,59 @@ async def create_lesson_plan(
     ctx = req.context
     _validate_run_and_oauth(ctx.batch_id, ctx.chat_id, ctx.run_id, ctx.lecturer_id)
 
-    result = create_lesson_plan_doc_for_user(
-        uid=ctx.lecturer_id,
-        lesson_plan_payload=req.lesson_plan,
-        lecturer_email=ctx.lecturer_email,
-        existing_doc_id=req.existing_doc_id,
-    )
-
     week = req.lesson_plan.get("week", 1)
-    artifact_id = save_lesson_plan_artifact(
+    title = req.lesson_plan.get("title", "Lesson Plan")
+    reservation = reserve_artifact(
         batch_id=ctx.batch_id,
+        artifact_type="lesson_plan",
         week=week,
-        title=result["title"],
-        doc_url=result["doc_url"],
-        doc_id=result["doc_id"],
-        lecturer_email=ctx.lecturer_email,
+        title=title,
+        created_by=ctx.lecturer_id,
         batch_name=ctx.batch_name,
         course_name=ctx.course_name,
     )
+    artifact_id = reservation["artifact_id"]
+    drive_file_name = build_artifact_file_name(
+        version=reservation["version"],
+        week=week,
+        artifact_type="lesson_plan",
+        title=title,
+    )
 
-    return {**result, "artifact_id": artifact_id}
+    try:
+        folders = ensure_batch_artifact_folders(
+            uid=ctx.lecturer_id,
+            batch_id=ctx.batch_id,
+            batch_name=ctx.batch_name,
+            course_name=ctx.course_name,
+        )
+        folder = folders["drive_folders"]["lesson_plan"]
+        result = create_lesson_plan_doc_for_user(
+            uid=ctx.lecturer_id,
+            lesson_plan_payload=req.lesson_plan,
+            lecturer_email=ctx.lecturer_email,
+            existing_doc_id=req.existing_doc_id,
+            target_folder_id=folder["id"],
+            drive_file_name=drive_file_name,
+        )
+        complete_artifact(
+            batch_id=ctx.batch_id,
+            artifact_id=artifact_id,
+            artifact_updates={
+                "title": result["title"],
+                "doc_url": result["doc_url"],
+                "doc_id": result["doc_id"],
+                "drive_file_name": result.get("drive_file_name", drive_file_name),
+                "drive_folder_id": folder["id"],
+                "drive_folder_url": folder["url"],
+                "metadata": {},
+            },
+        )
+    except Exception as exc:
+        fail_reserved_artifact(ctx.batch_id, artifact_id, str(exc))
+        raise
+
+    return {**result, "artifact_id": artifact_id, "version": reservation["version"]}
 
 
 @router.post("/docs/lab")
@@ -199,28 +236,70 @@ async def create_lab(
     ctx = req.context
     _validate_run_and_oauth(ctx.batch_id, ctx.chat_id, ctx.run_id, ctx.lecturer_id)
 
-    result = create_lab_docs_for_user(
-        uid=ctx.lecturer_id,
-        lab_payload=req.lab,
-        lecturer_email=ctx.lecturer_email,
-    )
-
     week = req.lab.get("week", 1)
     title = req.lab.get("title", "Lab")
-    artifact_id = save_lab_artifact(
+    reservation = reserve_artifact(
         batch_id=ctx.batch_id,
+        artifact_type="lab",
         week=week,
         title=title,
-        doc_url=result["lecturer_doc_url"],
-        doc_id=result["lecturer_doc_id"],
-        student_doc_url=result["student_doc_url"],
-        student_doc_id=result["student_doc_id"],
-        lecturer_email=ctx.lecturer_email,
+        created_by=ctx.lecturer_id,
         batch_name=ctx.batch_name,
         course_name=ctx.course_name,
     )
+    artifact_id = reservation["artifact_id"]
+    lecturer_name = build_artifact_file_name(
+        version=reservation["version"],
+        week=week,
+        artifact_type="lab",
+        title=title,
+        suffix="Lecturer Guide",
+    )
+    student_name = build_artifact_file_name(
+        version=reservation["version"],
+        week=week,
+        artifact_type="lab",
+        title=title,
+        suffix="Student Instructions",
+    )
 
-    return {**result, "artifact_id": artifact_id}
+    try:
+        folders = ensure_batch_artifact_folders(
+            uid=ctx.lecturer_id,
+            batch_id=ctx.batch_id,
+            batch_name=ctx.batch_name,
+            course_name=ctx.course_name,
+        )
+        folder = folders["drive_folders"]["lab"]
+        result = create_lab_docs_for_user(
+            uid=ctx.lecturer_id,
+            lab_payload=req.lab,
+            lecturer_email=ctx.lecturer_email,
+            target_folder_id=folder["id"],
+            lecturer_drive_file_name=lecturer_name,
+            student_drive_file_name=student_name,
+        )
+        complete_artifact(
+            batch_id=ctx.batch_id,
+            artifact_id=artifact_id,
+            artifact_updates={
+                "doc_url": result["lecturer_doc_url"],
+                "doc_id": result["lecturer_doc_id"],
+                "drive_file_name": result.get("lecturer_drive_file_name", lecturer_name),
+                "drive_folder_id": folder["id"],
+                "drive_folder_url": folder["url"],
+                "metadata": {
+                    "student_doc_url": result["student_doc_url"],
+                    "student_doc_id": result["student_doc_id"],
+                    "student_drive_file_name": result.get("student_drive_file_name", student_name),
+                },
+            },
+        )
+    except Exception as exc:
+        fail_reserved_artifact(ctx.batch_id, artifact_id, str(exc))
+        raise
+
+    return {**result, "artifact_id": artifact_id, "version": reservation["version"]}
 
 
 @router.post("/docs/read-content")
@@ -267,26 +346,64 @@ async def create_quiz(
     ctx = req.context
     _validate_run_and_oauth(ctx.batch_id, ctx.chat_id, ctx.run_id, ctx.lecturer_id)
 
-    result = create_quiz_form_for_user(
-        uid=ctx.lecturer_id,
-        quiz_payload=req.quiz,
-        lecturer_email=ctx.lecturer_email,
-    )
-
     # Forms don't strictly have a week, but the agent payload might
     week = req.quiz.get("week", 1)
-    artifact_id = save_quiz_artifact(
+    title = req.quiz.get("title", "Quiz")
+    reservation = reserve_artifact(
         batch_id=ctx.batch_id,
+        artifact_type="quiz",
         week=week,
-        title=result["title"],
-        form_url=result["form_url"],
-        form_id=result["form_id"],
-        lecturer_email=ctx.lecturer_email,
+        title=title,
+        created_by=ctx.lecturer_id,
         batch_name=ctx.batch_name,
         course_name=ctx.course_name,
     )
+    artifact_id = reservation["artifact_id"]
+    drive_file_name = build_artifact_file_name(
+        version=reservation["version"],
+        week=week,
+        artifact_type="quiz",
+        title=title,
+    )
 
-    return {**result, "artifact_id": artifact_id}
+    try:
+        folders = ensure_batch_artifact_folders(
+            uid=ctx.lecturer_id,
+            batch_id=ctx.batch_id,
+            batch_name=ctx.batch_name,
+            course_name=ctx.course_name,
+        )
+        folder = folders["drive_folders"]["assessment"]
+        result = create_quiz_form_for_user(
+            uid=ctx.lecturer_id,
+            quiz_payload=req.quiz,
+            lecturer_email=ctx.lecturer_email,
+            target_folder_id=folder["id"],
+            drive_file_name=drive_file_name,
+        )
+        complete_artifact(
+            batch_id=ctx.batch_id,
+            artifact_id=artifact_id,
+            artifact_updates={
+                "title": result["title"],
+                "doc_url": result["form_url"],
+                "doc_id": result["form_id"],
+                "form_url": result["form_url"],
+                "form_id": result["form_id"],
+                "drive_file_name": result.get("drive_file_name", drive_file_name),
+                "drive_folder_id": folder["id"],
+                "drive_folder_url": folder["url"],
+                "metadata": {
+                    "form_url": result["form_url"],
+                    "form_id": result["form_id"],
+                },
+            },
+        )
+    except Exception as exc:
+        fail_reserved_artifact(ctx.batch_id, artifact_id, str(exc))
+        raise
+
+    return {**result, "artifact_id": artifact_id, "version": reservation["version"]}
 
 
 @router.post("/gmail/send")

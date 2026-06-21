@@ -19,6 +19,9 @@ export default function Batches() {
         studentsLoading={state.studentsLoading}
         files={state.files}
         filesLoading={state.filesLoading}
+        artifacts={state.artifacts}
+        artifactSummary={state.artifactSummary}
+        artifactsLoading={state.artifactsLoading}
         fileUploading={state.fileUploading}
         fileInputRef={state.fileInputRef}
         studentForm={state.studentForm}
@@ -32,6 +35,8 @@ export default function Batches() {
         handleFileUpload={state.handleFileUpload}
         handleDeleteFile={state.handleDeleteFile}
         handleRefreshFiles={state.handleRefreshFiles}
+        handleDeleteArtifact={state.handleDeleteArtifact}
+        refreshArtifacts={state.refreshArtifacts}
       />
     )
   }

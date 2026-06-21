@@ -28,6 +28,8 @@ type ChatLocationState = {
   initialMessage?: string
 }
 
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+
 function connectorErrorMessage(err: unknown): string {
   if (!axios.isAxiosError(err)) {
     return 'Sorry, something went wrong. Please try again.'
@@ -41,7 +43,11 @@ function connectorErrorMessage(err: unknown): string {
   if (code === 'GOOGLE_OAUTH_REQUIRED') {
     const base =
       'Google Workspace is not connected or needs re-consent. Please connect Google Workspace, then try again.'
-    return connectUrl ? `${base}\n\n[Connect Google Workspace](${connectUrl})` : base
+    if (!connectUrl) return base
+    const absoluteUrl = connectUrl.startsWith('http')
+      ? connectUrl
+      : `${API_URL.replace(/\/$/, '')}${connectUrl.startsWith('/') ? connectUrl : `/${connectUrl}`}`
+    return `${base}\n\n[Connect Google Workspace](${absoluteUrl})`
   }
 
   if (code === 'GOOGLE_CONNECTOR_DISABLED') {

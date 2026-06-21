@@ -1,6 +1,6 @@
 import type { Batch } from '../../entity/Batch'
 
-export type DetailTab = 'students' | 'materials'
+export type DetailTab = 'students' | 'materials' | 'artifacts'
 export type CreateStep = 'details' | 'method' | 'manual' | 'csv'
 export type StudentRow = { name: string; email: string }
 export type BatchWithCount = Batch

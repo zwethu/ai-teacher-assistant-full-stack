@@ -36,6 +36,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from routers.agent import router as agent_router
+from routers.artifacts import router as artifacts_router
 from routers.auth import router as auth_router
 from routers.batches import router as batches_router
 from routers.chats import router as chats_router
@@ -61,6 +62,7 @@ app.add_middleware(
 
 app.include_router(auth_router, prefix="", tags=["auth"])
 app.include_router(batches_router)
+app.include_router(artifacts_router)
 app.include_router(files_router)
 app.include_router(chats_router)
 app.include_router(email_router, prefix="", tags=["email"])

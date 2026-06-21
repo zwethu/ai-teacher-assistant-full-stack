@@ -13,6 +13,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 from services.google_workspace.credentials import build_user_credentials
+from services.google_workspace.drive_folders import move_file_to_folder, rename_file
 from services.google_workspace.docs_rendering.builder import DocBuilder
 from services.google_workspace.docs_rendering.lab_builder import LabDocBuilder
 from services.google_workspace.docs_rendering.renderer import render_phases
@@ -130,12 +131,15 @@ def create_lesson_plan_doc_for_user(
     lesson_plan_payload: dict[str, Any],
     lecturer_email: str,
     existing_doc_id: str | None = None,
+    target_folder_id: str | None = None,
+    drive_file_name: str | None = None,
 ) -> dict[str, str]:
     """Create a styled lesson plan Google Doc for the user.
 
     Returns ``{"doc_url": "...", "doc_id": "...", "title": "..."}``.
     """
     plan = LessonPlanFull.model_validate(lesson_plan_payload)
+    document_title = drive_file_name or plan.title
     blocks = DocBuilder(plan).build()
 
     docs = _build_docs_service(uid)
@@ -147,11 +151,11 @@ def create_lesson_plan_doc_for_user(
             _clear_doc(docs, doc_id)
             drive.files().update(
                 fileId=doc_id,
-                body={"name": plan.title},
+                body={"name": document_title},
             ).execute()
         else:
             document = docs.documents().create(
-                body={"title": plan.title}
+                body={"title": document_title}
             ).execute()
             doc_id = document["documentId"]
 
@@ -177,6 +181,10 @@ def create_lesson_plan_doc_for_user(
             _apply_blocks(docs, doc_id, style_requests)
 
         _share_doc_with_teacher(drive, doc_id, lecturer_email)
+        if drive_file_name:
+            rename_file(uid, doc_id, drive_file_name)
+        if target_folder_id:
+            move_file_to_folder(uid, doc_id, target_folder_id)
     except HttpError as exc:
         logger.exception("Google Docs API error for uid=%s week=%s", uid, plan.week)
         raise RuntimeError(
@@ -185,13 +193,22 @@ def create_lesson_plan_doc_for_user(
 
     doc_url = f"https://docs.google.com/document/d/{doc_id}/edit"
     logger.info("created lesson plan doc uid=%s week=%s url=%s", uid, plan.week, doc_url)
-    return {"doc_url": doc_url, "doc_id": doc_id, "title": plan.title}
+    return {
+        "doc_url": doc_url,
+        "doc_id": doc_id,
+        "title": plan.title,
+        "drive_file_name": drive_file_name or document_title,
+        "drive_folder_id": target_folder_id or "",
+    }
 
 
 def create_lab_docs_for_user(
     uid: str,
     lab_payload: dict[str, Any],
     lecturer_email: str,
+    target_folder_id: str | None = None,
+    lecturer_drive_file_name: str | None = None,
+    student_drive_file_name: str | None = None,
 ) -> dict[str, str]:
     """Create lecturer guide + student instructions Google Docs.
 
@@ -205,9 +222,9 @@ def create_lab_docs_for_user(
 
     for mode in ("lecturer", "student"):
         if mode == "lecturer":
-            doc_title = f"Week {lab.week} Lab — {lab.title} (Lecturer Guide)"
+            doc_title = lecturer_drive_file_name or f"Week {lab.week} Lab — {lab.title} (Lecturer Guide)"
         else:
-            doc_title = f"Week {lab.week} Lab — {lab.title} (Student Instructions)"
+            doc_title = student_drive_file_name or f"Week {lab.week} Lab — {lab.title} (Student Instructions)"
 
         blocks = LabDocBuilder(lab, mode=mode).build()  # type: ignore[arg-type]
 
@@ -236,6 +253,11 @@ def create_lab_docs_for_user(
                 _apply_blocks(docs, doc_id, style_requests)
 
             _share_doc_with_teacher(drive, doc_id, lecturer_email)
+            requested_name = lecturer_drive_file_name if mode == "lecturer" else student_drive_file_name
+            if requested_name:
+                rename_file(uid, doc_id, requested_name)
+            if target_folder_id:
+                move_file_to_folder(uid, doc_id, target_folder_id)
         except HttpError as exc:
             logger.exception(
                 "Google Docs API error for uid=%s week=%s mode=%s", uid, lab.week, mode,
@@ -248,7 +270,9 @@ def create_lab_docs_for_user(
         logger.info("created lab doc uid=%s week=%s mode=%s url=%s", uid, lab.week, mode, doc_url)
         result[f"{mode}_doc_url"] = doc_url
         result[f"{mode}_doc_id"] = doc_id
+        result[f"{mode}_drive_file_name"] = doc_title
 
+    result["drive_folder_id"] = target_folder_id or ""
     return result
 
 import io

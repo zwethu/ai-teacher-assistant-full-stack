@@ -7,8 +7,10 @@ import { formatDate } from '../../../utils/formatDate'
 import { ArrowLeft, Clock, Trash2, Users } from 'lucide-react'
 import { BTN_SECONDARY } from '../constants'
 import type { DetailTab } from '../types'
+import { ArtifactsTab } from './ArtifactsTab'
 import { MaterialsTab } from './MaterialsTab'
 import { StudentsTab } from './StudentsTab'
+import type { Artifact, ArtifactSummary } from '../../../services/artifactService'
 
 type Props = {
   toast: ToastMessage | null
@@ -21,6 +23,9 @@ type Props = {
   studentsLoading: boolean
   files: BatchFile[]
   filesLoading: boolean
+  artifacts: Artifact[]
+  artifactSummary: ArtifactSummary | null
+  artifactsLoading: boolean
   fileUploading: boolean
   fileInputRef: React.RefObject<HTMLInputElement | null>
   studentForm: { name: string; email: string }
@@ -34,6 +39,8 @@ type Props = {
   handleFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void
   handleDeleteFile: (file: BatchFile) => void
   handleRefreshFiles: () => void
+  handleDeleteArtifact: (artifact: Artifact) => void
+  refreshArtifacts: () => void
 }
 
 export function BatchDetailView({
@@ -47,6 +54,9 @@ export function BatchDetailView({
   studentsLoading,
   files,
   filesLoading,
+  artifacts,
+  artifactSummary,
+  artifactsLoading,
   fileUploading,
   fileInputRef,
   studentForm,
@@ -60,6 +70,8 @@ export function BatchDetailView({
   handleFileUpload,
   handleDeleteFile,
   handleRefreshFiles,
+  handleDeleteArtifact,
+  refreshArtifacts,
 }: Props) {
   return (
     <div>
@@ -131,6 +143,23 @@ export function BatchDetailView({
             </span>
           )}
         </button>
+        <button
+          type="button"
+          onClick={() => setDetailTab('artifacts')}
+          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+            detailTab === 'artifacts'
+              ? 'border-emerald-600 text-emerald-700'
+              : 'border-transparent text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          <Clock className="w-4 h-4" />
+          Artifacts
+          {artifacts.length > 0 && (
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600">
+              {artifacts.length}
+            </span>
+          )}
+        </button>
       </div>
 
       {detailTab === 'students' && (
@@ -157,6 +186,16 @@ export function BatchDetailView({
           onFileUpload={handleFileUpload}
           onDeleteFile={handleDeleteFile}
           onRefreshFiles={handleRefreshFiles}
+        />
+      )}
+
+      {detailTab === 'artifacts' && (
+        <ArtifactsTab
+          artifacts={artifacts}
+          summary={artifactSummary}
+          loading={artifactsLoading}
+          onRefresh={refreshArtifacts}
+          onDelete={handleDeleteArtifact}
         />
       )}
     </div>

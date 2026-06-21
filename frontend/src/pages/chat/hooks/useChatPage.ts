@@ -78,6 +78,17 @@ function connectorErrorMessage(err: unknown): string {
   return message || 'Sorry, something went wrong. Please try again.'
 }
 
+function titleFromMessage(content: string): string {
+  const trimmed = content.trim()
+  if (!trimmed) return 'New Chat'
+  if (trimmed.length <= 50) return trimmed
+
+  const prefix = trimmed.slice(0, 50).trimEnd()
+  const lastSpace = prefix.lastIndexOf(' ')
+  const title = lastSpace > 0 ? prefix.slice(0, lastSpace) : prefix
+  return `${title}...`
+}
+
 function chatPath(batchId: string, chatId: string): string {
   return `/batches/${batchId}/chats/${chatId}`
 }
@@ -422,7 +433,7 @@ export function useChatPage() {
       runFallbackTimerRef.current = window.setTimeout(() => {
         updateRunStreamError(runId, STREAM_DELAY_MESSAGE)
         startFallbackPolling(batchId, chatId, runId, pendingId)
-      }, 30000)
+      }, 10000)
     }
   }
 
@@ -494,7 +505,7 @@ export function useChatPage() {
 
     let chat = activeChat
     if (!chat) {
-      chat = await handleNewChat(content.slice(0, 50) || 'New Chat')
+      chat = await handleNewChat(titleFromMessage(content))
       if (!chat) return
     }
     const batchId = selectedBatch.id
@@ -536,7 +547,7 @@ export function useChatPage() {
       subscribeToRun(result.run_id, batchId, chatId, { withPolling: true })
 
       if (chat.title === 'New Chat') {
-        const newTitle = content.slice(0, 50)
+        const newTitle = titleFromMessage(content)
         void updateChatTitle(batchId, chatId, newTitle).then(() => {
           setChats((prev) =>
             prev.map((c) => (c.chat_id === chatId ? { ...c, title: newTitle } : c)),
@@ -782,7 +793,6 @@ export function useChatPage() {
 
   async function handleDeleteChat(chat: Chat) {
     if (!selectedBatch) return
-    if (!window.confirm(`Delete "${chat.title}"?`)) return
     await deleteChat(selectedBatch.id, chat.chat_id).catch(console.error)
     setChats((prev) => prev.filter((c) => c.chat_id !== chat.chat_id))
     if (activeChat?.chat_id === chat.chat_id) {

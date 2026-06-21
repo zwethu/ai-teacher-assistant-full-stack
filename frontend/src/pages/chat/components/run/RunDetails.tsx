@@ -51,7 +51,7 @@ export function RunDetails({ run, isFinal }: Props) {
   if (!hasContent) return null
 
   return (
-    <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/70 p-3">
+    <div className="space-y-2 pl-3 border-l-2 border-slate-200/70">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}

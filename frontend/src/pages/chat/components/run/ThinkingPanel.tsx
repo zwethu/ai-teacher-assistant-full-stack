@@ -67,16 +67,19 @@ export function ThinkingPanel({ events, runStatus }: Props) {
   if (thinkingEvents.length === 0) return null
 
   return (
-    <div className="rounded-md border border-slate-200/80 bg-white/80">
+    <div className="pl-3 border-l-2 border-slate-200/70">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center gap-2 px-2.5 py-2 text-left text-xs font-medium text-slate-700"
+        className="flex w-full items-center gap-2 py-1.5 text-left text-xs font-medium text-slate-500"
       >
         {open ? (
           <ChevronDown className="h-3.5 w-3.5 flex-shrink-0 text-slate-500" />
         ) : (
           <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 text-slate-500" />
+        )}
+        {runStatus === 'running' && !open && (
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
         )}
         <span>Thinking</span>
         {!open && (
@@ -87,7 +90,7 @@ export function ThinkingPanel({ events, runStatus }: Props) {
       </button>
 
       {open && (
-        <div className="space-y-2 border-t border-slate-100 px-2.5 py-2">
+        <div className="space-y-2 pt-1.5">
           <p className="text-[11px] text-slate-500">Public working notes from the agent</p>
           <div className="space-y-1.5">
             {thinkingEvents.map((event) => {
@@ -99,7 +102,7 @@ export function ThinkingPanel({ events, runStatus }: Props) {
               return (
                 <div
                   key={event.event_id}
-                  className="rounded-md border border-slate-200/70 bg-slate-50/60 px-2.5 py-2"
+                  className="py-1"
                 >
                   <div className="flex items-start gap-2 text-xs">
                     <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-slate-400" />

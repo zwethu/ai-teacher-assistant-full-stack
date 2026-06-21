@@ -108,7 +108,7 @@ export function ChatMessagesPanel({
         ) : showWelcome ? (
           welcomeContent
         ) : (
-          <div className="space-y-6 pb-4">
+          <div className="space-y-8 pb-4">
             {safeMessages.map((msg) => (
               <MessageRow
                 key={msg.message_id}

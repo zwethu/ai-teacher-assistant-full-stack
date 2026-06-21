@@ -1,6 +1,6 @@
-import type { RefObject } from 'react'
+import { useState, type RefObject } from 'react'
 import type { Chat } from '../../../entity/Chat'
-import { Loader2, MessageSquarePlus, MoreHorizontal, Trash2 } from 'lucide-react'
+import { Check, Loader2, MessageSquarePlus, Pencil, Trash2, X } from 'lucide-react'
 
 type Props = {
   sidebarOpen: boolean
@@ -35,6 +35,8 @@ export function ChatSidebar({
   onStartRename,
   onDeleteChat,
 }: Props) {
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+
   return (
     <aside
       className={`flex-shrink-0 transition-all duration-300 overflow-hidden ${
@@ -90,29 +92,68 @@ export function ChatSidebar({
                 <span className="flex-1 min-w-0 text-sm truncate">{chat.title}</span>
               )}
 
-              <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 flex-shrink-0 transition-opacity">
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onStartRename(chat)
-                  }}
-                  className="p-1 rounded hover:bg-white/50 text-slate-400 hover:text-slate-600"
-                  aria-label="Rename"
-                >
-                  <MoreHorizontal className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    void onDeleteChat(chat)
-                  }}
-                  className="p-1 rounded hover:bg-red-50 text-slate-400 hover:text-red-500"
-                  aria-label="Delete"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
+              <div
+                className={`flex items-center gap-0.5 flex-shrink-0 transition-opacity ${
+                  confirmDeleteId === chat.chat_id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                }`}
+                onBlur={(e) => {
+                  if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                    setConfirmDeleteId(null)
+                  }
+                }}
+              >
+                {confirmDeleteId === chat.chat_id ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setConfirmDeleteId(null)
+                        void onDeleteChat(chat)
+                      }}
+                      className="p-1 rounded hover:bg-red-50 text-red-500 hover:text-red-600"
+                      aria-label="Confirm delete chat"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setConfirmDeleteId(null)
+                      }}
+                      className="p-1 rounded hover:bg-white/50 text-slate-400 hover:text-slate-600"
+                      aria-label="Cancel delete chat"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onStartRename(chat)
+                      }}
+                      className="p-1 rounded hover:bg-white/50 text-slate-400 hover:text-slate-600"
+                      aria-label="Rename chat"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setConfirmDeleteId(chat.chat_id)
+                      }}
+                      className="p-1 rounded hover:bg-red-50 text-slate-400 hover:text-red-500"
+                      aria-label="Delete"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           ))

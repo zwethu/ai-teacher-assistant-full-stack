@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 
 type CatSpriteProps = {
-  mood: 'idle' | 'happy' | 'confused' | 'playful' | 'eating';
+  mood: 'idle' | 'happy' | 'confused' | 'playful' | 'eating' | 'sleeping';
 };
 
 type RandomBehavior = {
@@ -12,19 +12,20 @@ type RandomBehavior = {
 
 const RANDOM_BEHAVIORS: RandomBehavior[] = [
   { emoji: '😸', label: '*purr purr purr*', bodyClass: 'purring' },
-  { emoji: '😺', label: 'Meow~', bodyClass: 'meowing' },
+  { emoji: '😺', label: 'Meow~',            bodyClass: 'meowing' },
   { emoji: '🙂‍↕️', label: 'slow blink... ♡', bodyClass: 'blinking' },
-  { emoji: '😹', label: 'hehe', bodyClass: 'smiling' },
-  { emoji: '😻', label: '(shows belly)', bodyClass: 'belly' },
-  { emoji: '🐱', label: 'chirp!', bodyClass: 'chirping' },
+  { emoji: '😹', label: 'hehe',             bodyClass: 'smiling' },
+  { emoji: '😻', label: '(shows belly)',    bodyClass: 'belly' },
+  { emoji: '🐱', label: 'chirp!',           bodyClass: 'chirping' },
 ];
 
 const MOOD_CONFIG: Record<string, { emoji: string; label: string; bodyClass: string }> = {
-  idle:     { emoji: '😺', label: '',                bodyClass: '' },
-  happy:    { emoji: '😸', label: '✨ Purr!',        bodyClass: 'happy' },
-  confused: { emoji: '😿', label: '😕 Hmm...',       bodyClass: 'confused' },
-  playful:  { emoji: '🙀', label: '🎉 Yay!',         bodyClass: 'playful' },
-  eating:   { emoji: '😋', label: '🐟 Nom nom nom!', bodyClass: 'eating' },
+  idle:     { emoji: '😺', label: '',                 bodyClass: '' },
+  happy:    { emoji: '😸', label: '✨ Purr!',         bodyClass: 'happy' },
+  confused: { emoji: '😿', label: '😕 Hmm...',        bodyClass: 'confused' },
+  playful:  { emoji: '🙀', label: '🎉 Yay!',          bodyClass: 'playful' },
+  eating:   { emoji: '😋', label: '🐟 Nom nom nom!',  bodyClass: 'eating' },
+  sleeping: { emoji: '😴', label: 'zzz...',           bodyClass: 'sleeping' },
 };
 
 export default function CatSprite({ mood }: CatSpriteProps) {

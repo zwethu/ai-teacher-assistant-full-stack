@@ -125,17 +125,18 @@
 }
 
 /* mood body classes */
-.cat-body-happy   .cat-emoji { animation: catBounce 0.6s ease; }
-.cat-body-confused .cat-emoji { animation: catWobble 0.6s ease; }
-.cat-body-playful .cat-emoji { animation: catSpin 0.5s ease; }
-.cat-body-eating  .cat-emoji { animation: catNom 0.4s ease infinite alternate; }
+.cat-body-happy    .cat-emoji { animation: catBounce  0.6s ease; }
+.cat-body-confused .cat-emoji { animation: catWobble  0.6s ease; }
+.cat-body-playful  .cat-emoji { animation: catSpin    0.5s ease; }
+.cat-body-eating   .cat-emoji { animation: catNom     0.4s ease infinite alternate; }
+.cat-body-sleeping .cat-emoji { animation: catSleep   3s ease infinite; }
 
 /* random behaviors */
-.cat-body-purring  .cat-emoji { animation: catFloat 1.5s ease infinite; }
+.cat-body-purring  .cat-emoji { animation: catFloat  1.5s ease infinite; }
 .cat-body-meowing  .cat-emoji { animation: catBounce 0.5s ease; }
-.cat-body-blinking .cat-emoji { animation: catBlink 0.8s ease; }
-.cat-body-smiling  .cat-emoji { animation: catFloat 1.8s ease infinite; }
-.cat-body-belly    .cat-emoji { animation: catRoll 0.7s ease; }
+.cat-body-blinking .cat-emoji { animation: catBlink  0.8s ease; }
+.cat-body-smiling  .cat-emoji { animation: catFloat  1.8s ease infinite; }
+.cat-body-belly    .cat-emoji { animation: catRoll   0.7s ease; }
 .cat-body-chirping .cat-emoji { animation: catWobble 0.5s ease; }
 
 .cat-speech-bubble {
@@ -366,7 +367,7 @@
   filter: drop-shadow(0 4px 10px rgba(0,0,0,0.1));
   animation: catBounce 0.7s ease;
 }
-.result-cat-wrap.eating .result-cat-emoji { animation: catNom 0.35s ease infinite alternate; }
+.result-cat-wrap.eating .result-cat-emoji { animation: catNom   0.35s ease infinite alternate; }
 .result-cat-wrap.full   .result-cat-emoji { animation: catFloat 2s ease infinite; }
 
 .result-cat-bowl {
@@ -481,6 +482,11 @@
   0%   { transform: rotate(0deg); }
   50%  { transform: rotate(25deg) translateX(8px); }
   100% { transform: rotate(0deg); }
+}
+@keyframes catSleep {
+  0%, 100% { transform: translateY(0px) rotate(0deg);    opacity: 1; }
+  30%       { transform: translateY(-4px) rotate(-3deg); opacity: 0.85; }
+  60%       { transform: translateY(2px) rotate(2deg);   opacity: 1; }
 }
 @keyframes bubblePop {
   from { transform: scale(0.6); opacity: 0; }

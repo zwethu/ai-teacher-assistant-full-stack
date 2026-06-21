@@ -10,6 +10,7 @@ import {
   hasAttempted,
 } from '../lib/gameSession';
 import type { GameSession } from '../types/catGame.types';
+import CatSprite from '../components/cat/CatSprite';
 import './PlayEntryPage.css';
 
 type FlowStep =
@@ -44,7 +45,6 @@ export default function PlayEntryPage() {
         if (!s) { setStep('invalid'); return; }
         if (s.status !== 'open') { setStep('unavailable'); return; }
         setSession(s);
-        // Check if already signed in via Firebase
         const unsubscribe = auth.onAuthStateChanged(user => {
           if (user && user.email) {
             setUserEmail(user.email);
@@ -135,7 +135,7 @@ export default function PlayEntryPage() {
     return (
       <div className="play-entry-bg">
         <div className="play-card">
-          <div className="play-cat-big">🐱</div>
+          <CatSprite mood="idle" />
           <p className="play-loading-text">{
             step === 'loading' ? 'Loading your adventure...' : 'Checking access...'
           }</p>
@@ -149,7 +149,7 @@ export default function PlayEntryPage() {
     return (
       <div className="play-entry-bg">
         <div className="play-card">
-          <div className="play-cat-big">😿</div>
+          <CatSprite mood="confused" />
           <h2 className="play-title">Oops!</h2>
           <p className="play-subtitle">This assessment link is invalid or doesn't exist.</p>
           <p className="play-hint">Ask your teacher for the correct link 🐾</p>
@@ -162,7 +162,7 @@ export default function PlayEntryPage() {
     return (
       <div className="play-entry-bg">
         <div className="play-card">
-          <div className="play-cat-big">😴</div>
+          <CatSprite mood="sleeping" />
           <h2 className="play-title">Not Available</h2>
           <p className="play-subtitle">This assessment is closed or has expired.</p>
           <p className="play-hint">Contact your teacher if you think this is a mistake 🐾</p>
@@ -175,7 +175,7 @@ export default function PlayEntryPage() {
     return (
       <div className="play-entry-bg">
         <div className="play-card">
-          <div className="play-cat-big">🙀</div>
+          <CatSprite mood="confused" />
           <h2 className="play-title">Not Enrolled</h2>
           <p className="play-subtitle">Your email <strong>{userEmail}</strong> is not in this class.</p>
           <p className="play-hint">Make sure you're signed in with your school email 🐾</p>
@@ -191,7 +191,7 @@ export default function PlayEntryPage() {
     return (
       <div className="play-entry-bg">
         <div className="play-card">
-          <div className="play-cat-big">😸</div>
+          <CatSprite mood="happy" />
           <h2 className="play-title">Already Played!</h2>
           <p className="play-subtitle">You've already completed this assessment.</p>
           <p className="play-hint">Each assessment can only be played once 🐾</p>
@@ -208,7 +208,7 @@ export default function PlayEntryPage() {
           <div className="play-scene-deco right">🌿</div>
         </div>
         <div className="play-card">
-          <div className="play-cat-big">😺</div>
+          <CatSprite mood="idle" />
           <h2 className="play-title">Welcome, Scholar!</h2>
           <p className="play-subtitle">Sign in to begin your study adventure 🐾</p>
           <button className="play-google-btn" onClick={handleGoogleSignIn}>
@@ -230,7 +230,7 @@ export default function PlayEntryPage() {
     return (
       <div className="play-entry-bg">
         <div className="play-card">
-          <div className="play-cat-big">🐱</div>
+          <CatSprite mood="idle" />
           <h2 className="play-title">What's your name?</h2>
           <p className="play-subtitle">Choose a nickname — your cat will remember it! 🐾</p>
           <div className="play-input-wrap">
@@ -262,7 +262,7 @@ export default function PlayEntryPage() {
   return (
     <div className="play-entry-bg">
       <div className="play-card">
-        <div className="play-cat-big">😸</div>
+        <CatSprite mood="playful" />
         <h2 className="play-title">Ready, {nickname}!</h2>
         <p className="play-subtitle">
           {session?.gameMode === 'mcq'

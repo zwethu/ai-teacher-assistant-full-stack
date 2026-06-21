@@ -125,11 +125,11 @@
 }
 
 /* mood body classes */
-.cat-body-happy    .cat-emoji { animation: catBounce  0.6s ease; }
-.cat-body-confused .cat-emoji { animation: catWobble  0.6s ease; }
-.cat-body-playful  .cat-emoji { animation: catSpin    0.5s ease; }
-.cat-body-eating   .cat-emoji { animation: catNom     0.4s ease infinite alternate; }
-.cat-body-sleeping .cat-emoji { animation: catSleep   3s ease infinite; }
+.cat-body-happy    .cat-emoji { animation: catBounce 0.6s ease; }
+.cat-body-confused .cat-emoji { animation: catWobble 0.6s ease; }
+.cat-body-playful  .cat-emoji { animation: catSpin   0.5s ease; }
+.cat-body-eating   .cat-emoji { animation: catNom    0.4s ease infinite alternate; }
+.cat-body-sleeping .cat-emoji { animation: catSleep  4s ease infinite; }
 
 /* random behaviors */
 .cat-body-purring  .cat-emoji { animation: catFloat  1.5s ease infinite; }
@@ -138,6 +138,29 @@
 .cat-body-smiling  .cat-emoji { animation: catFloat  1.8s ease infinite; }
 .cat-body-belly    .cat-emoji { animation: catRoll   0.7s ease; }
 .cat-body-chirping .cat-emoji { animation: catWobble 0.5s ease; }
+
+/* ─── Sleeping zzz bubbles ─── */
+.cat-zzz-wrap {
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  pointer-events: none;
+}
+
+.cat-zzz {
+  font-weight: 900;
+  color: #9bb8d4;
+  line-height: 1;
+  opacity: 0;
+  animation: zzzFloat 3s ease infinite;
+}
+.cat-zzz-1 { font-size: 0.85rem; animation-delay: 0s; }
+.cat-zzz-2 { font-size: 1.1rem;  animation-delay: 0.8s; }
+.cat-zzz-3 { font-size: 1.4rem;  animation-delay: 1.6s; }
 
 .cat-speech-bubble {
   background: white;
@@ -484,9 +507,14 @@
   100% { transform: rotate(0deg); }
 }
 @keyframes catSleep {
-  0%, 100% { transform: translateY(0px) rotate(0deg);    opacity: 1; }
-  30%       { transform: translateY(-4px) rotate(-3deg); opacity: 0.85; }
-  60%       { transform: translateY(2px) rotate(2deg);   opacity: 1; }
+  0%, 100% { transform: translateY(0px) rotate(0deg); }
+  50%       { transform: translateY(-5px) rotate(-4deg); }
+}
+@keyframes zzzFloat {
+  0%   { opacity: 0;   transform: translate(0px, 0px)   scale(0.6); }
+  30%  { opacity: 1;   transform: translate(4px, -8px)  scale(1); }
+  70%  { opacity: 0.6; transform: translate(8px, -18px) scale(1.1); }
+  100% { opacity: 0;   transform: translate(12px,-28px) scale(0.8); }
 }
 @keyframes bubblePop {
   from { transform: scale(0.6); opacity: 0; }

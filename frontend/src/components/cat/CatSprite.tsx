@@ -20,12 +20,12 @@ const RANDOM_BEHAVIORS: RandomBehavior[] = [
 ];
 
 const MOOD_CONFIG: Record<string, { emoji: string; label: string; bodyClass: string }> = {
-  idle:     { emoji: '😺', label: '',                 bodyClass: '' },
-  happy:    { emoji: '😸', label: '✨ Purr!',         bodyClass: 'happy' },
-  confused: { emoji: '😿', label: '😕 Hmm...',        bodyClass: 'confused' },
-  playful:  { emoji: '🙀', label: '🎉 Yay!',          bodyClass: 'playful' },
-  eating:   { emoji: '😋', label: '🐟 Nom nom nom!',  bodyClass: 'eating' },
-  sleeping: { emoji: '😴', label: 'zzz...',           bodyClass: 'sleeping' },
+  idle:     { emoji: '😺', label: '',                bodyClass: '' },
+  happy:    { emoji: '😸', label: '✨ Purr!',        bodyClass: 'happy' },
+  confused: { emoji: '😿', label: '😕 Hmm...',       bodyClass: 'confused' },
+  playful:  { emoji: '🙀', label: '🎉 Yay!',         bodyClass: 'playful' },
+  eating:   { emoji: '😋', label: '🐟 Nom nom nom!', bodyClass: 'eating' },
+  sleeping: { emoji: '😺', label: '',               bodyClass: 'sleeping' },
 };
 
 export default function CatSprite({ mood }: CatSpriteProps) {
@@ -57,6 +57,13 @@ export default function CatSprite({ mood }: CatSpriteProps) {
     <div className={`cat-sprite cat-body-${active.bodyClass || 'idle'}`}>
       <div className="cat-shadow" />
       <div className="cat-emoji">{active.emoji}</div>
+      {mood === 'sleeping' && (
+        <div className="cat-zzz-wrap">
+          <span className="cat-zzz cat-zzz-1">z</span>
+          <span className="cat-zzz cat-zzz-2">z</span>
+          <span className="cat-zzz cat-zzz-3">Z</span>
+        </div>
+      )}
       {active.label && (
         <div className="cat-speech-bubble">{active.label}</div>
       )}

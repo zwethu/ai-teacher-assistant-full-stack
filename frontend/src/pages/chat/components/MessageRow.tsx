@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Bot, ExternalLink, FileText, Loader2, User } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import rehypeSanitize from 'rehype-sanitize'
@@ -7,6 +7,7 @@ import type { ChatMessage } from '../../../entity/Chat'
 import { checkGoogleAuthStatus, startGoogleOAuth } from '../../../services/authService'
 import {
   exportLessonPlanDraftToGoogleDocs,
+  getArtifact,
   type LessonPlanExportResult,
 } from '../../../services/artifactService'
 import type { RunUiState } from '../runTypes'
@@ -153,7 +154,38 @@ function LessonPlanExportButton({
   const [needsGoogle, setNeedsGoogle] = useState(false)
   const [error, setError] = useState('')
 
-  if (!artifactId || artifactType !== 'lesson_plan' || !exportable) return null
+  useEffect(() => {
+    if (!artifactId || artifactType !== 'lesson_plan') return
+    let cancelled = false
+    getArtifact(batchId, artifactId)
+      .then((artifact) => {
+        if (cancelled) return
+        if (artifact.status === 'confirmed' && artifact.doc_url) {
+          setResult({
+            artifact_id: artifact.id,
+            status: artifact.status,
+            doc_url: artifact.doc_url,
+            doc_id: artifact.doc_id,
+            version: artifact.version,
+            drive_file_name: artifact.drive_file_name,
+          })
+          return
+        }
+        if (artifact.status === 'draft' || artifact.status === 'failed_export') {
+          setResult(null)
+        }
+      })
+      .catch(() => {
+        // Keep metadata-driven fallback UI if artifact lookup is temporarily unavailable.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [artifactId, artifactType, batchId])
+
+  if (!artifactId || artifactType !== 'lesson_plan' || (!exportable && !result?.doc_url)) {
+    return null
+  }
 
   async function handleExport() {
     setError('')

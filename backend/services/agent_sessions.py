@@ -62,6 +62,9 @@ def create_agent_run_record(
     agent_engine_resource_name: str,
     connectors: dict | None = None,
     google_oauth_status: str = "missing",
+    workflow_type: str = "",
+    week: int | None = None,
+    save_draft: bool = False,
 ) -> None:
     connectors = {
         "web_search": bool((connectors or {}).get("web_search", True)),
@@ -82,6 +85,9 @@ def create_agent_run_record(
             "connectors": connectors,
             "google_workspace_enabled": connectors.get("google_workspace", False),
             "google_oauth_status": google_oauth_status,
+            "workflow_type": workflow_type,
+            "week": week,
+            "save_draft": save_draft,
             "created_at": SERVER_TIMESTAMP,
             "updated_at": SERVER_TIMESTAMP,
         }
@@ -149,6 +155,41 @@ def mark_agent_run_failed(
     )
 
 
+def mark_agent_run_draft_saved(
+    *,
+    batch_id: str,
+    chat_id: str,
+    run_id: str,
+    artifact_id: str,
+    week: int | None,
+) -> None:
+    _run_ref(batch_id, chat_id, run_id).update(
+        {
+            "draft_artifact_id": artifact_id,
+            "draft_status": "saved",
+            "draft_error": "",
+            "week": week,
+            "updated_at": SERVER_TIMESTAMP,
+        }
+    )
+
+
+def mark_agent_run_draft_failed(
+    *,
+    batch_id: str,
+    chat_id: str,
+    run_id: str,
+    error: str,
+) -> None:
+    _run_ref(batch_id, chat_id, run_id).update(
+        {
+            "draft_status": "failed",
+            "draft_error": str(error)[:1000],
+            "updated_at": SERVER_TIMESTAMP,
+        }
+    )
+
+
 def _chat_ref(batch_id: str, chat_id: str):
     return (
         get_firestore()
@@ -173,6 +214,12 @@ def _run_to_dict(data: dict[str, Any]) -> dict[str, Any]:
         "error": str(data.get("error") or ""),
         "final_message_id": str(data.get("final_message_id") or ""),
         "rtdb_run_path": str(data.get("rtdb_run_path") or ""),
+        "workflow_type": str(data.get("workflow_type") or ""),
+        "week": data.get("week"),
+        "save_draft": bool(data.get("save_draft", False)),
+        "draft_artifact_id": str(data.get("draft_artifact_id") or ""),
+        "draft_status": str(data.get("draft_status") or ""),
+        "draft_error": str(data.get("draft_error") or ""),
         "connectors": {
             "web_search": bool(connectors.get("web_search", True)),
             "google_workspace": bool(connectors.get("google_workspace", False)),

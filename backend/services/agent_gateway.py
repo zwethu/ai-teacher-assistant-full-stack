@@ -43,6 +43,8 @@ from services.agent_sessions import (
     create_agent_run_record,
     ensure_chat_agent_session,
     mark_agent_run_done,
+    mark_agent_run_draft_failed,
+    mark_agent_run_draft_saved,
     mark_agent_run_failed,
 )
 from services.artifact_service import save_lesson_plan_draft_from_session
@@ -177,6 +179,9 @@ async def start_chat_run(
         lecturer_email=lecturer_email,
         connectors=connectors,
         google_oauth_status=google_oauth_status,
+        workflow_type=workflow_type,
+        week=week,
+        save_draft=save_draft,
     )
 
     # --- 6. Schedule background agent task ---
@@ -380,6 +385,13 @@ async def _run_agent_background(
                     ),
                 )
                 metadata = _draft_message_metadata(draft)
+                mark_agent_run_draft_saved(
+                    batch_id=batch_id,
+                    chat_id=chat_id,
+                    run_id=run_id,
+                    artifact_id=str(metadata.get("draft_artifact_id") or ""),
+                    week=draft.get("week"),
+                )
                 logger.info(
                     "lesson plan draft saved run_id=%s artifact_id=%s week=%s",
                     run_id,
@@ -392,6 +404,19 @@ async def _run_agent_background(
                 run_id,
                 draft_exc,
             )
+            try:
+                mark_agent_run_draft_failed(
+                    batch_id=batch_id,
+                    chat_id=chat_id,
+                    run_id=run_id,
+                    error=str(draft_exc),
+                )
+            except Exception as mark_exc:
+                logger.warning(
+                    "Firestore draft failure marker failed run_id=%s: %s",
+                    run_id,
+                    mark_exc,
+                )
 
         # Persist assistant message to Firestore
         final_msg = add_message(

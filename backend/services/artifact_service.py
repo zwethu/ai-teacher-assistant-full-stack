@@ -521,7 +521,7 @@ def _update_source_message_export_metadata(
         "draft_artifact_id": str(artifact.get("id") or ""),
         "artifact_type": "lesson_plan",
         "week": artifact.get("week"),
-        "exportable": True,
+        "exportable": False,
         "doc_url": export_updates.get("doc_url", ""),
         "doc_id": export_updates.get("doc_id", ""),
         "version": export_updates.get("version"),

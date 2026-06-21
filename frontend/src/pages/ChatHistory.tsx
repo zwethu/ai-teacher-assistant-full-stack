@@ -57,9 +57,7 @@ export default function ChatHistory() {
                       <button
                         type="button"
                         onClick={() =>
-                          navigate('/chat', {
-                            state: { batchId: chat.batch_id, chatId: chat.chat_id },
-                          })
+                          navigate(`/batches/${chat.batch_id}/chats/${chat.chat_id}`)
                         }
                         className="w-full text-left px-6 py-4 hover:bg-emerald-50/60 transition-colors"
                       >

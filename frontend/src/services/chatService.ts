@@ -15,6 +15,11 @@ export async function listChats(batchId: string): Promise<Chat[]> {
   return res.data
 }
 
+export async function getChat(batchId: string, chatId: string): Promise<Chat> {
+  const res = await api.get<Chat>(`/batches/${batchId}/chats/${chatId}`)
+  return res.data
+}
+
 export async function deleteChat(batchId: string, chatId: string): Promise<void> {
   await api.delete(`/batches/${batchId}/chats/${chatId}`)
 }

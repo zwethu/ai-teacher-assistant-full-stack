@@ -89,6 +89,19 @@ async def update_title_endpoint(
     return {"status": "ok"}
 
 
+@router.get("/{chat_id}", response_model=dict)
+async def get_chat_endpoint(
+    batch_id: str,
+    chat_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    lecturer_id: str = current_user["uid"]
+    chat = get_chat(batch_id, chat_id, lecturer_id)
+    if chat is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
+    return chat
+
+
 # ---------------------------------------------------------------------------
 # Message endpoints
 # ---------------------------------------------------------------------------

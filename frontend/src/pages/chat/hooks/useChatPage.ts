@@ -8,14 +8,15 @@ import {
   type SetStateAction,
 } from 'react'
 import axios from 'axios'
-import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import type { Batch } from '../../../entity/Batch'
 import type { Chat, ChatMessage } from '../../../entity/Chat'
 import { useAuth } from '../../../hooks/useAuth'
-import { listBatches } from '../../../services/batchService'
+import { getBatchById, listBatches } from '../../../services/batchService'
 import {
   createChat,
   deleteChat,
+  getChat,
   listChats,
   listMessages,
   sendMessage,
@@ -77,6 +78,27 @@ function connectorErrorMessage(err: unknown): string {
   return message || 'Sorry, something went wrong. Please try again.'
 }
 
+function chatPath(batchId: string, chatId: string): string {
+  return `/batches/${batchId}/chats/${chatId}`
+}
+
+function enrichMessages(data: ChatMessage[], chat: Chat): ChatMessage[] {
+  const lastRunId = chat.last_run_id
+  const assistantMsgs = data.filter((msg) => msg.role === 'assistant')
+  const latestAssistant = assistantMsgs.at(-1)
+  return data.map((msg) => {
+    if (msg.run_id) return msg
+    if (
+      latestAssistant &&
+      msg.message_id === latestAssistant.message_id &&
+      lastRunId
+    ) {
+      return { ...msg, run_id: lastRunId }
+    }
+    return msg
+  })
+}
+
 function collectRunIds(messages: ChatMessage[], activeChat: Chat | null): string[] {
   const runIds = new Set<string>()
   const assistantMsgs = messages.filter((msg) => msg.role === 'assistant')
@@ -101,12 +123,9 @@ export function useChatPage() {
   const { user } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
-  const [searchParams, setSearchParams] = useSearchParams()
+  const [searchParams] = useSearchParams()
+  const { batchId: routeBatchId, chatId: routeChatId } = useParams()
 
-  const requestedBatchIdRef = useRef<string | null>(null)
-  const requestedChatIdRef = useRef<string | null>(null)
-  const routeHydratedRef = useRef(false)
-  const routeParamsReadRef = useRef(false)
   const pendingInitialMessageRef = useRef<string | null>(null)
   const runUnsubscribesRef = useRef<Record<string, () => void>>({})
   const runFallbackTimerRef = useRef<number | null>(null)
@@ -188,132 +207,6 @@ export function useChatPage() {
       .finally(() => setBatchesLoading(false))
   }, [user])
 
-  // Read route params once on mount
-  useEffect(() => {
-    if (routeParamsReadRef.current) return
-    routeParamsReadRef.current = true
-
-    const routeState = location.state as ChatLocationState | null
-    requestedBatchIdRef.current = routeState?.batchId || searchParams.get('batch')
-    requestedChatIdRef.current = routeState?.chatId || searchParams.get('chat')
-    pendingInitialMessageRef.current = routeState?.initialMessage ?? null
-
-    if (routeState) {
-      navigate(location.pathname + location.search, { replace: true, state: null })
-    }
-  }, [location.pathname, location.search, location.state, navigate, searchParams])
-
-  // Hydrate batch/chat from URL params
-  useEffect(() => {
-    const batchId = requestedBatchIdRef.current
-    const chatId = requestedChatIdRef.current
-
-    if (!batchId) {
-      if (!batchesLoading && !routeHydratedRef.current) {
-        routeHydratedRef.current = true
-        setRouteHydration('hydrated')
-      }
-      return
-    }
-
-    if (batchesLoading) {
-      setRouteHydration('hydrating')
-      return
-    }
-
-    const batch = batches.find((item) => item.id === batchId)
-    if (!batch) {
-      if (!routeHydratedRef.current) {
-        routeHydratedRef.current = true
-        setRouteHydration('invalid')
-      }
-      return
-    }
-
-    if (selectedBatch?.id !== batch.id) {
-      setSelectedBatch(batch)
-    }
-
-    if (!chatId) {
-      if (!routeHydratedRef.current) {
-        routeHydratedRef.current = true
-        setRouteHydration('hydrated')
-      }
-      return
-    }
-
-    if (chatsLoading) {
-      setRouteHydration('hydrating')
-      return
-    }
-
-    const chat = chats.find((item) => item.chat_id === chatId)
-    if (!chat) {
-      if (selectedBatch?.id === batch.id && !chatsLoading && !routeHydratedRef.current) {
-        routeHydratedRef.current = true
-        setRouteHydration('invalid')
-      }
-      return
-    }
-
-    if (activeChat?.chat_id !== chat.chat_id) {
-      setActiveChat(chat)
-    }
-
-    if (!routeHydratedRef.current) {
-      routeHydratedRef.current = true
-      setRouteHydration('hydrated')
-    }
-  }, [
-    activeChat?.chat_id,
-    batches,
-    batchesLoading,
-    chats,
-    chatsLoading,
-    selectedBatch?.id,
-  ])
-
-  // Sync state to URL only after hydration completes
-  useEffect(() => {
-    if (!routeHydratedRef.current || routeHydration === 'hydrating') return
-
-    const waitingForBatch =
-      Boolean(requestedBatchIdRef.current) && !selectedBatch && batchesLoading
-    const waitingForChat =
-      Boolean(requestedChatIdRef.current) &&
-      !activeChat &&
-      (chatsLoading || Boolean(selectedBatch))
-
-    if (waitingForBatch || waitingForChat) return
-
-    const newParams = new URLSearchParams(searchParams)
-    let changed = false
-
-    if (selectedBatch) {
-      if (newParams.get('batch') !== selectedBatch.id) {
-        newParams.set('batch', selectedBatch.id)
-        changed = true
-      }
-    } else if (newParams.has('batch') && !requestedBatchIdRef.current) {
-      newParams.delete('batch')
-      changed = true
-    }
-
-    if (activeChat) {
-      if (newParams.get('chat') !== activeChat.chat_id) {
-        newParams.set('chat', activeChat.chat_id)
-        changed = true
-      }
-    } else if (newParams.has('chat') && !requestedChatIdRef.current) {
-      newParams.delete('chat')
-      changed = true
-    }
-
-    if (changed) {
-      setSearchParams(newParams, { replace: true })
-    }
-  }, [activeChat, routeHydration, searchParams, selectedBatch, batchesLoading, chatsLoading, setSearchParams])
-
   const loadChats = useCallback(async (batchId: string) => {
     setChatsLoading(true)
     try {
@@ -328,45 +221,115 @@ export function useChatPage() {
     }
   }, [])
 
+  const selectChat = useCallback(
+    (chat: Chat) => {
+      navigate(chatPath(chat.batch_id, chat.chat_id))
+    },
+    [navigate],
+  )
+
+  // Capture one-shot initialMessage from navigation state
+  useEffect(() => {
+    const routeState = location.state as ChatLocationState | null
+    if (!routeState?.initialMessage) return
+    pendingInitialMessageRef.current = routeState.initialMessage
+    navigate(location.pathname, { replace: true, state: null })
+  }, [location.pathname, location.state, navigate])
+
+  // Redirect legacy location.state / query URLs to canonical routes
+  useEffect(() => {
+    if (routeBatchId && routeChatId) return
+
+    const routeState = location.state as ChatLocationState | null
+    if (routeState?.batchId && routeState?.chatId) {
+      pendingInitialMessageRef.current = routeState.initialMessage ?? null
+      navigate(chatPath(routeState.batchId, routeState.chatId), { replace: true, state: null })
+      return
+    }
+
+    const paramBatch = searchParams.get('batch')
+    const paramChat = searchParams.get('chat')
+    if (paramBatch && paramChat) {
+      navigate(chatPath(paramBatch, paramChat), { replace: true })
+    }
+  }, [routeBatchId, routeChatId, location.state, navigate, searchParams])
+
+  // Canonical route: load batch + chat + messages from backend
+  useEffect(() => {
+    if (!routeBatchId || !routeChatId || !user) return
+
+    let cancelled = false
+
+    async function hydrateFromRoute() {
+      setRouteHydration('hydrating')
+      setMessagesLoading(true)
+
+      try {
+        const batch = await getBatchById(routeBatchId!)
+        if (cancelled) return
+        if (!batch) {
+          setRouteHydration('invalid')
+          return
+        }
+
+        const chat = await getChat(routeBatchId!, routeChatId!)
+        if (cancelled) return
+
+        setSelectedBatch(batch)
+        setActiveChat(chat)
+        setChats((prev) => {
+          const exists = prev.some((item) => item.chat_id === chat.chat_id)
+          if (exists) {
+            return prev.map((item) => (item.chat_id === chat.chat_id ? chat : item))
+          }
+          return [chat, ...prev]
+        })
+
+        const data = await listMessages(routeBatchId!, routeChatId!)
+        if (cancelled) return
+
+        setMessages((prev) => {
+          if (prev.length > 0 && prev.every((msg) => msg.chat_id === chat.chat_id)) {
+            return prev
+          }
+          return enrichMessages(data, chat)
+        })
+        setRouteHydration('hydrated')
+      } catch (err) {
+        console.error(err)
+        if (!cancelled) setRouteHydration('invalid')
+      } finally {
+        if (!cancelled) setMessagesLoading(false)
+      }
+
+      if (!cancelled) {
+        void loadChats(routeBatchId!)
+      }
+    }
+
+    void hydrateFromRoute()
+    return () => {
+      cancelled = true
+    }
+  }, [routeBatchId, routeChatId, user, loadChats])
+
+  // Plain /chat: no active conversation in the URL
+  useEffect(() => {
+    if (routeBatchId && routeChatId) return
+
+    setActiveChat(null)
+    setMessages([])
+    setRouteHydration('idle')
+  }, [routeBatchId, routeChatId])
+
   useEffect(() => {
     if (!selectedBatch) {
       setChats([])
-      setActiveChat(null)
-      setMessages([])
       return
     }
+    if (routeBatchId && routeChatId && routeHydration === 'hydrating') return
     void loadChats(selectedBatch.id)
-  }, [selectedBatch, loadChats])
-
-  useEffect(() => {
-    if (!activeChat || !selectedBatch) {
-      setMessages([])
-      return
-    }
-    setMessagesLoading(true)
-    listMessages(selectedBatch.id, activeChat.chat_id)
-      .then((data) => {
-        const lastRunId = activeChat.last_run_id
-        const assistantMsgs = data.filter((msg) => msg.role === 'assistant')
-        const latestAssistant = assistantMsgs.at(-1)
-        const enriched = data.map((msg) => {
-          if (msg.run_id) {
-            return msg
-          }
-          if (
-            latestAssistant &&
-            msg.message_id === latestAssistant.message_id &&
-            lastRunId
-          ) {
-            return { ...msg, run_id: lastRunId }
-          }
-          return msg
-        })
-        setMessages(enriched)
-      })
-      .catch(console.error)
-      .finally(() => setMessagesLoading(false))
-  }, [activeChat, selectedBatch])
+  }, [selectedBatch, loadChats, routeBatchId, routeChatId, routeHydration])
 
   function ensureRunState(runId: string, status: AgentRunStatus = 'running') {
     setRunStates((prev) => ({
@@ -520,11 +483,8 @@ export function useChatPage() {
     if (!selectedBatch) return null
     const chat = await createChat(selectedBatch.id, title)
     setChats((prev) => [chat, ...prev])
-    setActiveChat(chat)
-    setMessages([])
-    requestedBatchIdRef.current = selectedBatch.id
-    requestedChatIdRef.current = chat.chat_id
     emitChatCreated()
+    navigate(chatPath(selectedBatch.id, chat.chat_id))
     return chat
   }
 
@@ -826,9 +786,7 @@ export function useChatPage() {
     await deleteChat(selectedBatch.id, chat.chat_id).catch(console.error)
     setChats((prev) => prev.filter((c) => c.chat_id !== chat.chat_id))
     if (activeChat?.chat_id === chat.chat_id) {
-      setActiveChat(null)
-      setMessages([])
-      requestedChatIdRef.current = null
+      navigate('/chat')
     }
     emitChatCreated()
   }
@@ -847,9 +805,15 @@ export function useChatPage() {
     batchesLoading,
     selectedBatch,
     setSelectedBatch: (batch: Batch | null) => {
-      requestedBatchIdRef.current = batch?.id ?? null
-      requestedChatIdRef.current = null
+      if (!batch) {
+        navigate('/chat')
+        setSelectedBatch(null)
+        return
+      }
       setSelectedBatch(batch)
+      if (routeBatchId && routeChatId) {
+        navigate('/chat')
+      }
     },
     chats,
     chatsLoading,
@@ -858,10 +822,7 @@ export function useChatPage() {
     renameValue,
     setRenameValue,
     activeChat,
-    setActiveChat: (chat: Chat | null) => {
-      requestedChatIdRef.current = chat?.chat_id ?? null
-      setActiveChat(chat)
-    },
+    selectChat,
     messages,
     messagesLoading,
     input,
@@ -883,6 +844,7 @@ export function useChatPage() {
     showWelcome,
     connectors,
     setConnectors: updateConnectors,
+    routeHydration,
   }
 }
 

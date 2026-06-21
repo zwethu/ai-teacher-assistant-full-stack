@@ -20,6 +20,7 @@ export default function App() {
         <Route element={<ProtectedRoute />}>
           <Route element={<AppLayout />}>
             <Route path="/chat" element={<Chat />} />
+            <Route path="/batches/:batchId/chats/:chatId" element={<Chat />} />
             <Route path="/chat-history" element={<ChatHistory />} />
             <Route path="/batches" element={<Batches />} />
             <Route path="/assessments" element={<Assessments />} />

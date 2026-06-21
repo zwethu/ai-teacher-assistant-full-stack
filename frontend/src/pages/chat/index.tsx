@@ -28,6 +28,7 @@ export default function Chat() {
         showWelcome={state.showWelcome}
         connectors={state.connectors}
         setConnectors={state.setConnectors}
+        routeHydration={state.routeHydration}
       />
     </ChatErrorBoundary>
   )

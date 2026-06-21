@@ -148,9 +148,7 @@ export function SessionsNavItem({ collapsed, onNavigate }: Props) {
     setInlineOpen(false)
     setPreviewVisible(false)
     onNavigate?.()
-    navigate('/chat', {
-      state: { batchId: session.batch_id, chatId: session.chat_id },
-    })
+    navigate(`/batches/${session.batch_id}/chats/${session.chat_id}`)
   }
 
   function toggleInline(e: React.MouseEvent) {

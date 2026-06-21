@@ -26,6 +26,7 @@ type Props = Pick<
   | 'showWelcome'
   | 'connectors'
   | 'setConnectors'
+  | 'routeHydration'
 >
 
 export function ChatLayout(props: Props) {
@@ -50,7 +51,10 @@ export function ChatLayout(props: Props) {
     showWelcome,
     connectors,
     setConnectors,
+    routeHydration,
   } = props
+
+  const isRouteInvalid = routeHydration === 'invalid'
 
   return (
     <div className="absolute inset-0 flex flex-col overflow-hidden">
@@ -69,6 +73,15 @@ export function ChatLayout(props: Props) {
               <h2 className="text-2xl font-semibold text-slate-800 mb-2">AI Teaching Assistant</h2>
               <p className="text-slate-500 text-sm max-w-sm">
                 Select a batch below to start chatting about lesson plans, assessments, and more.
+              </p>
+            </div>
+          </main>
+        ) : isRouteInvalid ? (
+          <main className="flex-1 overflow-y-auto">
+            <div className="max-w-3xl mx-auto px-4 py-8 min-h-full flex flex-col items-center justify-center text-center">
+              <h3 className="text-lg font-semibold text-slate-700 mb-1">Chat not found</h3>
+              <p className="text-sm text-slate-500 mb-4 max-w-xs">
+                This conversation may have been deleted or you may not have access to it.
               </p>
             </div>
           </main>

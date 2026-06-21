@@ -99,8 +99,8 @@ export function MaterialsTab({
       const chat = await createChat(batchId, title)
       emitChatCreated()
       setInput('')
-      navigate('/chat', {
-        state: { batchId, chatId: chat.chat_id, initialMessage: content },
+      navigate(`/batches/${batchId}/chats/${chat.chat_id}`, {
+        state: { initialMessage: content },
       })
     } catch (err) {
       console.error(err)
@@ -110,7 +110,7 @@ export function MaterialsTab({
   }
 
   function openChat(chatId: string) {
-    navigate('/chat', { state: { batchId, chatId } })
+    navigate(`/batches/${batchId}/chats/${chatId}`)
   }
 
   return (

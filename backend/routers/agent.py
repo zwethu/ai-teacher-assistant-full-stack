@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from services.agent_gateway import start_chat_run
 from services.chat_service import get_chat
@@ -30,12 +30,17 @@ router = APIRouter()
 # Request / Response models
 # ---------------------------------------------------------------------------
 
+class ConnectorState(BaseModel):
+    web_search: bool = True
+    google_workspace: bool = False
+
+
 class AgentInvokeRequest(BaseModel):
     """Minimal request — batch context is loaded from Firestore, not trusted from client."""
     message: str
     chat_id: str
     batch_id: str
-    enable_web_search: bool = True
+    connectors: ConnectorState = Field(default_factory=ConnectorState)
 
 
 class AgentInvokeResponse(BaseModel):
@@ -79,7 +84,7 @@ async def invoke_agent(
         chat_id=body.chat_id,
         lecturer_id=lecturer_id,
         lecturer_email=user.get("email", ""),
-        enable_web_search=body.enable_web_search,
+        connectors=body.connectors.model_dump(),
         background_tasks=background_tasks,
     )
 

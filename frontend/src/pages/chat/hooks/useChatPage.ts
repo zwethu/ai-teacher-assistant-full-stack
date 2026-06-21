@@ -3,7 +3,9 @@ import {
   useEffect,
   useRef,
   useState,
+  type Dispatch,
   type KeyboardEvent,
+  type SetStateAction,
 } from 'react'
 import axios from 'axios'
 import { useLocation, useNavigate } from 'react-router-dom'
@@ -20,12 +22,18 @@ import {
   updateChatTitle,
 } from '../../../services/chatService'
 import { subscribeAgentRun } from '../../../services/agentRunStream'
+import { checkGoogleAuthStatus } from '../../../services/authService'
 import { emitChatCreated } from '../../../utils/chatEvents'
 
 type ChatLocationState = {
   batchId?: string
   chatId?: string
   initialMessage?: string
+}
+
+type ConnectorsState = {
+  web_search: boolean
+  google_workspace: boolean
 }
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
@@ -66,6 +74,7 @@ export function useChatPage() {
   const pendingInitialMessageRef = useRef<string | null>(null)
   const runUnsubscribeRef = useRef<(() => void) | null>(null)
   const runFallbackTimerRef = useRef<number | null>(null)
+  const googleWorkspaceManuallyDisabledRef = useRef(false)
 
   const [batches, setBatches] = useState<Batch[]>([])
   const [batchesLoading, setBatchesLoading] = useState(true)
@@ -88,10 +97,48 @@ export function useChatPage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const renameInputRef = useRef<HTMLInputElement>(null)
   
-  const [connectors, setConnectors] = useState({
+  const [connectors, setConnectors] = useState<ConnectorsState>({
     web_search: true,
     google_workspace: false,
   })
+
+  const updateConnectors: Dispatch<SetStateAction<ConnectorsState>> = useCallback((value) => {
+    setConnectors((prev) => {
+      const next = typeof value === 'function' ? value(prev) : value
+      if (prev.google_workspace && !next.google_workspace) {
+        googleWorkspaceManuallyDisabledRef.current = true
+      }
+      if (!prev.google_workspace && next.google_workspace) {
+        googleWorkspaceManuallyDisabledRef.current = false
+      }
+      return next
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!user) return
+    let cancelled = false
+
+    checkGoogleAuthStatus()
+      .then((status) => {
+        if (cancelled) return
+        const hasValidGoogle = status.valid && status.has_google_scopes
+        setConnectors((prev) => ({
+          ...prev,
+          google_workspace:
+            hasValidGoogle && !googleWorkspaceManuallyDisabledRef.current,
+        }))
+      })
+      .catch((err) => {
+        console.error(err)
+        if (cancelled) return
+        setConnectors((prev) => ({ ...prev, google_workspace: false }))
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [user])
 
   useEffect(() => {
     if (!user) return
@@ -418,7 +465,7 @@ export function useChatPage() {
     handleDeleteChat,
     showWelcome,
     connectors,
-    setConnectors,
+    setConnectors: updateConnectors,
   }
 }
 

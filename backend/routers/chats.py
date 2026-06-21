@@ -3,7 +3,7 @@
 import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from services.agent_gateway import start_chat_run
 from services.batch_service import get_batch
@@ -26,10 +26,14 @@ class CreateChatBody(BaseModel):
     title: str = "New Chat"
 
 
+class ConnectorState(BaseModel):
+    web_search: bool = True
+    google_workspace: bool = False
+
+
 class SendMessageBody(BaseModel):
     content: str
-    enable_web_search: bool = True
-    connectors: dict = {"web_search": True, "google_workspace": False}
+    connectors: ConnectorState = Field(default_factory=ConnectorState)
 
 
 class UpdateTitleBody(BaseModel):
@@ -135,6 +139,6 @@ async def send_message_endpoint(
         chat_id=chat_id,
         lecturer_id=lecturer_id,
         lecturer_email=current_user.get("email", ""),
-        connectors=body.connectors,
+        connectors=body.connectors.model_dump(),
         background_tasks=background_tasks,
     )

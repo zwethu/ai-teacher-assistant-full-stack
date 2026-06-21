@@ -51,6 +51,10 @@ GOOGLE_OAUTH_REQUIRED_DETAIL = {
     "message": "Google OAuth connection is required for Google Workspace actions.",
     "connect_url": "/auth/google-scopes",
 }
+EMAIL_SEND_CONFIRMATION_REQUIRED_DETAIL = {
+    "code": "EMAIL_SEND_CONFIRMATION_REQUIRED",
+    "message": "Email sending requires explicit user confirmation.",
+}
 
 
 def _verify_secret(secret: str) -> None:
@@ -147,6 +151,7 @@ class EmailRequest(BaseModel):
     subject: str
     body: str
     recipients: list[str]
+    confirmed_send: bool = False
 
 
 class CalendarRequest(BaseModel):
@@ -412,6 +417,12 @@ async def send_email(
     x_pnai_agent_secret: str = Header(None),
 ) -> dict[str, Any]:
     _verify_secret(x_pnai_agent_secret)
+    if not req.confirmed_send:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=EMAIL_SEND_CONFIRMATION_REQUIRED_DETAIL,
+        )
+
     ctx = req.context
     _validate_run_and_oauth(ctx.batch_id, ctx.chat_id, ctx.run_id, ctx.lecturer_id)
 

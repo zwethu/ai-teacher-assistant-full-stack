@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { AnswerRecord } from '../../types/catGame.types';
+import CatSprite from './CatSprite';
 
 type Props = {
   answers: AnswerRecord[];
@@ -44,10 +45,11 @@ export default function ResultScreen({ answers, totalQuestions, happiness, fish,
     accuracy >= 50 ? '🐾 Good Study Friend!' :
     '💪 Keep Practicing!';
 
-  const catEmoji =
-    catMood === 'eating' ? '😋' :
-    catMood === 'full'   ? (happiness >= 60 ? '😸' : '😺') :
-    '😺';
+  // Map feeding phase to CatSprite mood
+  const spriteMood =
+    catMood === 'eating'  ? 'eating' :
+    catMood === 'full'    ? (happiness >= 60 ? 'happy' : 'smiling') :
+    'idle';
 
   const catLabel =
     catMood === 'eating' ? 'Nom nom nom...' :
@@ -74,7 +76,7 @@ export default function ResultScreen({ answers, totalQuestions, happiness, fish,
         )}
 
         <div className={`result-cat-wrap ${catMood}`}>
-          <div className="result-cat-emoji">{catEmoji}</div>
+          <CatSprite mood={spriteMood} size="result" />
           <div className="result-cat-bowl">
             {catMood === 'eating' && <span className="bowl-fish">🐟</span>}
             🥣

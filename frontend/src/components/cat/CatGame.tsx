@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import type { AnswerRecord, GameMode } from '../../types/catGame.types';
-import type { MCQQuestion, MatchingQuestion, Question } from '../../types/catGame.types';
-import { MOCK_MCQ, MOCK_MATCHING } from './mockData';
+import type { MCQQuestion, MatchingQuestion, RopeLinkQuestion, Question } from '../../types/catGame.types';
+import { MOCK_MCQ, MOCK_MATCHING, MOCK_ROPELINK } from './mockData';
 import HUD from './HUD';
 import CatSprite from './CatSprite';
 import PetAndChoose from './modes/PetAndChoose';
 import MatchAndTreat from './modes/MatchAndTreat';
+import RopeAndLink from './modes/RopeAndLink';
 import ResultScreen from './ResultScreen';
 import { saveAttempt } from '../../lib/gameSession';
 import './CatGame.css';
@@ -25,18 +26,22 @@ export default function CatGame({
   playerUid,
   assessmentId,
 }: Props) {
-  // Use real questions if provided, otherwise fall back to mock data
   const mcqQuestions = questions
     ? (questions.filter(q => q.type === 'mcq') as MCQQuestion[])
     : MOCK_MCQ;
   const matchingQuestions = questions
     ? (questions.filter(q => q.type === 'matching') as MatchingQuestion[])
     : MOCK_MATCHING;
+  const ropeLinkQuestions = questions
+    ? (questions.filter(q => q.type === 'ropelink') as RopeLinkQuestion[])
+    : MOCK_ROPELINK;
 
-  const activeQuestions = gameMode === 'mcq' ? mcqQuestions : matchingQuestions;
-  const totalQuestions = gameMode === 'mcq'
-    ? mcqQuestions.length
-    : matchingQuestions.reduce((acc, q) => acc + q.pairs.length, 0);
+  const totalQuestions =
+    gameMode === 'mcq'
+      ? mcqQuestions.length
+      : gameMode === 'matching'
+      ? matchingQuestions.reduce((acc, q) => acc + q.pairs.length, 0)
+      : ropeLinkQuestions.reduce((acc, q) => acc + q.pairs.length, 0);
 
   const [gameOver, setGameOver] = useState(false);
   const [happiness, setHappiness] = useState(60);
@@ -74,7 +79,6 @@ export default function CatGame({
     setAnswers(allAnswers);
     setGameOver(true);
 
-    // Save to Firestore if we have real player data
     if (playerUid && assessmentId && !resultSaved) {
       const correct = allAnswers.filter(a => a.correct).length;
       const accuracy = totalQuestions > 0 ? Math.round((correct / totalQuestions) * 100) : 0;
@@ -96,7 +100,6 @@ export default function CatGame({
   }
 
   function handleRestart() {
-    // Restart is only for dev/mock mode — real games are single attempt
     setGameOver(false);
     setHappiness(60);
     setFish(0);
@@ -117,6 +120,13 @@ export default function CatGame({
     );
   }
 
+  const modePill =
+    gameMode === 'mcq'
+      ? '🐾 Answer questions to earn 🐟 fish!'
+      : gameMode === 'matching'
+      ? '🧩 Match the pairs for more 🐟 fish!'
+      : '🪢 Connect each question to its answer!';
+
   return (
     <div className="cat-game-container">
       <div className="room-deco window">🪟</div>
@@ -133,17 +143,13 @@ export default function CatGame({
 
       <div className="cat-center-area">
         <CatSprite mood={catMood} />
-        <div className="mode-pill">
-          {gameMode === 'mcq'
-            ? '🐾 Answer questions to earn 🐟 fish!'
-            : '🧩 Match the pairs for more 🐟 fish!'}
-        </div>
+        <div className="mode-pill">{modePill}</div>
       </div>
 
       <div className="interaction-area">
         {gameMode === 'mcq' && (
           <PetAndChoose
-            questions={activeQuestions as MCQQuestion[]}
+            questions={mcqQuestions}
             onCorrect={handleCorrect}
             onWrong={handleWrong}
             onComplete={handleComplete}
@@ -151,8 +157,16 @@ export default function CatGame({
         )}
         {gameMode === 'matching' && (
           <MatchAndTreat
-            questions={activeQuestions as MatchingQuestion[]}
+            questions={matchingQuestions}
             onMatch={handleMatchPlay}
+            onComplete={handleComplete}
+          />
+        )}
+        {gameMode === 'ropelink' && (
+          <RopeAndLink
+            questions={ropeLinkQuestions}
+            onCorrect={handleCorrect}
+            onWrong={handleWrong}
             onComplete={handleComplete}
           />
         )}

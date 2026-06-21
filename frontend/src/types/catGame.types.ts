@@ -12,14 +12,20 @@ export type MatchingQuestion = {
   pairs: { left: string; right: string }[];
 };
 
-export type Question = MCQQuestion | MatchingQuestion;
+export type RopeLinkQuestion = {
+  id: string;
+  type: 'ropelink';
+  pairs: { question: string; answer: string }[];
+};
+
+export type Question = MCQQuestion | MatchingQuestion | RopeLinkQuestion;
 
 export type AnswerRecord = {
   questionId: string;
   correct: boolean;
 };
 
-export type GameMode = 'mcq' | 'matching';
+export type GameMode = 'mcq' | 'matching' | 'ropelink';
 
 export type GameState = 'playing' | 'result';
 

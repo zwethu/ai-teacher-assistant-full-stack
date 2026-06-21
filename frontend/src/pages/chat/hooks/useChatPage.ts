@@ -24,9 +24,11 @@ import {
 } from '../../../services/chatService'
 import {
   subscribeAgentRun,
+  type AgentRunDelta,
   type AgentRunEvent,
   type AgentRunStatus,
   type AgentRunStep,
+  type AgentRunStreamMeta,
 } from '../../../services/agentRunStream'
 import { checkGoogleAuthStatus } from '../../../services/authService'
 import { emitChatCreated } from '../../../utils/chatEvents'
@@ -139,6 +141,7 @@ export function useChatPage() {
 
   const pendingInitialMessageRef = useRef<string | null>(null)
   const runUnsubscribesRef = useRef<Record<string, () => void>>({})
+  const runDeltaIndexesRef = useRef<Record<string, Set<number>>>({})
   const runFallbackTimerRef = useRef<number | null>(null)
   const runPollIntervalRef = useRef<Record<string, number>>({})
 
@@ -415,6 +418,8 @@ export function useChatPage() {
       },
       onEvent: (event) => appendRunEvent(runId, event),
       onStep: (step) => upsertRunStep(runId, step),
+      onDelta: (delta) => appendRunDelta(runId, delta, chatId, pendingId),
+      onStreamMeta: (meta) => updateRunStreamMeta(runId, meta),
       onRunError: (message) => updateRunError(runId, message),
       onDisconnected: (connected) => updateRunConnection(runId, connected),
       onError: (error) => {
@@ -440,6 +445,7 @@ export function useChatPage() {
   function unsubscribeFromRun(runId: string) {
     runUnsubscribesRef.current[runId]?.()
     delete runUnsubscribesRef.current[runId]
+    delete runDeltaIndexesRef.current[runId]
     stopFallbackTimers(runId)
   }
 
@@ -588,6 +594,92 @@ export function useChatPage() {
             (a, b) => (a.created_at || 0) - (b.created_at || 0) || a.event_id.localeCompare(b.event_id),
           )
       return { ...prev, [runId]: { ...current, events } }
+    })
+  }
+
+  function appendRunDelta(
+    runId: string,
+    delta: AgentRunDelta,
+    chatId: string,
+    pendingId: string,
+  ) {
+    const indexes = runDeltaIndexesRef.current[runId] || new Set<number>()
+    if (indexes.has(delta.index)) return
+    indexes.add(delta.index)
+    runDeltaIndexesRef.current[runId] = indexes
+
+    setRunStates((prev) => {
+      const current = prev[runId] || {
+        status: 'running' as AgentRunStatus,
+        events: [],
+        steps: {},
+      }
+      return {
+        ...prev,
+        [runId]: {
+          ...current,
+          streamText: `${current.streamText || ''}${delta.delta}`,
+          streamDeltaIndexes: {
+            ...(current.streamDeltaIndexes || {}),
+            [delta.index]: true,
+          },
+        },
+      }
+    })
+
+    setMessages((prev) => {
+      const hasFinal = prev.some(
+        (msg) => msg.run_id === runId && msg.role === 'assistant' && !msg.pending,
+      )
+      if (hasFinal) return prev
+
+      const pendingIndex = prev.findIndex(
+        (msg) => msg.message_id === pendingId || (msg.pending && msg.run_id === runId),
+      )
+
+      if (pendingIndex >= 0) {
+        return prev.map((msg) =>
+          msg.message_id === pendingId || (msg.pending && msg.run_id === runId)
+            ? {
+                ...msg,
+                content: `${msg.content || ''}${delta.delta}`,
+                status: 'pending',
+                pending: true,
+              }
+            : msg,
+        )
+      }
+
+      return [
+        ...prev,
+        {
+          message_id: pendingId,
+          chat_id: chatId,
+          role: 'assistant',
+          content: delta.delta,
+          created_at: new Date().toISOString(),
+          status: 'pending',
+          run_id: runId,
+          pending: true,
+        },
+      ]
+    })
+  }
+
+  function updateRunStreamMeta(runId: string, meta: AgentRunStreamMeta) {
+    setRunStates((prev) => {
+      const current = prev[runId] || {
+        status: 'running' as AgentRunStatus,
+        events: [],
+        steps: {},
+      }
+      return {
+        ...prev,
+        [runId]: {
+          ...current,
+          streamDone: meta.done ?? current.streamDone,
+        },
+      }
     })
   }
 
@@ -780,24 +872,66 @@ export function useChatPage() {
     setTimeout(() => renameInputRef.current?.focus(), 50)
   }
 
+  function cancelRename() {
+    setRenamingId(null)
+    setRenameValue('')
+  }
+
   async function commitRename() {
     if (!renamingId || !selectedBatch) return
-    const title = renameValue.trim() || 'New Chat'
-    await updateChatTitle(selectedBatch.id, renamingId, title).catch(console.error)
-    setChats((prev) => prev.map((c) => (c.chat_id === renamingId ? { ...c, title } : c)))
-    if (activeChat?.chat_id === renamingId) {
+    const chatId = renamingId
+    const title = renameValue.trim()
+    if (!title) {
+      cancelRename()
+      return
+    }
+    try {
+      await updateChatTitle(selectedBatch.id, chatId, title)
+    } catch (err) {
+      console.error(err)
+      return
+    }
+    setChats((prev) => prev.map((c) => (c.chat_id === chatId ? { ...c, title } : c)))
+    if (activeChat?.chat_id === chatId) {
       setActiveChat((prev) => (prev ? { ...prev, title } : prev))
     }
-    setRenamingId(null)
+    cancelRename()
   }
 
   async function handleDeleteChat(chat: Chat) {
     if (!selectedBatch) return
-    await deleteChat(selectedBatch.id, chat.chat_id).catch(console.error)
+    const isActiveChat = activeChat?.chat_id === chat.chat_id
+    const runIds = new Set<string>()
+    if (chat.active_run_id) runIds.add(chat.active_run_id)
+    if (chat.last_run_id) runIds.add(chat.last_run_id)
+    if (isActiveChat) {
+      collectRunIds(messages, activeChat).forEach((runId) => runIds.add(runId))
+    }
+
+    try {
+      await deleteChat(selectedBatch.id, chat.chat_id)
+    } catch (err) {
+      console.error(err)
+      return
+    }
+
+    runIds.forEach((runId) => unsubscribeFromRun(runId))
+    setRunStates((prev) => {
+      const next = { ...prev }
+      runIds.forEach((runId) => {
+        delete next[runId]
+      })
+      return next
+    })
     setChats((prev) => prev.filter((c) => c.chat_id !== chat.chat_id))
-    if (activeChat?.chat_id === chat.chat_id) {
+    if (isActiveChat) {
+      setActiveChat(null)
+      setMessages([])
+      setCurrentRunId(null)
+      setSending(false)
       navigate('/chat')
     }
+    cancelRename()
     emitChatCreated()
   }
 
@@ -850,6 +984,7 @@ export function useChatPage() {
     handleTextareaInput,
     startRename,
     commitRename,
+    cancelRename,
     handleDeleteChat,
     showWelcome,
     connectors,

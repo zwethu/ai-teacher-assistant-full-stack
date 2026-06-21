@@ -147,6 +147,44 @@ def write_final_message(
         logger.warning("RTDB write_final_message failed run_id=%s: %s", run_id, exc)
 
 
+def write_stream_delta(run_id: str, index: int, delta: str) -> None:
+    """Write one assistant text stream chunk to RTDB."""
+    if not delta:
+        return
+    if not _ensure_init():
+        return
+    try:
+        key = f"{index:06d}"
+        _ref(f"agentRuns/{run_id}/stream_deltas/{key}").set({
+            "index": index,
+            "delta": delta,
+            "created_at": int(time.time()),
+        })
+    except Exception as exc:
+        logger.warning("RTDB write_stream_delta failed run_id=%s index=%s: %s", run_id, index, exc)
+
+
+def write_stream_meta(
+    run_id: str,
+    *,
+    done: bool = False,
+    chunk_count: int = 0,
+    final_length: int = 0,
+) -> None:
+    """Write assistant text stream metadata to RTDB."""
+    if not _ensure_init():
+        return
+    try:
+        _ref(f"agentRuns/{run_id}/stream_meta").set({
+            "done": done,
+            "chunk_count": chunk_count,
+            "final_length": final_length,
+            "updated_at": int(time.time()),
+        })
+    except Exception as exc:
+        logger.warning("RTDB write_stream_meta failed run_id=%s: %s", run_id, exc)
+
+
 def write_run_error(run_id: str, message: str) -> None:
     """Write a user-safe run error node for frontend failure details."""
     if not _ensure_init():
@@ -158,3 +196,19 @@ def write_run_error(run_id: str, message: str) -> None:
         })
     except Exception as exc:
         logger.warning("RTDB write_run_error failed run_id=%s: %s", run_id, exc)
+
+
+def delete_chat_rtdb_state(chat_id: str, run_ids: list[str] | None = None) -> None:
+    """Best-effort cleanup for chat/run state mirrored in RTDB."""
+    if not _ensure_init():
+        return
+    try:
+        _ref(f"chats/{chat_id}/activeRunId").delete()
+    except Exception as exc:
+        logger.warning("RTDB activeRunId cleanup failed chat_id=%s: %s", chat_id, exc)
+
+    for run_id in run_ids or []:
+        try:
+            _ref(f"agentRuns/{run_id}").delete()
+        except Exception as exc:
+            logger.warning("RTDB run cleanup failed run_id=%s: %s", run_id, exc)

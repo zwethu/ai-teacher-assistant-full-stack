@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 BATCHES_COLLECTION = "batches"
 CHATS_SUBCOLLECTION = "chats"
 MESSAGES_SUBCOLLECTION = "messages"
+RUNS_SUBCOLLECTION = "runs"
 
 
 # ---------------------------------------------------------------------------
@@ -31,6 +32,10 @@ def _chats_col(batch_id: str):
 
 def _messages_col(batch_id: str, chat_id: str):
     return _chats_col(batch_id).document(chat_id).collection(MESSAGES_SUBCOLLECTION)
+
+
+def _runs_col(batch_id: str, chat_id: str):
+    return _chats_col(batch_id).document(chat_id).collection(RUNS_SUBCOLLECTION)
 
 
 def _chat_to_dict(doc_id: str, data: dict[str, Any]) -> dict[str, Any]:
@@ -151,11 +156,24 @@ def get_chat(batch_id: str, chat_id: str, lecturer_id: str) -> dict[str, Any] | 
 def delete_chat(batch_id: str, chat_id: str, lecturer_id: str) -> bool:
     chat_ref = _chats_col(batch_id).document(chat_id)
     snap = chat_ref.get()
-    if not snap.exists or (snap.to_dict() or {}).get("lecturer_id") != lecturer_id:
+    data = snap.to_dict() or {}
+    if not snap.exists or data.get("lecturer_id") != lecturer_id:
         return False
+    if data.get("hidden"):
+        return False
+    run_ids: list[str] = []
+    for run in _runs_col(batch_id, chat_id).stream():
+        run_ids.append(run.id)
+        run.reference.delete()
     for msg in _messages_col(batch_id, chat_id).stream():
         msg.reference.delete()
     chat_ref.delete()
+    try:
+        from utils.rtdb_client import delete_chat_rtdb_state
+
+        delete_chat_rtdb_state(chat_id, run_ids)
+    except Exception as exc:
+        logger.warning("RTDB cleanup skipped for chat %s: %s", chat_id, exc)
     return True
 
 
@@ -163,9 +181,19 @@ def delete_all_batch_chats(batch_id: str) -> None:
     """Delete all chats and their messages for a batch (used during batch deletion)."""
     col = _chats_col(batch_id)
     for chat_doc in col.stream():
+        run_ids: list[str] = []
+        for run in _runs_col(batch_id, chat_doc.id).stream():
+            run_ids.append(run.id)
+            run.reference.delete()
         for msg in _messages_col(batch_id, chat_doc.id).stream():
             msg.reference.delete()
         chat_doc.reference.delete()
+        try:
+            from utils.rtdb_client import delete_chat_rtdb_state
+
+            delete_chat_rtdb_state(chat_doc.id, run_ids)
+        except Exception as exc:
+            logger.warning("RTDB cleanup skipped for chat %s: %s", chat_doc.id, exc)
     logger.info("Deleted all chats for batch %s", batch_id)
 
 

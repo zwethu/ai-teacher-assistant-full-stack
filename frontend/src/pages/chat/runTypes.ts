@@ -11,4 +11,7 @@ export type RunUiState = {
   streamError?: string
   runError?: string
   liveConnected?: boolean
+  streamText?: string
+  streamDeltaIndexes?: Record<number, true>
+  streamDone?: boolean
 }

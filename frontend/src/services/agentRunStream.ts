@@ -44,11 +44,26 @@ export type AgentRunStep = {
   updated_at?: number
 }
 
+export type AgentRunDelta = {
+  index: number
+  delta: string
+  created_at?: number
+}
+
+export type AgentRunStreamMeta = {
+  done?: boolean
+  chunk_count?: number
+  final_length?: number
+  updated_at?: number
+}
+
 type SubscribeAgentRunOptions = {
   onStatus?: (status: AgentRunStatus) => void
   onMessage?: (message: Omit<ChatMessage, 'chat_id'>) => void
   onEvent?: (event: AgentRunEvent) => void
   onStep?: (step: AgentRunStep) => void
+  onDelta?: (delta: AgentRunDelta) => void
+  onStreamMeta?: (meta: AgentRunStreamMeta) => void
   onRunError?: (message: string) => void
   onError?: (error: Error) => void
   onDisconnected?: (connected: boolean) => void
@@ -62,14 +77,20 @@ export function subscribeAgentRun(
     const runRef = ref(rtdb, `agentRuns/${runId}`)
     const seenEvents = new Set<string>()
     const seenMessages = new Set<string>()
+    const seenDeltaIndexes = new Set<number>()
 
     const handleError = (error: Error) => {
       options.onError?.(error)
     }
 
-    void loadExistingRunSnapshot(runId, runRef, options, seenEvents, seenMessages).catch(
-      handleError,
-    )
+    void loadExistingRunSnapshot(
+      runId,
+      runRef,
+      options,
+      seenEvents,
+      seenMessages,
+      seenDeltaIndexes,
+    ).catch(handleError)
 
     const unsubscribers = [
       onValue(
@@ -101,6 +122,14 @@ export function subscribeAgentRun(
         },
         handleError,
       ),
+      onValue(
+        child(runRef, 'stream_meta'),
+        (snapshot) => {
+          const meta = normalizeStreamMeta(snapshot.val())
+          if (meta) options.onStreamMeta?.(meta)
+        },
+        handleError,
+      ),
       onChildAdded(
         child(runRef, 'messages'),
         (snapshot) => {
@@ -108,6 +137,16 @@ export function subscribeAgentRun(
           if (!message || seenMessages.has(message.message_id)) return
           seenMessages.add(message.message_id)
           options.onMessage?.(message)
+        },
+        handleError,
+      ),
+      onChildAdded(
+        child(runRef, 'stream_deltas'),
+        (snapshot) => {
+          const delta = normalizeDelta(snapshot.key, snapshot.val())
+          if (!delta || seenDeltaIndexes.has(delta.index)) return
+          seenDeltaIndexes.add(delta.index)
+          options.onDelta?.(delta)
         },
         handleError,
       ),
@@ -154,12 +193,34 @@ async function loadExistingRunSnapshot(
   options: SubscribeAgentRunOptions,
   seenEvents: Set<string>,
   seenMessages: Set<string>,
+  seenDeltaIndexes: Set<number>,
 ): Promise<void> {
-  const [eventsSnap, stepsSnap, messagesSnap] = await Promise.all([
+  const [eventsSnap, stepsSnap, messagesSnap, deltasSnap, streamMetaSnap] = await Promise.all([
     get(child(runRef, 'events')),
     get(child(runRef, 'steps')),
     get(child(runRef, 'messages')),
+    get(child(runRef, 'stream_deltas')),
+    get(child(runRef, 'stream_meta')),
   ])
+
+  if (deltasSnap.exists()) {
+    const raw = deltasSnap.val() as Record<string, unknown>
+    const deltas = Object.entries(raw)
+      .map(([key, value]) => normalizeDelta(key, value))
+      .filter((delta): delta is AgentRunDelta => Boolean(delta))
+      .sort((a, b) => a.index - b.index)
+
+    for (const delta of deltas) {
+      if (seenDeltaIndexes.has(delta.index)) continue
+      seenDeltaIndexes.add(delta.index)
+      options.onDelta?.(delta)
+    }
+  }
+
+  if (streamMetaSnap.exists()) {
+    const meta = normalizeStreamMeta(streamMetaSnap.val())
+    if (meta) options.onStreamMeta?.(meta)
+  }
 
   if (eventsSnap.exists()) {
     const raw = eventsSnap.val() as Record<string, unknown>
@@ -216,7 +277,7 @@ function normalizeEvent(
 ): AgentRunEvent | null {
   if (!raw || typeof raw !== 'object') return null
   const value = raw as Record<string, unknown>
-  return {
+  const event = {
     event_id: String(value.event_id || key || `${runId}-event`),
     run_id: String(value.run_id || runId),
     kind: String(value.kind || 'process'),
@@ -230,6 +291,37 @@ function normalizeEvent(
     tool_call_id: value.tool_call_id ? String(value.tool_call_id) : undefined,
     parent_id: value.parent_id ? String(value.parent_id) : undefined,
     created_at: toNumber(value.created_at),
+  }
+  if (import.meta.env.DEV && event.kind === 'thinking') {
+    console.debug('[agentRunStream] thinking event', event)
+  }
+  return event
+}
+
+function normalizeDelta(key: string | null, raw: unknown): AgentRunDelta | null {
+  if (!raw || typeof raw !== 'object') return null
+  const value = raw as Record<string, unknown>
+  const indexFromValue = Number(value.index)
+  const indexFromKey = key ? Number(key) : NaN
+  const index = Number.isFinite(indexFromValue) ? indexFromValue : indexFromKey
+  if (!Number.isFinite(index)) return null
+  const delta = typeof value.delta === 'string' ? value.delta : ''
+  if (!delta) return null
+  return {
+    index,
+    delta,
+    created_at: toNumber(value.created_at),
+  }
+}
+
+function normalizeStreamMeta(raw: unknown): AgentRunStreamMeta | null {
+  if (!raw || typeof raw !== 'object') return null
+  const value = raw as Record<string, unknown>
+  return {
+    done: typeof value.done === 'boolean' ? value.done : undefined,
+    chunk_count: toNumber(value.chunk_count),
+    final_length: toNumber(value.final_length),
+    updated_at: toNumber(value.updated_at),
   }
 }
 

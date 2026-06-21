@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+import json
 from typing import Any
 
 from fastapi import BackgroundTasks, HTTPException, status
@@ -37,12 +38,14 @@ import os
 
 from entity.Batch import BatchModel
 from services.agent_engine_client import get_agent_engine_resource_name, stream_agent_response
+from services.agent_platform_sessions import get_agent_session_state
 from services.agent_sessions import (
     create_agent_run_record,
     ensure_chat_agent_session,
     mark_agent_run_done,
     mark_agent_run_failed,
 )
+from services.artifact_service import save_lesson_plan_draft_from_session
 from services.batch_service import get_batch
 from services.chat_service import add_message
 from utils.rtdb_client import (
@@ -82,6 +85,9 @@ async def start_chat_run(
     lecturer_email: str,
     connectors: dict,
     background_tasks: BackgroundTasks,
+    workflow_type: str = "",
+    week: int | None = None,
+    save_draft: bool = False,
 ) -> dict[str, Any]:
     """Persist the user message, create a run, start the agent in the background.
 
@@ -155,6 +161,9 @@ async def start_chat_run(
         agent_engine_resource_name=agent_engine_resource_name,
         connectors=connectors,
         google_oauth_status=google_oauth_status,
+        workflow_type=workflow_type,
+        week=week,
+        save_draft=save_draft,
     )
 
     # --- 5. Build trusted session state for the agent ---
@@ -211,6 +220,9 @@ def _build_session_state(
     lecturer_email: str,
     connectors: dict,
     google_oauth_status: str,
+    workflow_type: str = "",
+    week: int | None = None,
+    save_draft: bool = False,
 ) -> dict[str, Any]:
     """Build the trusted session state payload sent to the agent.
 
@@ -238,6 +250,9 @@ def _build_session_state(
         "google_workspace_enabled": connectors.get("google_workspace", False),
         "google_oauth_status": google_oauth_status,
         "backend_internal_url": os.getenv("PNAI_BACKEND_INTERNAL_URL") or os.getenv("BACKEND_PUBLIC_URL", ""),
+        "workflow_type": workflow_type,
+        "requested_week": week,
+        "save_draft": save_draft,
     }
 
 
@@ -257,6 +272,53 @@ def safe_run_error_message(exc: Exception) -> str:
     if "rtdb" in text or "realtime database" in text:
         return "Live updates were unavailable while the agent was running."
     return "Unexpected backend error."
+
+
+def extract_lesson_plan_full_from_state(state: dict[str, Any]) -> dict[str, Any] | None:
+    """Return a plausible LessonPlanFull payload from Agent Platform state."""
+    active_type = str(state.get("active_artifact_type") or "").strip()
+    if active_type and active_type != "lesson_plan":
+        return None
+
+    raw = state.get("lesson_plan_full")
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+    elif hasattr(raw, "model_dump"):
+        raw = raw.model_dump(mode="json")
+
+    if not isinstance(raw, dict):
+        return None
+
+    title = str(raw.get("title") or "").strip()
+    subject = str(raw.get("subject") or raw.get("course_name") or "").strip()
+    week = raw.get("week")
+    objectives = raw.get("objectives")
+    timeline = raw.get("detailed_timeline")
+    try:
+        week_int = int(week)
+    except (TypeError, ValueError):
+        return None
+    if not title or week_int < 1 or not subject:
+        return None
+    if not objectives and not timeline:
+        return None
+    return raw
+
+
+def _draft_message_metadata(draft: dict[str, Any] | None) -> dict[str, Any]:
+    if not draft:
+        return {}
+    return {
+        "draft_artifact_id": str(draft.get("id") or draft.get("artifact_id") or ""),
+        "artifact_type": "lesson_plan",
+        "week": draft.get("week"),
+        "exportable": True,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -295,13 +357,55 @@ async def _run_agent_background(
         if not final_text:
             raise RuntimeError("Agent Engine stream completed without any assistant text")
 
+        metadata: dict[str, Any] = {}
+        try:
+            session_state_after = await get_agent_session_state(
+                resource_name=get_agent_engine_resource_name(),
+                user_id=lecturer_id,
+                session_id=agent_session_id,
+            )
+            lesson_plan_payload = extract_lesson_plan_full_from_state(session_state_after)
+            if lesson_plan_payload:
+                draft = save_lesson_plan_draft_from_session(
+                    batch_id=batch_id,
+                    lecturer_id=lecturer_id,
+                    chat_id=chat_id,
+                    run_id=run_id,
+                    lesson_plan_payload=lesson_plan_payload,
+                    rendered_markdown=final_text,
+                    lecturer_email=str(
+                        session_state_after.get("lecturer_email")
+                        or session_state.get("lecturer_email")
+                        or ""
+                    ),
+                )
+                metadata = _draft_message_metadata(draft)
+                logger.info(
+                    "lesson plan draft saved run_id=%s artifact_id=%s week=%s",
+                    run_id,
+                    metadata.get("draft_artifact_id"),
+                    metadata.get("week"),
+                )
+        except Exception as draft_exc:
+            logger.warning(
+                "Lesson plan generated, but draft artifact save failed run_id=%s: %s",
+                run_id,
+                draft_exc,
+            )
+
         # Persist assistant message to Firestore
         final_msg = add_message(
-            batch_id, chat_id, "assistant", final_text, lecturer_id, run_id=run_id,
+            batch_id,
+            chat_id,
+            "assistant",
+            final_text,
+            lecturer_id,
+            run_id=run_id,
+            metadata=metadata,
         )
 
         # Write final message to RTDB for frontend live message display
-        write_final_message(run_id, final_text)
+        write_final_message(run_id, final_text, metadata=metadata)
 
         # Mark run complete
         try:

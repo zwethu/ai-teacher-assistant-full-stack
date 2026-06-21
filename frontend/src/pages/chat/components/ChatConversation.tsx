@@ -76,6 +76,7 @@ export function ChatInput({
 }
 
 type MessagesPanelProps = {
+  batchId?: string
   messages: ChatMessage[]
   messagesLoading: boolean
   showWelcome: boolean
@@ -86,6 +87,7 @@ type MessagesPanelProps = {
 }
 
 export function ChatMessagesPanel({
+  batchId,
   messages,
   messagesLoading,
   showWelcome,
@@ -112,6 +114,7 @@ export function ChatMessagesPanel({
                 key={msg.message_id}
                 msg={msg}
                 run={msg.run_id ? runStates[msg.run_id] : undefined}
+                batchId={batchId}
               />
             ))}
             {sending && !safeMessages.some((msg) => msg.pending) && <ThinkingIndicator />}

@@ -40,6 +40,15 @@ export type DeleteArtifactResult = {
   deletion_id: string
 }
 
+export type LessonPlanExportResult = {
+  artifact_id: string
+  status: string
+  version?: number
+  doc_url?: string
+  doc_id?: string
+  drive_file_name?: string
+}
+
 export async function listArtifacts(
   batchId: string,
   filters: { type?: string; week?: number; current?: boolean; status?: string } = {},
@@ -66,5 +75,15 @@ export async function deleteArtifact(
   const res = await api.delete<DeleteArtifactResult>(`/batches/${batchId}/artifacts/${artifactId}`, {
     params: { delete_google: deleteGoogle },
   })
+  return res.data
+}
+
+export async function exportLessonPlanDraftToGoogleDocs(
+  batchId: string,
+  artifactId: string,
+): Promise<LessonPlanExportResult> {
+  const res = await api.post<LessonPlanExportResult>(
+    `/batches/${batchId}/artifacts/${artifactId}/export/google-docs`,
+  )
   return res.data
 }

@@ -19,7 +19,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from services.agent_gateway import start_chat_run
-from services.chat_service import get_chat
+from services.chat_service import get_chat, get_or_create_workflow_chat
 from utils.firebase_auth import CurrentUser, get_current_user
 
 logger = logging.getLogger(__name__)
@@ -38,8 +38,11 @@ class ConnectorState(BaseModel):
 class AgentInvokeRequest(BaseModel):
     """Minimal request — batch context is loaded from Firestore, not trusted from client."""
     message: str
-    chat_id: str
     batch_id: str
+    chat_id: str | None = None
+    workflow_type: str | None = None
+    week: int | None = None
+    save_draft: bool = False
     connectors: ConnectorState = Field(default_factory=ConnectorState)
 
 
@@ -70,27 +73,45 @@ async def invoke_agent(
     """
     lecturer_id: str = user["uid"]
 
-    # Verify the chat belongs to this lecturer before creating a run.
-    chat = get_chat(body.batch_id, body.chat_id, lecturer_id)
-    if chat is None:
+    chat_id = body.chat_id
+    if chat_id:
+        chat = get_chat(body.batch_id, chat_id, lecturer_id)
+        if chat is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Chat not found or access denied",
+            )
+    elif body.workflow_type:
+        chat = get_or_create_workflow_chat(
+            batch_id=body.batch_id,
+            lecturer_id=lecturer_id,
+            workflow_type=body.workflow_type,
+            week=body.week,
+            title=f"{body.workflow_type.replace('_', ' ').title()} Workflow",
+        )
+        chat_id = str(chat["chat_id"])
+    else:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Chat not found or access denied",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="chat_id or workflow_type is required",
         )
 
     result = await start_chat_run(
         user_message=body.message,
         batch_id=body.batch_id,
-        chat_id=body.chat_id,
+        chat_id=chat_id,
         lecturer_id=lecturer_id,
         lecturer_email=user.get("email", ""),
         connectors=body.connectors.model_dump(),
         background_tasks=background_tasks,
+        workflow_type=body.workflow_type or "",
+        week=body.week,
+        save_draft=body.save_draft,
     )
 
     return AgentInvokeResponse(
         run_id=result["run_id"],
-        chat_id=body.chat_id,
+        chat_id=chat_id,
         rtdb_run_path=result["rtdb_run_path"],
         status=result["status"],
     )

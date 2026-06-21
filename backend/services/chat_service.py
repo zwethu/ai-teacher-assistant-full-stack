@@ -47,6 +47,10 @@ def _chat_to_dict(doc_id: str, data: dict[str, Any]) -> dict[str, Any]:
         "last_run_id": str(data.get("last_run_id") or ""),
         "last_run_status": str(data.get("last_run_status") or ""),
         "agent_engine_resource_name": str(data.get("agent_engine_resource_name") or ""),
+        "type": str(data.get("type") or "chat"),
+        "workflow_type": str(data.get("workflow_type") or ""),
+        "week": data.get("week"),
+        "hidden": bool(data.get("hidden", False)),
         "created_at": (created.isoformat() if hasattr(created, "isoformat") else (str(created) if created else None)),
         "updated_at": (updated.isoformat() if hasattr(updated, "isoformat") else (str(updated) if updated else None)),
     }
@@ -60,6 +64,7 @@ def _msg_to_dict(doc_id: str, data: dict[str, Any]) -> dict[str, Any]:
         "role": str(data.get("role") or "user"),
         "content": str(data.get("content") or ""),
         "run_id": str(data.get("run_id") or ""),
+        "metadata": data.get("metadata") or {},
         "created_at": (created.isoformat() if hasattr(created, "isoformat") else (str(created) if created else None)),
     }
 
@@ -68,7 +73,15 @@ def _msg_to_dict(doc_id: str, data: dict[str, Any]) -> dict[str, Any]:
 # Chat CRUD
 # ---------------------------------------------------------------------------
 
-def create_chat(batch_id: str, lecturer_id: str, title: str = "New Chat") -> dict[str, Any]:
+def create_chat(
+    batch_id: str,
+    lecturer_id: str,
+    title: str = "New Chat",
+    chat_type: str = "chat",
+    workflow_type: str = "",
+    week: int | None = None,
+    hidden: bool = False,
+) -> dict[str, Any]:
     col = _chats_col(batch_id)
     chat_id = str(uuid.uuid4())
     agent_session_id = make_agent_session_id(chat_id)
@@ -84,6 +97,10 @@ def create_chat(batch_id: str, lecturer_id: str, title: str = "New Chat") -> dic
             "last_run_id": "",
             "last_run_status": "",
             "agent_engine_resource_name": "",
+            "type": chat_type,
+            "workflow_type": workflow_type,
+            "week": week,
+            "hidden": hidden,
             "title": title.strip() or "New Chat",
             "created_at": SERVER_TIMESTAMP,
             "updated_at": SERVER_TIMESTAMP,
@@ -99,15 +116,26 @@ def create_chat(batch_id: str, lecturer_id: str, title: str = "New Chat") -> dic
         "last_run_id": "",
         "last_run_status": "",
         "agent_engine_resource_name": "",
+        "type": chat_type,
+        "workflow_type": workflow_type,
+        "week": week,
+        "hidden": hidden,
         "title": title,
     }
 
 
-def list_chats(batch_id: str, lecturer_id: str) -> list[dict[str, Any]]:
+def list_chats(
+    batch_id: str,
+    lecturer_id: str,
+    include_hidden: bool = False,
+) -> list[dict[str, Any]]:
     """Return chats for a batch ordered newest first, filtered by lecturer_id."""
     col = _chats_col(batch_id)
     docs = col.where("lecturer_id", "==", lecturer_id).order_by("created_at", direction="DESCENDING").stream()
-    return [_chat_to_dict(doc.id, doc.to_dict() or {}) for doc in docs]
+    chats = [_chat_to_dict(doc.id, doc.to_dict() or {}) for doc in docs]
+    if not include_hidden:
+        chats = [chat for chat in chats if not chat.get("hidden")]
+    return chats
 
 
 def get_chat(batch_id: str, chat_id: str, lecturer_id: str) -> dict[str, Any] | None:
@@ -141,6 +169,38 @@ def delete_all_batch_chats(batch_id: str) -> None:
     logger.info("Deleted all chats for batch %s", batch_id)
 
 
+def get_or_create_workflow_chat(
+    batch_id: str,
+    lecturer_id: str,
+    workflow_type: str,
+    week: int | None,
+    title: str,
+) -> dict[str, Any]:
+    """Return a hidden workflow chat for standalone page runs."""
+    clean_workflow_type = str(workflow_type or "").strip()
+    col = _chats_col(batch_id)
+    docs = (
+        col.where("lecturer_id", "==", lecturer_id)
+        .where("type", "==", "workflow")
+        .where("workflow_type", "==", clean_workflow_type)
+        .where("week", "==", week)
+        .limit(1)
+        .stream()
+    )
+    for doc in docs:
+        return _chat_to_dict(doc.id, doc.to_dict() or {})
+
+    return create_chat(
+        batch_id=batch_id,
+        lecturer_id=lecturer_id,
+        title=title,
+        chat_type="workflow",
+        workflow_type=clean_workflow_type,
+        week=week,
+        hidden=True,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Message CRUD
 # ---------------------------------------------------------------------------
@@ -152,6 +212,7 @@ def add_message(
     content: str,
     lecturer_id: str,
     run_id: str = "",
+    metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Persist one message and bump chat updated_at."""
     msg_id = str(uuid.uuid4())
@@ -164,12 +225,16 @@ def add_message(
     }
     if run_id:
         doc["run_id"] = run_id
+    if metadata:
+        doc["metadata"] = metadata
     col = _messages_col(batch_id, chat_id)
     col.document(msg_id).set(doc)
     _chats_col(batch_id).document(chat_id).update({"updated_at": SERVER_TIMESTAMP})
     result: dict[str, Any] = {"message_id": msg_id, "role": role, "content": content}
     if run_id:
         result["run_id"] = run_id
+    if metadata:
+        result["metadata"] = metadata
     return result
 
 

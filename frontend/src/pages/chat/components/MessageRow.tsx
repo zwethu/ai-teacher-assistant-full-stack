@@ -1,8 +1,14 @@
-import { Bot, User } from 'lucide-react'
+import { useState } from 'react'
+import { Bot, ExternalLink, FileText, Loader2, User } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import rehypeSanitize from 'rehype-sanitize'
 import remarkGfm from 'remark-gfm'
 import type { ChatMessage } from '../../../entity/Chat'
+import { checkGoogleAuthStatus, startGoogleOAuth } from '../../../services/authService'
+import {
+  exportLessonPlanDraftToGoogleDocs,
+  type LessonPlanExportResult,
+} from '../../../services/artifactService'
 import type { RunUiState } from '../runTypes'
 import { RunDetails } from './run/RunDetails'
 import { ThinkingPanel } from './run/ThinkingPanel'
@@ -10,9 +16,11 @@ import { ThinkingPanel } from './run/ThinkingPanel'
 export function MessageRow({
   msg,
   run,
+  batchId,
 }: {
   msg?: ChatMessage | null
   run?: RunUiState
+  batchId?: string
 }) {
   if (!msg) return null
 
@@ -108,9 +116,125 @@ export function MessageRow({
                 </ReactMarkdown>
               ) : null}
             </div>
+            {!isUser && batchId && <LessonPlanExportButton batchId={batchId} msg={msg} />}
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function LessonPlanExportButton({
+  batchId,
+  msg,
+}: {
+  batchId: string
+  msg: ChatMessage
+}) {
+  const metadata = msg.metadata || {}
+  const artifactId = String(metadata.draft_artifact_id || '')
+  const artifactType = String(metadata.artifact_type || '')
+  const exportable = metadata.exportable === true
+  const initialDocUrl = typeof metadata.doc_url === 'string' ? metadata.doc_url : ''
+  const [checkingAuth, setCheckingAuth] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [result, setResult] = useState<LessonPlanExportResult | null>(
+    initialDocUrl
+      ? {
+          artifact_id: artifactId,
+          status: 'confirmed',
+          doc_url: initialDocUrl,
+          version: typeof metadata.version === 'number' ? metadata.version : undefined,
+          drive_file_name:
+            typeof metadata.drive_file_name === 'string' ? metadata.drive_file_name : undefined,
+        }
+      : null,
+  )
+  const [needsGoogle, setNeedsGoogle] = useState(false)
+  const [error, setError] = useState('')
+
+  if (!artifactId || artifactType !== 'lesson_plan' || !exportable) return null
+
+  async function handleExport() {
+    setError('')
+    setNeedsGoogle(false)
+    setCheckingAuth(true)
+    try {
+      const status = await checkGoogleAuthStatus()
+      if (!status.valid || !status.has_google_scopes) {
+        setNeedsGoogle(true)
+        return
+      }
+    } catch {
+      setNeedsGoogle(true)
+      return
+    } finally {
+      setCheckingAuth(false)
+    }
+
+    setExporting(true)
+    try {
+      const exported = await exportLessonPlanDraftToGoogleDocs(batchId, artifactId)
+      setResult(exported)
+    } catch (err) {
+      const maybe = err as { response?: { data?: { detail?: unknown } }; message?: string }
+      const detail = maybe.response?.data?.detail
+      if (detail && typeof detail === 'object' && 'code' in detail) {
+        const code = String((detail as { code?: unknown }).code || '')
+        if (code === 'GOOGLE_OAUTH_REQUIRED') {
+          setNeedsGoogle(true)
+          return
+        }
+      }
+      setError(maybe.message || 'Failed to export lesson plan.')
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3">
+      {result?.doc_url ? (
+        <>
+          <a
+            href={result.doc_url}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+          >
+            <ExternalLink className="h-4 w-4" />
+            Open Google Doc
+          </a>
+          <span className="text-xs text-slate-500">
+            {result.drive_file_name || 'Lesson plan exported'}
+            {result.version ? ` · v${String(result.version).padStart(2, '0')}` : ''}
+          </span>
+        </>
+      ) : (
+        <button
+          type="button"
+          onClick={() => void handleExport()}
+          disabled={checkingAuth || exporting}
+          className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
+        >
+          {checkingAuth || exporting ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <FileText className="h-4 w-4" />
+          )}
+          {exporting ? 'Exporting...' : 'Export to Google Docs'}
+        </button>
+      )}
+      {needsGoogle && (
+        <button
+          type="button"
+          onClick={startGoogleOAuth}
+          className="inline-flex items-center rounded-md border border-emerald-200 bg-white px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50"
+        >
+          Connect Google
+        </button>
+      )}
+      {error && <span className="text-sm text-red-600">{error}</span>}
     </div>
   )
 }

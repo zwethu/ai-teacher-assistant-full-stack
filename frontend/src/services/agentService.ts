@@ -8,8 +8,11 @@ export type AgentConnectors = {
 
 export type AgentInvokePayload = {
   message: string
-  chat_id: string
   batch_id: string
+  chat_id?: string
+  workflow_type?: string
+  week?: number
+  save_draft?: boolean
   connectors?: AgentConnectors
 }
 

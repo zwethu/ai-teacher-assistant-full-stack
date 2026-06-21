@@ -1,6 +1,8 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import type { ToastMessage } from '../types'
 import type { LessonPlan } from '../entity/LessonPlan'
+import type { Batch } from '../entity/Batch'
+import type { ChatMessage } from '../entity/Chat'
 import Toast from '../components/ui/Toast'
 import { getErrorMessage } from '../utils/errors'
 
@@ -26,10 +28,13 @@ import { db } from '../lib/firebase'
 import { useAuth } from '../hooks/useAuth'
 import { useUserCollection } from '../hooks/useUserCollection'
 import { fromFirestore, toFirestore } from '../entity/LessonPlan'
+import { listBatches } from '../services/batchService'
+import { listMessages } from '../services/chatService'
 import { generateLessonPlan } from '../services/agentService'
 import { increaseStress } from '../services/wellnessService'
 import { formatLessonPlanContent as formatContentForDisplay } from '../utils/content'
 import { timeAgo } from '../utils/formatDate'
+import { MessageRow } from './chat/components/MessageRow'
 
 const GRADES = Array.from({ length: 12 }, (_, i) => `Grade ${i + 1}`)
 const DURATIONS = ['30 min', '45 min', '60 min', '90 min']
@@ -38,6 +43,7 @@ const INITIAL_FORM = {
   subject: '',
   grade: 'Grade 6',
   topic: '',
+  week: 1,
   duration: '45 min',
   objectives: '',
 }
@@ -65,6 +71,21 @@ export default function LessonPlans() {
   const [form, setForm] = useState(INITIAL_FORM)
   const [generating, setGenerating] = useState(false)
   const [toast, setToast] = useState<ToastMessage | null>(null)
+  const [batches, setBatches] = useState<Batch[]>([])
+  const [selectedBatchId, setSelectedBatchId] = useState('')
+  const [latestGeneratedMessage, setLatestGeneratedMessage] = useState<ChatMessage | null>(null)
+
+  useEffect(() => {
+    listBatches()
+      .then((data) => {
+        setBatches(data)
+        setSelectedBatchId((current) => current || data[0]?.id || '')
+      })
+      .catch((err) => {
+        console.error(err)
+        showToast('error', 'Could not load batches for lesson-plan generation.')
+      })
+  }, [])
 
   function showToast(type: ToastMessage['type'], message: string) {
     setToast({ type, message })
@@ -79,7 +100,7 @@ export default function LessonPlans() {
   async function handleGenerate(e: FormEvent) {
     e.preventDefault()
 
-    if (!user) return
+    if (!user || !selectedBatchId) return
 
     setGenerating(true)
     try {
@@ -88,11 +109,39 @@ export default function LessonPlans() {
         subject: form.subject.trim(),
         grade: form.grade,
         topic: form.topic.trim(),
+        week: Number(form.week || 1),
         duration: form.duration,
         objectives: form.objectives.trim(),
       }
 
-      const result = await generateLessonPlan(token, payload)
+      const message = [
+        'Generate lesson plan only. Do not export to Google Docs.',
+        `Topic: ${payload.topic}`,
+        `Week: ${payload.week}`,
+        `Grade: ${payload.grade}`,
+        `Duration: ${payload.duration}`,
+        `Difficulty: medium`,
+        `Teaching approach: mixed`,
+        `Prior knowledge: ${payload.objectives}`,
+        `Learning objectives: ${payload.objectives}`,
+      ].join('\n')
+      const result = (await generateLessonPlan(token, {
+        batch_id: selectedBatchId,
+        workflow_type: 'lesson_plan',
+        week: payload.week,
+        save_draft: true,
+        message,
+        connectors: {
+          web_search: true,
+          google_workspace: false,
+        },
+      })) as { run_id: string; chat_id: string }
+      const finalMessage = await waitForAssistantMessage(
+        selectedBatchId,
+        result.chat_id,
+        result.run_id,
+      )
+      setLatestGeneratedMessage(finalMessage)
 
       await addDoc(
         collection(db, 'lesson_plans'),
@@ -103,13 +152,13 @@ export default function LessonPlans() {
           topic: payload.topic,
           duration: payload.duration,
           objectives: payload.objectives,
-          content: result,
+          content: finalMessage.content,
           createdAt: serverTimestamp(),
         }),
       )
 
       setGenerateOpen(false)
-      showToast('success', 'Lesson plan generated and saved successfully.')
+      showToast('success', 'Lesson plan generated. Use the Export button to create a Google Doc.')
       increaseStress(user.uid, 5)
     } catch (err) {
       console.error(err)
@@ -117,6 +166,23 @@ export default function LessonPlans() {
     } finally {
       setGenerating(false)
     }
+  }
+
+  async function waitForAssistantMessage(
+    batchId: string,
+    chatId: string,
+    runId: string,
+  ): Promise<ChatMessage> {
+    const deadline = Date.now() + 180000
+    while (Date.now() < deadline) {
+      const messages = await listMessages(batchId, chatId)
+      const match = [...messages].reverse().find(
+        (msg) => msg.role === 'assistant' && msg.run_id === runId,
+      )
+      if (match?.content) return match
+      await new Promise((resolve) => window.setTimeout(resolve, 2500))
+    }
+    throw new Error('Timed out waiting for generated lesson plan.')
   }
 
   async function handleDelete(item: LessonPlan) {
@@ -156,6 +222,12 @@ export default function LessonPlans() {
           Generate New
         </button>
       </div>
+
+      {latestGeneratedMessage && selectedBatchId && (
+        <div className="mb-6 rounded-xl border border-emerald-100 bg-white p-5 shadow-sm">
+          <MessageRow msg={latestGeneratedMessage} batchId={selectedBatchId} />
+        </div>
+      )}
 
       <div className="relative group overflow-hidden rounded-2xl border border-slate-100 bg-white/90 shadow-sm">
         <div className="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500">
@@ -286,6 +358,24 @@ export default function LessonPlans() {
             >
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+                  Batch
+                </label>
+                <select
+                  required
+                  value={selectedBatchId}
+                  onChange={(e) => setSelectedBatchId(e.target.value)}
+                  className="block w-full rounded-md border border-slate-300 shadow-sm py-2.5 px-2 text-sm focus:border-emerald-500 focus:ring-emerald-500"
+                >
+                  {batches.map((batch) => (
+                    <option key={batch.id} value={batch.id}>
+                      {batch.batch_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1.5">
                   Subject
                 </label>
                 <input
@@ -301,6 +391,21 @@ export default function LessonPlans() {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+                    Week
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    required
+                    value={form.week}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, week: Number(e.target.value || 1) }))
+                    }
+                    className="block w-full rounded-md border border-slate-300 shadow-sm py-2.5 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500"
+                  />
+                </div>
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-1.5">
                     Grade

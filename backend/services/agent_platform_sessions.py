@@ -119,6 +119,30 @@ async def ensure_session_with_state(
     )
 
 
+async def get_agent_session_state(
+    resource_name: str,
+    user_id: str,
+    session_id: str,
+) -> dict[str, Any]:
+    """Fetch Agent Platform session state without logging sensitive values."""
+    service = get_vertex_session_service(resource_name)
+    app_name = _app_name()
+    session = await service.get_session(
+        app_name=app_name,
+        user_id=user_id,
+        session_id=session_id,
+    )
+    state = dict(session.state or {}) if session else {}
+    logger.info(
+        "Fetched Agent Platform session state app=%s user_id=%s session_id=%s keys=%s",
+        app_name,
+        user_id,
+        session_id,
+        sorted(state.keys()),
+    )
+    return state
+
+
 async def _get_session(
     *,
     service: VertexAiSessionService,

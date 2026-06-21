@@ -7,6 +7,7 @@ export type ChatMessage = {
   status?: 'pending' | 'done' | 'failed'
   run_id?: string
   pending?: boolean
+  metadata?: Record<string, unknown>
 }
 
 export type Chat = {
@@ -20,6 +21,10 @@ export type Chat = {
   last_run_id?: string
   last_run_status?: string
   agent_engine_resource_name?: string
+  type?: 'chat' | 'workflow'
+  workflow_type?: string
+  week?: number | null
+  hidden?: boolean
   created_at: string | null
   updated_at: string | null
 }

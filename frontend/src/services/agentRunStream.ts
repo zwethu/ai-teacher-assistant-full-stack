@@ -205,6 +205,7 @@ function normalizeMessage(
     created_at: normalizeTimestamp(value.created_at),
     status: 'done',
     run_id: runId,
+    metadata: isRecord(value.metadata) ? value.metadata : undefined,
   }
 }
 

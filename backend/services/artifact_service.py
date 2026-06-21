@@ -12,12 +12,20 @@ from datetime import datetime, timezone
 from typing import Any
 
 from utils.firestore_client import get_firestore
-from services.google_workspace.drive_folders import delete_drive_file
+from services.google_workspace.credentials import assert_google_oauth_valid
+from services.google_workspace.docs_service import create_lesson_plan_doc_for_user
+from services.google_workspace.drive_folders import (
+    build_artifact_file_name,
+    delete_drive_file,
+    ensure_batch_artifact_folders,
+)
 
 logger = logging.getLogger(__name__)
 
 BATCHES_COLLECTION = "batches"
 ARTIFACTS_SUBCOLLECTION = "artifacts"
+CHATS_SUBCOLLECTION = "chats"
+MESSAGES_SUBCOLLECTION = "messages"
 
 
 def _batch_ref(batch_id: str):
@@ -301,6 +309,235 @@ def save_lesson_plan_artifact(
         "metadata": {},
     }
     return save_versioned_artifact(batch_id, artifact_data)
+
+
+def save_lesson_plan_draft_from_session(
+    batch_id: str,
+    lecturer_id: str,
+    chat_id: str,
+    run_id: str,
+    lesson_plan_payload: dict[str, Any],
+    rendered_markdown: str = "",
+    lecturer_email: str = "",
+) -> dict[str, Any]:
+    """Save or update a draft lesson-plan artifact produced by an Agent Engine run."""
+    if not _batch_owned_by(batch_id, lecturer_id):
+        raise RuntimeError("Batch not found or access denied")
+
+    title = str(lesson_plan_payload.get("title") or "Untitled Lesson Plan").strip()
+    week = lesson_plan_payload.get("week")
+    try:
+        week = int(week)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("lesson_plan_full.week is required for draft artifact save") from exc
+
+    col = _artifacts_col(batch_id)
+    existing = [
+        _doc_to_dict(doc)
+        for doc in col.where("source_run_id", "==", run_id).stream()
+        if (doc.to_dict() or {}).get("artifact_type") == "lesson_plan"
+    ]
+    artifact_id = str(existing[0]["id"]) if existing else str(uuid.uuid4())
+    now = _now()
+    data = {
+        "id": artifact_id,
+        "type": "lesson_plan",
+        "artifact_type": "lesson_plan",
+        "status": "draft",
+        "is_current": False,
+        "version": None,
+        "title": title,
+        "batch_id": batch_id,
+        "week": week,
+        "content_json": lesson_plan_payload,
+        "rendered_markdown": rendered_markdown,
+        "source_run_id": run_id,
+        "source_chat_id": chat_id,
+        "created_by": lecturer_id,
+        "created_by_email": lecturer_email,
+        "updated_at": now,
+        "metadata": {
+            "source": "agent_platform_session",
+            "exportable": True,
+        },
+    }
+    if not existing:
+        data["created_at"] = now
+    col.document(artifact_id).set(data, merge=True)
+    saved = col.document(artifact_id).get()
+    return _doc_to_dict(saved)
+
+
+def export_lesson_plan_draft_to_google_docs(
+    batch_id: str,
+    artifact_id: str,
+    lecturer_id: str,
+) -> dict[str, Any]:
+    """Export a draft lesson-plan artifact to Google Docs and confirm it."""
+    batch_snap = _batch_ref(batch_id).get()
+    if not batch_snap.exists:
+        raise RuntimeError("Batch not found")
+    batch = batch_snap.to_dict() or {}
+    if batch.get("lecturer_id") != lecturer_id:
+        raise PermissionError("Batch not found or access denied")
+
+    ref = _artifacts_col(batch_id).document(artifact_id)
+    snap = ref.get()
+    if not snap.exists:
+        raise RuntimeError("Artifact not found")
+    artifact = _doc_to_dict(snap)
+    artifact_type = str(artifact.get("artifact_type") or artifact.get("type") or "")
+    if artifact_type != "lesson_plan":
+        raise RuntimeError("Artifact is not a lesson plan")
+    if artifact.get("status") not in {"draft", "failed_export"}:
+        raise RuntimeError("Only draft lesson plans can be exported")
+
+    payload = artifact.get("content_json")
+    if not isinstance(payload, dict) or not payload:
+        raise RuntimeError("Draft lesson plan content is missing")
+
+    assert_google_oauth_valid(lecturer_id, ["documents", "drive.file"])
+
+    week = int(payload.get("week") or artifact.get("week") or 0)
+    title = str(payload.get("title") or artifact.get("title") or "Lesson Plan")
+    next_version = _next_confirmed_version(batch_id, "lesson_plan", week)
+    folders = ensure_batch_artifact_folders(
+        uid=lecturer_id,
+        batch_id=batch_id,
+        batch_name=str(batch.get("batch_name") or artifact.get("batch_name") or ""),
+        course_name=str(batch.get("course_name") or artifact.get("course_name") or ""),
+    )
+    lesson_folder = (folders.get("drive_folders") or {}).get("lesson_plan") or {}
+    folder_id = str(lesson_folder.get("id") or "")
+    drive_file_name = build_artifact_file_name(
+        version=next_version,
+        week=week,
+        artifact_type="lesson_plan",
+        title=title,
+    )
+
+    ref.update(
+        {
+            "status": "exporting",
+            "export_error": "",
+            "updated_at": _now(),
+        }
+    )
+    try:
+        doc_result = create_lesson_plan_doc_for_user(
+            uid=lecturer_id,
+            lesson_plan_payload=payload,
+            lecturer_email=str(batch.get("lecturer_email") or artifact.get("created_by_email") or ""),
+            target_folder_id=folder_id,
+            drive_file_name=drive_file_name,
+        )
+    except Exception as exc:
+        safe_error = str(exc)[:1000]
+        ref.update(
+            {
+                "status": "failed_export",
+                "export_error": safe_error,
+                "is_current": False,
+                "updated_at": _now(),
+            }
+        )
+        raise RuntimeError(safe_error) from exc
+
+    _supersede_current_artifacts(batch_id, "lesson_plan", week, artifact_id)
+    updates = {
+        "status": "confirmed",
+        "is_current": True,
+        "version": next_version,
+        "doc_url": doc_result.get("doc_url", ""),
+        "doc_id": doc_result.get("doc_id", ""),
+        "drive_file_name": doc_result.get("drive_file_name", drive_file_name),
+        "drive_folder_id": doc_result.get("drive_folder_id", folder_id),
+        "exported_at": _now(),
+        "updated_at": _now(),
+        "export_error": "",
+    }
+    ref.update(updates)
+    _update_source_message_export_metadata(
+        batch_id=batch_id,
+        artifact=artifact,
+        export_updates=updates,
+    )
+    saved = _doc_to_dict(ref.get())
+    return {
+        "artifact_id": artifact_id,
+        "status": saved.get("status"),
+        "version": saved.get("version"),
+        "doc_url": saved.get("doc_url", ""),
+        "doc_id": saved.get("doc_id", ""),
+        "drive_file_name": saved.get("drive_file_name", ""),
+    }
+
+
+def _next_confirmed_version(batch_id: str, artifact_type: str, week: int | None) -> int:
+    versions = [
+        int((doc.to_dict() or {}).get("version") or 0)
+        for doc in _artifacts_col(batch_id).stream()
+        if _same_scope(doc.to_dict() or {}, artifact_type, week)
+        and (doc.to_dict() or {}).get("status") == "confirmed"
+    ]
+    return max(versions, default=0) + 1
+
+
+def _supersede_current_artifacts(
+    batch_id: str,
+    artifact_type: str,
+    week: int | None,
+    new_artifact_id: str,
+) -> None:
+    for doc in _artifacts_col(batch_id).stream():
+        data = doc.to_dict() or {}
+        if (
+            doc.id != new_artifact_id
+            and _same_scope(data, artifact_type, week)
+            and data.get("status") == "confirmed"
+            and data.get("is_current", True)
+        ):
+            doc.reference.update(
+                {
+                    "status": "superseded",
+                    "is_current": False,
+                    "superseded_by_artifact_id": new_artifact_id,
+                    "updated_at": _now(),
+                }
+            )
+
+
+def _update_source_message_export_metadata(
+    batch_id: str,
+    artifact: dict[str, Any],
+    export_updates: dict[str, Any],
+) -> None:
+    chat_id = str(artifact.get("source_chat_id") or "")
+    run_id = str(artifact.get("source_run_id") or "")
+    if not chat_id or not run_id:
+        return
+
+    metadata = {
+        "draft_artifact_id": str(artifact.get("id") or ""),
+        "artifact_type": "lesson_plan",
+        "week": artifact.get("week"),
+        "exportable": True,
+        "doc_url": export_updates.get("doc_url", ""),
+        "doc_id": export_updates.get("doc_id", ""),
+        "version": export_updates.get("version"),
+        "drive_file_name": export_updates.get("drive_file_name", ""),
+    }
+    messages = (
+        _batch_ref(batch_id)
+        .collection(CHATS_SUBCOLLECTION)
+        .document(chat_id)
+        .collection(MESSAGES_SUBCOLLECTION)
+        .where("run_id", "==", run_id)
+        .where("role", "==", "assistant")
+        .stream()
+    )
+    for message in messages:
+        message.reference.update({"metadata": metadata, "updated_at": _now()})
 
 
 def save_lab_artifact(

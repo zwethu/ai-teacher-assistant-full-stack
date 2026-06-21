@@ -122,19 +122,27 @@ def set_run_status(run_id: str, status: str) -> None:
         logger.warning("RTDB set_run_status failed run_id=%s: %s", run_id, exc)
 
 
-def write_final_message(run_id: str, content: str, role: str = "assistant") -> None:
+def write_final_message(
+    run_id: str,
+    content: str,
+    role: str = "assistant",
+    metadata: dict | None = None,
+) -> None:
     """Push the final assistant message into agentRuns/{run_id}/messages."""
     if not _ensure_init():
         return
     try:
         import uuid
         msg_id = uuid.uuid4().hex[:16]
-        _ref(f"agentRuns/{run_id}/messages/{msg_id}").set({
+        message = {
             "message_id": msg_id,
             "role": role,
             "content": content,
             "created_at": int(time.time()),
-        })
+        }
+        if metadata:
+            message["metadata"] = metadata
+        _ref(f"agentRuns/{run_id}/messages/{msg_id}").set(message)
     except Exception as exc:
         logger.warning("RTDB write_final_message failed run_id=%s: %s", run_id, exc)
 

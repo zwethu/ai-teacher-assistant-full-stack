@@ -99,6 +99,7 @@ export function ChatLayout(props: Props) {
           </main>
         ) : (
           <ChatMessagesPanel
+            batchId={selectedBatch.id}
             messages={messages}
             messagesLoading={messagesLoading}
             runStates={runStates}

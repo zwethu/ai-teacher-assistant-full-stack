@@ -8,14 +8,20 @@ import Assessments from './pages/Assessments'
 import LessonPlans from './pages/LessonPlans'
 import Batches from './pages/Batches'
 import Email from './pages/Email'
+import CatGamePage from './pages/CatGamePage'
 
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
+        {/* Public routes */}
         <Route path="/login" element={<Login />} />
         <Route path="/auth/callback" element={<AuthCallback />} />
 
+        {/* Student game route — full screen, no auth, no navbar */}
+        <Route path="/game" element={<CatGamePage />} />
+
+        {/* Teacher protected routes */}
         <Route element={<ProtectedRoute />}>
           <Route element={<AppLayout />}>
             <Route path="/chat" element={<Chat />} />

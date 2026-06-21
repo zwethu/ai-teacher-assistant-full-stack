@@ -8,7 +8,7 @@ import {
   type SetStateAction,
 } from 'react'
 import axios from 'axios'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import type { Batch } from '../../../entity/Batch'
 import type { Chat, ChatMessage } from '../../../entity/Chat'
 import { useAuth } from '../../../hooks/useAuth'
@@ -75,7 +75,10 @@ export function useChatPage() {
   const { user } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+  
   const appliedRouteStateRef = useRef<string | null>(null)
+  const isInitializedRef = useRef(false)
   const pendingChatIdRef = useRef<string | null>(null)
   const pendingInitialMessageRef = useRef<string | null>(null)
   const runUnsubscribeRef = useRef<(() => void) | null>(null)
@@ -157,22 +160,74 @@ export function useChatPage() {
       .finally(() => setBatchesLoading(false))
   }, [user])
 
+  // Initialize from location state or URL params
   useEffect(() => {
+    if (batchesLoading) return
+
     const routeState = location.state as ChatLocationState | null
-    if (!routeState?.batchId || batches.length === 0) return
+    const paramBatchId = routeState?.batchId || searchParams.get('batch')
+    const paramChatId = routeState?.chatId || searchParams.get('chat')
 
-    const stateKey = `${routeState.batchId}:${routeState.chatId ?? ''}`
-    if (appliedRouteStateRef.current === stateKey) return
+    if (!paramBatchId || batches.length === 0) {
+      isInitializedRef.current = true
+      return
+    }
 
-    const batch = batches.find((b) => b.id === routeState.batchId)
-    if (!batch) return
+    const stateKey = `${paramBatchId}:${paramChatId ?? ''}`
+    if (appliedRouteStateRef.current === stateKey) {
+      isInitializedRef.current = true
+      return
+    }
+
+    const batch = batches.find((b) => b.id === paramBatchId)
+    if (!batch) {
+      isInitializedRef.current = true
+      return
+    }
 
     setSelectedBatch(batch)
-    pendingChatIdRef.current = routeState.chatId ?? null
-    pendingInitialMessageRef.current = routeState.initialMessage ?? null
+    pendingChatIdRef.current = paramChatId ?? null
+    pendingInitialMessageRef.current = routeState?.initialMessage ?? null
     appliedRouteStateRef.current = stateKey
-    navigate(location.pathname, { replace: true, state: null })
-  }, [batches, location.pathname, location.state, navigate])
+    isInitializedRef.current = true
+
+    if (routeState) {
+      navigate(location.pathname + location.search, { replace: true, state: null })
+    }
+  }, [batchesLoading, batches, location.pathname, location.search, location.state, navigate, searchParams])
+
+  // Sync state to URL params
+  useEffect(() => {
+    if (!isInitializedRef.current) return
+
+    const newParams = new URLSearchParams(searchParams)
+    let changed = false
+    
+    if (selectedBatch) {
+      if (newParams.get('batch') !== selectedBatch.id) {
+        newParams.set('batch', selectedBatch.id)
+        changed = true
+      }
+    } else if (newParams.has('batch')) {
+      newParams.delete('batch')
+      changed = true
+    }
+
+    if (activeChat) {
+      if (newParams.get('chat') !== activeChat.chat_id) {
+        newParams.set('chat', activeChat.chat_id)
+        changed = true
+      }
+    } else if (newParams.has('chat')) {
+      newParams.delete('chat')
+      changed = true
+    }
+
+    if (changed) {
+      setSearchParams(newParams, { replace: true })
+      appliedRouteStateRef.current = `${selectedBatch?.id || ''}:${activeChat?.chat_id || ''}`
+    }
+  }, [selectedBatch, activeChat, searchParams, setSearchParams])
 
   useEffect(() => {
     if (!selectedBatch || !pendingChatIdRef.current || chats.length === 0) return
@@ -261,15 +316,17 @@ export function useChatPage() {
       onMessage: (message) => {
         upsertLiveAssistantMessage(message, pendingId, chatId)
         setSending(false)
-        stopFallbackPolling()
+        stopFallbackTimers()
       },
       onStatus: (status) => {
         updateRunStatus(runId, status)
         if (status === 'done') {
+          stopFallbackTimers()
           void pollFinalMessagesOnce(batchId, chatId, runId, pendingId)
             .finally(() => setSending(false))
         }
         if (status === 'failed') {
+          stopFallbackTimers()
           setSending(false)
         }
       },
@@ -377,11 +434,12 @@ export function useChatPage() {
         onMessage: (message) => {
           upsertLiveAssistantMessage(message, pendingId, chatId)
           setSending(false)
-          stopFallbackPolling()
+          stopFallbackTimers()
         },
         onStatus: (status) => {
           updateRunStatus(result.run_id, status)
           if (status === 'failed') {
+            stopFallbackTimers()
             setMessages((prev) =>
               prev
                 .filter(Boolean)
@@ -401,6 +459,7 @@ export function useChatPage() {
           }
 
           if (status === 'done') {
+            stopFallbackTimers()
             window.setTimeout(() => {
               void pollFinalMessagesOnce(batchId, chatId, result.run_id, pendingId)
                 .finally(() => setSending(false))
@@ -572,6 +631,14 @@ export function useChatPage() {
     }
   }
 
+  function stopFallbackTimers() {
+    if (runFallbackTimerRef.current) {
+      window.clearTimeout(runFallbackTimerRef.current)
+      runFallbackTimerRef.current = null
+    }
+    stopFallbackPolling()
+  }
+
   function mergePolledMessages(
     previous: ChatMessage[],
     fetched: ChatMessage[],
@@ -579,7 +646,10 @@ export function useChatPage() {
     pendingId: string,
   ): ChatMessage[] {
     const pendingIndex = previous.findIndex((msg) => msg.message_id === pendingId)
-    if (pendingIndex < 0) return fetched
+    if (pendingIndex < 0) {
+      stopFallbackTimers()
+      return previous
+    }
 
     const previousAssistantCount = previous.filter(
       (msg) => msg.role === 'assistant' && msg.message_id !== pendingId,

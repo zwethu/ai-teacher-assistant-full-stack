@@ -1,21 +1,21 @@
 from dotenv import load_dotenv
+from pathlib import Path
 
-load_dotenv()
+BACKEND_DIR = Path(__file__).resolve().parent
+load_dotenv(BACKEND_DIR / ".env", override=True)
 
 import logging
 import os
-from pathlib import Path
 
 
 def _configure_gcp_credentials() -> None:
     """Resolve GCP credentials to an existing file under the backend directory."""
-    backend_dir = Path(__file__).resolve().parent
     raw = (os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or "gcp-service-account.json").strip()
     path = Path(raw)
     if not path.is_absolute():
-        path = backend_dir / path
+        path = BACKEND_DIR / path
     if not path.is_file():
-        fallback = backend_dir / "gcp-service-account.json"
+        fallback = BACKEND_DIR / "gcp-service-account.json"
         if fallback.is_file():
             path = fallback
     if path.is_file():

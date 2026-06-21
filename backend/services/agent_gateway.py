@@ -248,6 +248,8 @@ def safe_run_error_message(exc: Exception) -> str:
         return "The Agent Engine stream finished without a final assistant response."
     if "agent engine" in text and any(word in text for word in ("auth", "credential", "permission", "forbidden", "unauthorized")):
         return "The Agent Engine credentials or permissions need attention."
+    if "failed to parse response as json" in text or "unknownapiresponseerror" in text:
+        return "The Agent Engine SDK could not parse the streaming response."
     if "agent engine" in text or "async_stream_query" in text:
         return "The Agent Engine stream failed before producing a final response."
     if "rtdb" in text or "realtime database" in text:

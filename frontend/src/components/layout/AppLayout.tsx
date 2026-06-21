@@ -8,8 +8,8 @@ export default function AppLayout() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#E0F1FF] via-sky-50 to-[#CDE1FA] text-slate-800 font-sans">
-      <div className="flex min-h-screen">
+    <div className="h-screen overflow-hidden bg-gradient-to-br from-[#E0F1FF] via-sky-50 to-[#CDE1FA] text-slate-800 font-sans">
+      <div className="flex h-full">
         <Sidebar
           collapsed={sidebarCollapsed}
           onToggleCollapsed={() => setSidebarCollapsed((c) => !c)}

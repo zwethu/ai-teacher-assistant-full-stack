@@ -52,6 +52,7 @@ pnai-teacher-assistant for session service calls.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from collections.abc import AsyncIterator
@@ -297,12 +298,29 @@ async def _sdk_stream(
         raise RuntimeError(
             "Agent Engine async_stream_query stream failed after session state was applied"
         ) from exc
-    except Exception:
-        logger.exception(
-            "Agent Engine async_stream_query stream failed resource=%s user_id=%s session_id=%s",
+    except Exception as exc:
+        recovered_chunks = _recover_final_chunks_from_stream_exception(exc)
+        if recovered_chunks:
+            logger.warning(
+                "Agent Engine SDK stream parser failed, recovered %d final text chunk(s) "
+                "from raw response resource=%s user_id=%s session_id=%s error_type=%s",
+                len(recovered_chunks),
+                resource_name,
+                lecturer_id,
+                session_id,
+                exc.__class__.__name__,
+            )
+            for chunk in recovered_chunks:
+                yield chunk
+            return
+
+        logger.error(
+            "Agent Engine async_stream_query stream failed resource=%s user_id=%s "
+            "session_id=%s error_type=%s",
             resource_name,
             lecturer_id,
             session_id,
+            exc.__class__.__name__,
         )
         raise
 
@@ -555,6 +573,45 @@ def _event_fields(event: Any) -> list[str]:
         )
     except TypeError:
         return [event.__class__.__name__]
+
+
+def _recover_final_chunks_from_stream_exception(exc: Exception) -> list[str]:
+    """Recover final text when the SDK exposes concatenated JSON in an error.
+
+    Some SDK versions raise UnknownApiResponseError when the stream segment
+    contains multiple JSON objects back-to-back. The raw text can include tool
+    responses, thought parts, and thought signatures, so this function never
+    logs or returns the raw response. It parses objects and reuses _event_text().
+    """
+    raw = _extract_raw_response_from_exception(exc)
+    if not raw:
+        return []
+
+    chunks: list[str] = []
+    decoder = json.JSONDecoder()
+    index = 0
+    while index < len(raw):
+        while index < len(raw) and raw[index].isspace():
+            index += 1
+        if index >= len(raw):
+            break
+        try:
+            event, next_index = decoder.raw_decode(raw, index)
+        except json.JSONDecodeError:
+            return chunks
+        text = _event_text(event)
+        if text:
+            chunks.append(text)
+        index = next_index
+    return chunks
+
+
+def _extract_raw_response_from_exception(exc: Exception) -> str:
+    text = str(exc)
+    marker = "Raw response:"
+    if marker not in text:
+        return ""
+    return text.split(marker, 1)[1].strip()
 
 
 def _short_repr(value: Any, limit: int = 1000) -> str:

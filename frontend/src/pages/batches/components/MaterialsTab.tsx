@@ -10,8 +10,26 @@ import {
 import { useNavigate } from 'react-router-dom'
 import type { BatchFile } from '../../../entity/File'
 import type { Chat } from '../../../entity/Chat'
-import { Clock, FileText, Loader2, MessageCircle, RefreshCw, Trash2, Upload } from 'lucide-react'
-import { createChat, listChats, listMessages } from '../../../services/chatService'
+import {
+  Check,
+  Clock,
+  FileText,
+  Loader2,
+  MessageCircle,
+  MoreHorizontal,
+  Pencil,
+  RefreshCw,
+  Trash2,
+  Upload,
+  X,
+} from 'lucide-react'
+import {
+  createChat,
+  deleteChat,
+  listChats,
+  listMessages,
+  updateChatTitle,
+} from '../../../services/chatService'
 import { formatDateTime } from '../../../utils/formatDate'
 import { emitChatCreated } from '../../../utils/chatEvents'
 import { BTN_PRIMARY } from '../constants'
@@ -45,7 +63,12 @@ export function MaterialsTab({
   const [chatsLoading, setChatsLoading] = useState(true)
   const [input, setInput] = useState('')
   const [creating, setCreating] = useState(false)
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const renameInputRef = useRef<HTMLInputElement>(null)
 
   const loadChats = useCallback(async () => {
     setChatsLoading(true)
@@ -74,6 +97,18 @@ export function MaterialsTab({
   useEffect(() => {
     void loadChats()
   }, [loadChats])
+
+  useEffect(() => {
+    if (!menuOpenId) return
+
+    function handleMouseDown(e: MouseEvent) {
+      if (e.target instanceof Element && e.target.closest('[data-chat-menu]')) return
+      setMenuOpenId(null)
+    }
+
+    document.addEventListener('mousedown', handleMouseDown)
+    return () => document.removeEventListener('mousedown', handleMouseDown)
+  }, [menuOpenId])
 
   function handleTextareaInput() {
     const el = textareaRef.current
@@ -113,6 +148,35 @@ export function MaterialsTab({
     navigate(`/batches/${batchId}/chats/${chatId}`)
   }
 
+  function startRename(chat: ChatWithPreview) {
+    setRenamingId(chat.chat_id)
+    setRenameValue(chat.title)
+    setMenuOpenId(null)
+    setConfirmDeleteId(null)
+    setTimeout(() => renameInputRef.current?.focus(), 50)
+  }
+
+  async function commitRename() {
+    if (!renamingId) return
+    const title = renameValue.trim() || 'New Chat'
+    await updateChatTitle(batchId, renamingId, title)
+    setChats((prev) =>
+      prev.map((chat) => (chat.chat_id === renamingId ? { ...chat, title } : chat)),
+    )
+    setRenamingId(null)
+  }
+
+  function cancelRename() {
+    setRenamingId(null)
+  }
+
+  async function doDelete(chat: ChatWithPreview) {
+    await deleteChat(batchId, chat.chat_id)
+    setChats((prev) => prev.filter((item) => item.chat_id !== chat.chat_id))
+    setConfirmDeleteId(null)
+    setMenuOpenId(null)
+  }
+
   return (
     <div className="flex flex-col min-h-[560px]">
       <div className="flex flex-1 min-h-0 gap-6">
@@ -138,30 +202,116 @@ export function MaterialsTab({
             ) : (
               <ul className="divide-y divide-slate-100">
                 {chats.map((chat) => (
-                  <li key={chat.chat_id}>
-                    <button
-                      type="button"
-                      onClick={() => openChat(chat.chat_id)}
+                  <li key={chat.chat_id} className="relative group">
+                    <div
                       className="w-full text-left px-4 py-3 hover:bg-emerald-50/60 transition-colors"
                     >
                       <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0 flex-1">
-                          <div className="text-sm font-medium text-slate-900 truncate">
-                            {chat.title}
-                          </div>
-                          {chat.preview && (
+                        <div
+                          className="min-w-0 flex-1 cursor-pointer"
+                          onClick={() => {
+                            if (renamingId === chat.chat_id) return
+                            openChat(chat.chat_id)
+                          }}
+                        >
+                          {renamingId === chat.chat_id ? (
+                            <input
+                              ref={renameInputRef}
+                              value={renameValue}
+                              onChange={(e) => setRenameValue(e.target.value)}
+                              onBlur={() => void commitRename()}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') void commitRename()
+                                if (e.key === 'Escape') cancelRename()
+                              }}
+                              className="w-full bg-transparent text-sm font-medium text-slate-900 outline-none border-b border-emerald-400"
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          ) : (
+                            <div className="text-sm font-medium text-slate-900 truncate">
+                              {chat.title}
+                            </div>
+                          )}
+                          {chat.preview && renamingId !== chat.chat_id && (
                             <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">
                               {chat.preview}
                             </p>
                           )}
                         </div>
-                        <span className="text-xs text-slate-400 whitespace-nowrap flex-shrink-0">
-                          {chat.updated_at || chat.created_at
-                            ? formatDateTime(chat.updated_at ?? chat.created_at)
-                            : '—'}
-                        </span>
+                        <div className="flex items-start gap-2 flex-shrink-0">
+                          <span className="text-xs text-slate-400 whitespace-nowrap">
+                            {chat.updated_at || chat.created_at
+                              ? formatDateTime(chat.updated_at ?? chat.created_at)
+                              : '—'}
+                          </span>
+                          <div
+                            className={`relative flex items-center gap-0.5 transition-opacity ${
+                              confirmDeleteId === chat.chat_id || menuOpenId === chat.chat_id
+                                ? 'opacity-100'
+                                : 'opacity-0 group-hover:opacity-100'
+                            }`}
+                            data-chat-menu
+                          >
+                            {confirmDeleteId === chat.chat_id ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => void doDelete(chat)}
+                                  className="rounded p-1 text-red-500 hover:bg-red-50 hover:text-red-600"
+                                  aria-label="Confirm delete chat"
+                                >
+                                  <Check className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteId(null)}
+                                  className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                                  aria-label="Cancel delete chat"
+                                >
+                                  <X className="h-3.5 w-3.5" />
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => setMenuOpenId((value) => (
+                                    value === chat.chat_id ? null : chat.chat_id
+                                  ))}
+                                  className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                                  aria-label="Open chat actions"
+                                >
+                                  <MoreHorizontal className="h-3.5 w-3.5" />
+                                </button>
+                                {menuOpenId === chat.chat_id && (
+                                  <div className="absolute right-0 top-7 z-20 w-32 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+                                    <button
+                                      type="button"
+                                      onClick={() => startRename(chat)}
+                                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                                    >
+                                      <Pencil className="h-3.5 w-3.5" />
+                                      Rename
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setConfirmDeleteId(chat.chat_id)
+                                        setMenuOpenId(null)
+                                      }}
+                                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-red-500 hover:bg-red-50 hover:text-red-600"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                      Delete
+                                    </button>
+                                  </div>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                    </button>
+                    </div>
                   </li>
                 ))}
               </ul>

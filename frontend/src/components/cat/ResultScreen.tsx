@@ -6,10 +6,11 @@ type Props = {
   totalQuestions: number;
   happiness: number;
   fish: number;
-  onRestart: () => void;
+  nickname?: string;
+  onRestart?: () => void;
 };
 
-export default function ResultScreen({ answers, totalQuestions, happiness, fish, onRestart }: Props) {
+export default function ResultScreen({ answers, totalQuestions, happiness, fish, nickname, onRestart }: Props) {
   const correct = answers.filter(a => a.correct).length;
   const accuracy = totalQuestions > 0 ? Math.round((correct / totalQuestions) * 100) : 0;
 
@@ -57,6 +58,21 @@ export default function ResultScreen({ answers, totalQuestions, happiness, fish,
     <div className="result-screen">
       <div className="result-card">
 
+        {nickname && (
+          <p style={{
+            margin: 0,
+            fontSize: '0.82rem',
+            fontWeight: 700,
+            color: '#b09080',
+            background: '#fff8f4',
+            borderRadius: '16px',
+            padding: '4px 14px',
+            border: '1.5px solid #f4e4d4'
+          }}>
+            🐾 {nickname}'s result
+          </p>
+        )}
+
         <div className={`result-cat-wrap ${catMood}`}>
           <div className="result-cat-emoji">{catEmoji}</div>
           <div className="result-cat-bowl">
@@ -95,9 +111,21 @@ export default function ResultScreen({ answers, totalQuestions, happiness, fish,
                 <span className="stat-value">{happiness} / 100</span>
               </div>
             </div>
-            <button className="restart-btn" onClick={onRestart}>
-              🔄 Play Again
-            </button>
+            {onRestart && (
+              <button className="restart-btn" onClick={onRestart}>
+                🔄 Play Again
+              </button>
+            )}
+            {!onRestart && (
+              <p style={{
+                fontSize: '0.82rem', fontWeight: 700,
+                color: '#b09080', margin: 0,
+                background: '#fff8f4', borderRadius: '16px',
+                padding: '6px 16px', border: '1.5px solid #f4e4d4'
+              }}>
+                ✅ Result saved! Good job 🐾
+              </p>
+            )}
           </>
         )}
       </div>

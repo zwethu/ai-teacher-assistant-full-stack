@@ -1,36 +1,55 @@
 import { useState } from 'react';
-import type { AnswerRecord, GameState } from '../../types/catGame.types';
+import type { AnswerRecord, GameMode } from '../../types/catGame.types';
+import type { MCQQuestion, MatchingQuestion, Question } from '../../types/catGame.types';
 import { MOCK_MCQ, MOCK_MATCHING } from './mockData';
 import HUD from './HUD';
 import CatSprite from './CatSprite';
 import PetAndChoose from './modes/PetAndChoose';
 import MatchAndTreat from './modes/MatchAndTreat';
 import ResultScreen from './ResultScreen';
+import { saveAttempt } from '../../lib/gameSession';
 import './CatGame.css';
 
-export default function CatGame() {
-  const [gameState, setGameState] = useState<GameState>('playing_a');
+type Props = {
+  gameMode?: GameMode;
+  questions?: Question[];
+  nickname?: string;
+  playerUid?: string;
+  assessmentId?: string;
+};
+
+export default function CatGame({
+  gameMode = 'mcq',
+  questions,
+  nickname = 'Player',
+  playerUid,
+  assessmentId,
+}: Props) {
+  // Use real questions if provided, otherwise fall back to mock data
+  const mcqQuestions = questions
+    ? (questions.filter(q => q.type === 'mcq') as MCQQuestion[])
+    : MOCK_MCQ;
+  const matchingQuestions = questions
+    ? (questions.filter(q => q.type === 'matching') as MatchingQuestion[])
+    : MOCK_MATCHING;
+
+  const activeQuestions = gameMode === 'mcq' ? mcqQuestions : matchingQuestions;
+  const totalQuestions = gameMode === 'mcq'
+    ? mcqQuestions.length
+    : matchingQuestions.reduce((acc, q) => acc + q.pairs.length, 0);
+
+  const [gameOver, setGameOver] = useState(false);
   const [happiness, setHappiness] = useState(60);
   const [fish, setFish] = useState(0);
   const [answers, setAnswers] = useState<AnswerRecord[]>([]);
   const [catMood, setCatMood] = useState<'idle' | 'happy' | 'confused' | 'playful' | 'eating'>('idle');
+  const [resultSaved, setResultSaved] = useState(false);
 
-  const totalQuestions = MOCK_MCQ.length + MOCK_MATCHING.reduce((acc, q) => acc + q.pairs.length, 0);
   const answered = answers.length;
 
   function triggerMood(mood: 'happy' | 'confused' | 'playful', duration = 1400) {
     setCatMood(mood);
     setTimeout(() => setCatMood('idle'), duration);
-  }
-
-  function handleMCQComplete(newAnswers: AnswerRecord[]) {
-    setAnswers(prev => [...prev, ...newAnswers]);
-    setGameState('playing_b');
-  }
-
-  function handleMatchComplete(newAnswers: AnswerRecord[]) {
-    setAnswers(prev => [...prev, ...newAnswers]);
-    setGameState('result');
   }
 
   function handleCorrect() {
@@ -50,29 +69,56 @@ export default function CatGame() {
     setHappiness(h => Math.min(100, h + 8));
   }
 
+  async function handleComplete(newAnswers: AnswerRecord[]) {
+    const allAnswers = [...answers, ...newAnswers];
+    setAnswers(allAnswers);
+    setGameOver(true);
+
+    // Save to Firestore if we have real player data
+    if (playerUid && assessmentId && !resultSaved) {
+      const correct = allAnswers.filter(a => a.correct).length;
+      const accuracy = totalQuestions > 0 ? Math.round((correct / totalQuestions) * 100) : 0;
+      try {
+        await saveAttempt({
+          playerUid,
+          assessmentId,
+          score: fish,
+          accuracy,
+          fish,
+          happiness,
+          completedAt: new Date(),
+        });
+        setResultSaved(true);
+      } catch (e) {
+        console.error('Failed to save attempt:', e);
+      }
+    }
+  }
+
   function handleRestart() {
-    setGameState('playing_a');
+    // Restart is only for dev/mock mode — real games are single attempt
+    setGameOver(false);
     setHappiness(60);
     setFish(0);
     setAnswers([]);
     setCatMood('idle');
   }
 
-  if (gameState === 'result') {
+  if (gameOver) {
     return (
       <ResultScreen
         answers={answers}
         totalQuestions={totalQuestions}
         happiness={happiness}
         fish={fish}
-        onRestart={handleRestart}
+        nickname={nickname}
+        onRestart={!assessmentId ? handleRestart : undefined}
       />
     );
   }
 
   return (
     <div className="cat-game-container">
-      {/* Cozy room decorations */}
       <div className="room-deco window">🪟</div>
       <div className="room-deco plant">🪴</div>
       <div className="room-deco shelf">🕯️ 📚</div>
@@ -88,26 +134,26 @@ export default function CatGame() {
       <div className="cat-center-area">
         <CatSprite mood={catMood} />
         <div className="mode-pill">
-          {gameState === 'playing_a'
+          {gameMode === 'mcq'
             ? '🐾 Answer questions to earn 🐟 fish!'
             : '🧩 Match the pairs for more 🐟 fish!'}
         </div>
       </div>
 
       <div className="interaction-area">
-        {gameState === 'playing_a' && (
+        {gameMode === 'mcq' && (
           <PetAndChoose
-            questions={MOCK_MCQ}
+            questions={activeQuestions as MCQQuestion[]}
             onCorrect={handleCorrect}
             onWrong={handleWrong}
-            onComplete={handleMCQComplete}
+            onComplete={handleComplete}
           />
         )}
-        {gameState === 'playing_b' && (
+        {gameMode === 'matching' && (
           <MatchAndTreat
-            questions={MOCK_MATCHING}
+            questions={activeQuestions as MatchingQuestion[]}
             onMatch={handleMatchPlay}
-            onComplete={handleMatchComplete}
+            onComplete={handleComplete}
           />
         )}
       </div>

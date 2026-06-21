@@ -19,6 +19,34 @@ export type AnswerRecord = {
   correct: boolean;
 };
 
-export type GameState = 'playing_a' | 'playing_b' | 'result';
+export type GameMode = 'mcq' | 'matching';
 
-export type CatMood = 'idle' | 'happy' | 'confused' | 'playful';
+export type GameState = 'playing' | 'result';
+
+export type CatMood = 'idle' | 'happy' | 'confused' | 'playful' | 'eating';
+
+export type GameSession = {
+  id: string;
+  batchId: string;
+  gameMode: GameMode;
+  status: 'open' | 'closed' | 'expired';
+  questions: Question[];
+  createdAt: Date;
+  expiresAt?: Date;
+};
+
+export type PlayerProfile = {
+  uid: string;
+  nickname: string;
+  email: string;
+};
+
+export type AttemptResult = {
+  playerUid: string;
+  assessmentId: string;
+  score: number;
+  accuracy: number;
+  fish: number;
+  happiness: number;
+  completedAt: Date;
+};

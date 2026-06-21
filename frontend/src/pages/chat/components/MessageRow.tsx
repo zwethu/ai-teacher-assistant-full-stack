@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Bot, ExternalLink, FileText, Loader2, User } from 'lucide-react'
+import { Bot, ChevronDown, ExternalLink, FileText, Loader2, User } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import rehypeSanitize from 'rehype-sanitize'
 import remarkGfm from 'remark-gfm'
@@ -11,6 +11,7 @@ import {
   type LessonPlanExportResult,
 } from '../../../services/artifactService'
 import type { RunUiState } from '../runTypes'
+import { splitSourcesSection } from '../utils/splitSourcesSection'
 import { RunDetails } from './run/RunDetails'
 import { ThinkingPanel } from './run/ThinkingPanel'
 
@@ -51,7 +52,11 @@ export function MessageRow({
             <RunDetails run={run} isFinal={isFinal} />
             {run && (
               <div className="mt-2">
-                <ThinkingPanel events={run.events} runStatus={run.status} />
+                <ThinkingPanel
+                  events={run.events}
+                  runStatus={run.status}
+                  responseStarted={run.responseStarted}
+                />
               </div>
             )}
             <div className={run ? 'mt-3' : ''}>
@@ -62,56 +67,7 @@ export function MessageRow({
               ) : isPending && !msg.content ? (
                 <ThinkingIndicator />
               ) : msg.content ? (
-                <div className="animate-in fade-in duration-300">
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    rehypePlugins={[rehypeSanitize]}
-                    components={{
-                      h1: ({ ...props }) => <h1 className="mt-3 mb-2 text-xl font-semibold text-slate-900" {...props} />,
-                      h2: ({ ...props }) => <h2 className="mt-3 mb-2 text-lg font-semibold text-slate-900" {...props} />,
-                      h3: ({ ...props }) => <h3 className="mt-3 mb-2 text-base font-semibold text-slate-900" {...props} />,
-                      p: ({ ...props }) => <p className="my-2" {...props} />,
-                      ul: ({ ...props }) => <ul className="my-2 list-disc pl-5 space-y-1" {...props} />,
-                      ol: ({ ...props }) => <ol className="my-2 list-decimal pl-5 space-y-1" {...props} />,
-                      li: ({ ...props }) => <li className="pl-1" {...props} />,
-                      a: ({ ...props }) => (
-                        <a
-                          className="font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-800"
-                          target="_blank"
-                          rel="noreferrer"
-                          {...props}
-                        />
-                      ),
-                      table: ({ ...props }) => (
-                        <div className="my-3 max-w-full overflow-x-auto rounded-lg border border-slate-200">
-                          <table className="min-w-full divide-y divide-slate-200 text-sm" {...props} />
-                        </div>
-                      ),
-                      th: ({ ...props }) => <th className="bg-slate-50 px-3 py-2 text-left font-semibold text-slate-800" {...props} />,
-                      td: ({ ...props }) => <td className="border-t border-slate-100 px-3 py-2 align-top" {...props} />,
-                      code: ({ className, children, ...props }) => {
-                        const isBlock = /language-/.test(className || '')
-                        return isBlock ? (
-                          <code className={className} {...props}>
-                            {children}
-                          </code>
-                        ) : (
-                          <code className="rounded bg-slate-100 px-1.5 py-0.5 text-[0.92em] text-slate-800" {...props}>
-                            {children}
-                          </code>
-                        )
-                      },
-                      pre: ({ ...props }) => (
-                        <pre className="my-3 max-w-full overflow-x-auto rounded-lg bg-slate-950 px-4 py-3 text-sm leading-6 text-slate-100" {...props} />
-                      ),
-                      blockquote: ({ ...props }) => (
-                        <blockquote className="my-3 border-l-4 border-emerald-300 pl-4 text-slate-600" {...props} />
-                      ),
-                    }}
-                  >
-                    {msg.content}
-                  </ReactMarkdown>
-                </div>
+                <ResponseMarkdown content={msg.content} streaming={isPending} />
               ) : null}
             </div>
             {!isUser && batchId && <LessonPlanExportButton batchId={batchId} msg={msg} />}
@@ -119,6 +75,94 @@ export function MessageRow({
         )}
       </div>
     </div>
+  )
+}
+
+function ResponseMarkdown({ content, streaming }: { content: string; streaming: boolean }) {
+  const [sourcesOpen, setSourcesOpen] = useState(false)
+  const { body, sources } = splitSourcesSection(content)
+
+  return (
+    <div className="animate-in fade-in duration-300">
+      {streaming && (
+        <div className="mb-1 inline-flex items-center gap-2 text-xs font-medium text-slate-500">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          Generating...
+        </div>
+      )}
+      <MarkdownBlock content={body || content} />
+      {sources && (
+        <div className="mt-3">
+          <button
+            type="button"
+            onClick={() => setSourcesOpen((value) => !value)}
+            className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-white hover:text-slate-900"
+          >
+            <FileText className="h-3.5 w-3.5" />
+            Sources
+            <ChevronDown className={`h-3.5 w-3.5 transition-transform ${sourcesOpen ? 'rotate-180' : ''}`} />
+          </button>
+          {sourcesOpen && (
+            <div className="mt-2 rounded-lg border border-slate-200 bg-white/70 px-3 py-2 text-sm">
+              <MarkdownBlock content={sources} />
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function MarkdownBlock({ content }: { content: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      rehypePlugins={[rehypeSanitize]}
+      components={{
+        h1: ({ ...props }) => <h1 className="mt-3 mb-2 text-xl font-semibold text-slate-900" {...props} />,
+        h2: ({ ...props }) => <h2 className="mt-3 mb-2 text-lg font-semibold text-slate-900" {...props} />,
+        h3: ({ ...props }) => <h3 className="mt-3 mb-2 text-base font-semibold text-slate-900" {...props} />,
+        p: ({ ...props }) => <p className="my-2" {...props} />,
+        ul: ({ ...props }) => <ul className="my-2 list-disc pl-5 space-y-1" {...props} />,
+        ol: ({ ...props }) => <ol className="my-2 list-decimal pl-5 space-y-1" {...props} />,
+        li: ({ ...props }) => <li className="pl-1" {...props} />,
+        a: ({ ...props }) => (
+          <a
+            className="font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-800"
+            target="_blank"
+            rel="noreferrer"
+            {...props}
+          />
+        ),
+        table: ({ ...props }) => (
+          <div className="my-3 max-w-full overflow-x-auto rounded-lg border border-slate-200">
+            <table className="min-w-full divide-y divide-slate-200 text-sm" {...props} />
+          </div>
+        ),
+        th: ({ ...props }) => <th className="bg-slate-50 px-3 py-2 text-left font-semibold text-slate-800" {...props} />,
+        td: ({ ...props }) => <td className="border-t border-slate-100 px-3 py-2 align-top" {...props} />,
+        code: ({ className, children, ...props }) => {
+          const isBlock = /language-/.test(className || '')
+          return isBlock ? (
+            <code className={className} {...props}>
+              {children}
+            </code>
+          ) : (
+            <code className="rounded bg-slate-100 px-1.5 py-0.5 text-[0.92em] text-slate-800" {...props}>
+              {children}
+            </code>
+          )
+        },
+        pre: ({ ...props }) => (
+          <pre className="my-3 max-w-full overflow-x-auto rounded-lg bg-slate-950 px-4 py-3 text-sm leading-6 text-slate-100" {...props} />
+        ),
+        blockquote: ({ ...props }) => (
+          <blockquote className="my-3 border-l-4 border-emerald-300 pl-4 text-slate-600" {...props} />
+        ),
+      }}
+    >
+      {content}
+    </ReactMarkdown>
   )
 }
 

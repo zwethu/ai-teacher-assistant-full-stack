@@ -1,6 +1,7 @@
 import { ChevronDown, Loader2 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { RunUiState } from '../../runTypes'
+import { normalizeRunRows } from './normalizeRunRows'
 import { StepsPanel } from './StepsPanel'
 
 type Props = {
@@ -8,27 +9,23 @@ type Props = {
   isFinal: boolean
 }
 
-const STEP_EVENT_KINDS = new Set(['process', 'tool', 'retrieval', 'artifact', 'error'])
-
 export function RunDetails({ run, isFinal }: Props) {
   const status = run?.status || 'running'
   const stepCount = useMemo(() => {
     if (!run) return 0
-    const stepsCount = Object.keys(run.steps).length
-    const eventsCount = run.events.filter((event) => STEP_EVENT_KINDS.has(event.kind)).length
-    return stepsCount + eventsCount
+    return normalizeRunRows(run.steps, run.events).length
   }, [run])
 
   const defaultOpen = status === 'running'
   const [open, setOpen] = useState(defaultOpen)
 
   useEffect(() => {
-    if (isFinal || status === 'done' || status === 'failed') {
+    if (run?.responseStarted || isFinal || status === 'done' || status === 'failed') {
       setOpen(false)
     } else if (status === 'running') {
       setOpen(true)
     }
-  }, [isFinal, status])
+  }, [isFinal, run?.responseStarted, status])
 
   if (!run) return null
 

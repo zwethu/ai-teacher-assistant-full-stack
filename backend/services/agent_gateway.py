@@ -31,7 +31,6 @@ from __future__ import annotations
 import logging
 import uuid
 import json
-import time
 from typing import Any
 
 from fastapi import BackgroundTasks, HTTPException, status
@@ -352,20 +351,8 @@ async def _run_agent_background(
     run status completion.
     """
     final_text_parts: list[str] = []
-    stream_index = 0
-    stream_buffer = ""
-    last_stream_flush = time.monotonic()
-
-    async def flush_stream_buffer(force: bool = False) -> None:
-        nonlocal stream_index, stream_buffer, last_stream_flush
-        if not stream_buffer:
-            return
-        if not force and len(stream_buffer) < 80 and (time.monotonic() - last_stream_flush) < 0.1:
-            return
-        stream_index += 1
-        write_stream_delta(run_id, stream_index, stream_buffer)
-        stream_buffer = ""
-        last_stream_flush = time.monotonic()
+    chunk_index = 0
+    streamed_length = 0
 
     try:
         async for chunk in stream_agent_response(
@@ -377,16 +364,21 @@ async def _run_agent_background(
             if not chunk:
                 continue
             final_text_parts.append(chunk)
-            stream_buffer += chunk
-            await flush_stream_buffer(force=False)
-
-        await flush_stream_buffer(force=True)
+            write_stream_delta(run_id, chunk_index, chunk)
+            chunk_index += 1
+            streamed_length += len(chunk)
+            write_stream_meta(
+                run_id,
+                done=False,
+                chunk_count=chunk_index,
+                final_length=streamed_length,
+            )
 
         final_text = "".join(final_text_parts).strip()
         write_stream_meta(
             run_id,
             done=True,
-            chunk_count=stream_index,
+            chunk_count=chunk_index,
             final_length=len(final_text),
         )
         if not final_text:
@@ -478,11 +470,10 @@ async def _run_agent_background(
     except Exception as exc:
         logger.error("gateway background failed run_id=%s: %s", run_id, exc)
         try:
-            await flush_stream_buffer(force=True)
             write_stream_meta(
                 run_id,
                 done=True,
-                chunk_count=stream_index,
+                chunk_count=chunk_index,
                 final_length=len("".join(final_text_parts)),
             )
         except Exception as stream_exc:

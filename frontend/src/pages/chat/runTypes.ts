@@ -14,4 +14,5 @@ export type RunUiState = {
   streamText?: string
   streamDeltaIndexes?: Record<number, true>
   streamDone?: boolean
+  responseStarted?: boolean
 }

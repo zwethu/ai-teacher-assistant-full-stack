@@ -154,7 +154,7 @@ def write_stream_delta(run_id: str, index: int, delta: str) -> None:
     if not _ensure_init():
         return
     try:
-        key = f"{index:06d}"
+        key = str(index)
         _ref(f"agentRuns/{run_id}/stream_deltas/{key}").set({
             "index": index,
             "delta": delta,

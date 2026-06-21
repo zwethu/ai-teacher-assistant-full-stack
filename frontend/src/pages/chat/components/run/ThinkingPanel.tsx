@@ -5,6 +5,7 @@ import type { AgentRunEvent, AgentRunStatus } from '../../../../services/agentRu
 type Props = {
   events: AgentRunEvent[]
   runStatus: AgentRunStatus
+  responseStarted?: boolean
 }
 
 function eventMode(event: AgentRunEvent): string {
@@ -21,13 +22,7 @@ function eventSummary(event: AgentRunEvent): string {
   return event.summary || event.title || eventRawText(event) || 'Working...'
 }
 
-function formatTime(value?: number): string {
-  if (!value) return ''
-  const ms = value < 10_000_000_000 ? value * 1000 : value
-  return new Date(ms).toLocaleTimeString()
-}
-
-export function ThinkingPanel({ events, runStatus }: Props) {
+export function ThinkingPanel({ events, runStatus, responseStarted = false }: Props) {
   const thinkingEvents = useMemo(
     () =>
       events
@@ -60,12 +55,12 @@ export function ThinkingPanel({ events, runStatus }: Props) {
   const [open, setOpen] = useState(defaultOpen)
 
   useEffect(() => {
-    if (runStatus === 'done' || runStatus === 'failed') {
+    if (responseStarted || runStatus === 'done' || runStatus === 'failed') {
       setOpen(false)
     } else if (runStatus === 'running') {
       setOpen(true)
     }
-  }, [runStatus])
+  }, [responseStarted, runStatus])
 
   if (!hasEvents && !showPlaceholder) return null
 
@@ -104,7 +99,6 @@ export function ThinkingPanel({ events, runStatus }: Props) {
               </p>
             ) : (
               <>
-                <p className="text-[11px] text-slate-500">Public working notes from the agent</p>
                 <div className="space-y-1.5">
                   {thinkingEvents.map((event) => {
                     const mode = eventMode(event)
@@ -120,12 +114,7 @@ export function ThinkingPanel({ events, runStatus }: Props) {
                         <div className="flex items-start gap-2 text-xs">
                           <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-slate-400" />
                           <div className="min-w-0 flex-1">
-                            <p className="text-[11px] leading-5 text-slate-600">{displayText}</p>
-                            {event.created_at && (
-                              <div className="mt-1 text-[10px] text-slate-400">
-                                {formatTime(event.created_at)}
-                              </div>
-                            )}
+                            <p className="truncate text-[11px] leading-5 text-slate-600">{displayText}</p>
                           </div>
                         </div>
                       </div>

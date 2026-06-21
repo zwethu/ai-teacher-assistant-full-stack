@@ -496,6 +496,12 @@ export function useChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, sending])
 
+  function scrollToBottomSmooth() {
+    requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    })
+  }
+
   async function handleNewChat(title = 'New Chat') {
     if (!selectedBatch) return null
     const chat = await createChat(selectedBatch.id, title)
@@ -583,6 +589,7 @@ export function useChatPage() {
         status,
       },
     }))
+    scrollToBottomSmooth()
   }
 
   function appendRunEvent(runId: string, event: AgentRunEvent) {
@@ -595,6 +602,7 @@ export function useChatPage() {
           )
       return { ...prev, [runId]: { ...current, events } }
     })
+    scrollToBottomSmooth()
   }
 
   function appendRunDelta(
@@ -619,6 +627,7 @@ export function useChatPage() {
         [runId]: {
           ...current,
           streamText: `${current.streamText || ''}${delta.delta}`,
+          responseStarted: true,
           streamDeltaIndexes: {
             ...(current.streamDeltaIndexes || {}),
             [delta.index]: true,
@@ -626,6 +635,7 @@ export function useChatPage() {
         },
       }
     })
+    scrollToBottomSmooth()
 
     setMessages((prev) => {
       const hasFinal = prev.some(
@@ -694,6 +704,7 @@ export function useChatPage() {
         },
       }
     })
+    scrollToBottomSmooth()
   }
 
   function updateRunStreamError(runId: string, streamError: string) {
@@ -742,6 +753,7 @@ export function useChatPage() {
             : msg,
         )
     })
+    scrollToBottomSmooth()
   }
 
   async function pollFinalMessagesOnce(

@@ -13,6 +13,7 @@ type Props = Pick<
   | 'activeChat'
   | 'messages'
   | 'messagesLoading'
+  | 'runStates'
   | 'input'
   | 'setInput'
   | 'sending'
@@ -36,6 +37,7 @@ export function ChatLayout(props: Props) {
     activeChat,
     messages,
     messagesLoading,
+    runStates,
     input,
     setInput,
     sending,
@@ -86,6 +88,7 @@ export function ChatLayout(props: Props) {
           <ChatMessagesPanel
             messages={messages}
             messagesLoading={messagesLoading}
+            runStates={runStates}
             showWelcome={showWelcome}
             sending={sending}
             messagesEndRef={messagesEndRef}

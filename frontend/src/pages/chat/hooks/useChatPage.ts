@@ -21,9 +21,15 @@ import {
   sendMessage,
   updateChatTitle,
 } from '../../../services/chatService'
-import { subscribeAgentRun } from '../../../services/agentRunStream'
+import {
+  subscribeAgentRun,
+  type AgentRunEvent,
+  type AgentRunStatus,
+  type AgentRunStep,
+} from '../../../services/agentRunStream'
 import { checkGoogleAuthStatus } from '../../../services/authService'
 import { emitChatCreated } from '../../../utils/chatEvents'
+import type { RunUiState } from '../runTypes'
 
 type ChatLocationState = {
   batchId?: string
@@ -74,6 +80,7 @@ export function useChatPage() {
   const pendingInitialMessageRef = useRef<string | null>(null)
   const runUnsubscribeRef = useRef<(() => void) | null>(null)
   const runFallbackTimerRef = useRef<number | null>(null)
+  const runPollIntervalRef = useRef<number | null>(null)
   const googleWorkspaceManuallyDisabledRef = useRef(false)
 
   const [batches, setBatches] = useState<Batch[]>([])
@@ -92,6 +99,7 @@ export function useChatPage() {
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [currentRunId, setCurrentRunId] = useState<string | null>(null)
+  const [runStates, setRunStates] = useState<Record<string, RunUiState>>({})
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -212,10 +220,79 @@ export function useChatPage() {
   }, [activeChat, selectedBatch])
 
   useEffect(() => {
+    if (!activeChat?.active_run_id || !selectedBatch || messagesLoading) return
+    const runId = activeChat.active_run_id
+    const pendingId = `pending-${runId}`
+    const batchId = selectedBatch.id
+    const chatId = activeChat.chat_id
+
+    setCurrentRunId(runId)
+    setRunStates((prev) => ({
+      ...prev,
+      [runId]: prev[runId] || {
+        status: 'running',
+        events: [],
+        steps: {},
+        liveConnected: true,
+      },
+    }))
+    setMessages((prev) => {
+      if (prev.some((msg) => msg.message_id === pendingId || msg.run_id === runId)) {
+        return prev
+      }
+      return [
+        ...prev,
+        {
+          message_id: pendingId,
+          chat_id: chatId,
+          role: 'assistant',
+          content: 'Working...',
+          created_at: new Date().toISOString(),
+          status: 'pending',
+          run_id: runId,
+          pending: true,
+        },
+      ]
+    })
+
+    runUnsubscribeRef.current?.()
+    stopFallbackPolling()
+    runUnsubscribeRef.current = subscribeAgentRun(runId, {
+      onMessage: (message) => {
+        upsertLiveAssistantMessage(message, pendingId, chatId)
+        setSending(false)
+        stopFallbackPolling()
+      },
+      onStatus: (status) => {
+        updateRunStatus(runId, status)
+        if (status === 'done') {
+          void pollFinalMessagesOnce(batchId, chatId, runId, pendingId)
+            .finally(() => setSending(false))
+        }
+        if (status === 'failed') {
+          setSending(false)
+        }
+      },
+      onEvent: (event) => appendRunEvent(runId, event),
+      onStep: (step) => upsertRunStep(runId, step),
+      onRunError: (message) => updateRunError(runId, message),
+      onDisconnected: (connected) => updateRunConnection(runId, connected),
+      onError: (error) => {
+        console.error(error)
+        updateRunStreamError(runId, 'Live updates are delayed. The run is still active.')
+        startFallbackPolling(batchId, chatId, runId, pendingId)
+      },
+    })
+  }, [activeChat, selectedBatch, messagesLoading])
+
+  useEffect(() => {
     return () => {
       runUnsubscribeRef.current?.()
       if (runFallbackTimerRef.current) {
         window.clearTimeout(runFallbackTimerRef.current)
+      }
+      if (runPollIntervalRef.current) {
+        window.clearInterval(runPollIntervalRef.current)
       }
     }
   }, [])
@@ -243,6 +320,8 @@ export function useChatPage() {
       chat = await handleNewChat(content.slice(0, 50) || 'New Chat')
       if (!chat) return
     }
+    const batchId = selectedBatch.id
+    const chatId = chat.chat_id
 
     setInput('')
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
@@ -250,7 +329,7 @@ export function useChatPage() {
 
     const optimisticUser: ChatMessage = {
       message_id: crypto.randomUUID(),
-      chat_id: chat.chat_id,
+      chat_id: chatId,
       role: 'user',
       content,
       created_at: new Date().toISOString(),
@@ -259,18 +338,27 @@ export function useChatPage() {
 
     try {
       const result = await sendMessage(
-        selectedBatch.id,
-        chat.chat_id,
+        batchId,
+        chatId,
         content,
         connectors,
       )
       const pendingId = `pending-${result.run_id}`
       setCurrentRunId(result.run_id)
+      setRunStates((prev) => ({
+        ...prev,
+        [result.run_id]: {
+          status: 'running',
+          events: [],
+          steps: {},
+          liveConnected: true,
+        },
+      }))
       setMessages((prev) => [
         ...prev.filter(Boolean),
         {
           message_id: pendingId,
-          chat_id: chat.chat_id,
+          chat_id: chatId,
           role: 'assistant',
           content: 'Working...',
           created_at: new Date().toISOString(),
@@ -284,20 +372,15 @@ export function useChatPage() {
       if (runFallbackTimerRef.current) {
         window.clearTimeout(runFallbackTimerRef.current)
       }
+      stopFallbackPolling()
       runUnsubscribeRef.current = subscribeAgentRun(result.run_id, {
         onMessage: (message) => {
-          setMessages((prev) =>
-            prev
-              .filter(Boolean)
-              .map((msg) =>
-                msg.message_id === pendingId
-                  ? { ...message, chat_id: chat!.chat_id, status: 'done', pending: false }
-                  : msg,
-              ),
-          )
+          upsertLiveAssistantMessage(message, pendingId, chatId)
           setSending(false)
+          stopFallbackPolling()
         },
         onStatus: (status) => {
+          updateRunStatus(result.run_id, status)
           if (status === 'failed') {
             setMessages((prev) =>
               prev
@@ -306,7 +389,7 @@ export function useChatPage() {
                   msg.message_id === pendingId
                     ? {
                         ...msg,
-                        content: 'The agent run failed. Please try again.',
+                        content: msg.content || 'The agent run failed before producing a final response.',
                         status: 'failed',
                         pending: false,
                       }
@@ -319,43 +402,37 @@ export function useChatPage() {
 
           if (status === 'done') {
             window.setTimeout(() => {
-              setMessages((prev) => {
-                const stillPending = prev.some((msg) => msg?.message_id === pendingId)
-                if (!stillPending || !selectedBatch) return prev
-                void listMessages(selectedBatch.id, chat!.chat_id)
-                  .then(setMessages)
-                  .catch(console.error)
-                  .finally(() => setSending(false))
-                return prev
-              })
+              void pollFinalMessagesOnce(batchId, chatId, result.run_id, pendingId)
+                .finally(() => setSending(false))
             }, 1500)
           }
         },
+        onEvent: (event) => appendRunEvent(result.run_id, event),
+        onStep: (step) => upsertRunStep(result.run_id, step),
+        onRunError: (message) => updateRunError(result.run_id, message),
+        onDisconnected: (connected) => updateRunConnection(result.run_id, connected),
         onError: (error) => {
           console.error(error)
+          updateRunStreamError(
+            result.run_id,
+            'Live updates are delayed. The run is still active.',
+          )
+          startFallbackPolling(batchId, chatId, result.run_id, pendingId)
         },
       })
       runFallbackTimerRef.current = window.setTimeout(() => {
-        setMessages((prev) =>
-          prev
-            .filter(Boolean)
-            .map((msg) =>
-              msg.message_id === pendingId
-                ? {
-                    ...msg,
-                    content: 'Still working. The live update stream is not connected yet.',
-                  }
-                : msg,
-            ),
+        updateRunStreamError(
+          result.run_id,
+          'Live updates are delayed. The run is still active.',
         )
-        setSending(false)
+        startFallbackPolling(batchId, chatId, result.run_id, pendingId)
       }, 30000)
 
       if (chat.title === 'New Chat') {
         const newTitle = content.slice(0, 50)
-        void updateChatTitle(selectedBatch.id, chat.chat_id, newTitle).then(() => {
+        void updateChatTitle(batchId, chatId, newTitle).then(() => {
           setChats((prev) =>
-            prev.map((c) => (c.chat_id === chat!.chat_id ? { ...c, title: newTitle } : c)),
+            prev.map((c) => (c.chat_id === chatId ? { ...c, title: newTitle } : c)),
           )
           setActiveChat((prev) => (prev ? { ...prev, title: newTitle } : prev))
         })
@@ -364,7 +441,7 @@ export function useChatPage() {
       console.error(err)
       const errMsg: ChatMessage = {
         message_id: crypto.randomUUID(),
-        chat_id: chat.chat_id,
+        chat_id: chatId,
         role: 'assistant',
         content: connectorErrorMessage(err),
         created_at: new Date().toISOString(),
@@ -372,6 +449,151 @@ export function useChatPage() {
       setMessages((prev) => [...prev, errMsg])
       setSending(false)
     }
+  }
+
+  function updateRunStatus(runId: string, status: AgentRunStatus) {
+    setRunStates((prev) => ({
+      ...prev,
+      [runId]: {
+        ...(prev[runId] || { events: [], steps: {} }),
+        status,
+      },
+    }))
+  }
+
+  function appendRunEvent(runId: string, event: AgentRunEvent) {
+    setRunStates((prev) => {
+      const current = prev[runId] || { status: 'running' as AgentRunStatus, events: [], steps: {} }
+      const events = current.events.some((item) => item.event_id === event.event_id)
+        ? current.events
+        : [...current.events, event].sort(
+            (a, b) => (a.created_at || 0) - (b.created_at || 0) || a.event_id.localeCompare(b.event_id),
+          )
+      return { ...prev, [runId]: { ...current, events } }
+    })
+  }
+
+  function upsertRunStep(runId: string, step: AgentRunStep) {
+    setRunStates((prev) => {
+      const current = prev[runId] || { status: 'running' as AgentRunStatus, events: [], steps: {} }
+      return {
+        ...prev,
+        [runId]: {
+          ...current,
+          steps: { ...current.steps, [step.step_id]: step },
+        },
+      }
+    })
+  }
+
+  function updateRunStreamError(runId: string, streamError: string) {
+    setRunStates((prev) => {
+      const current = prev[runId] || { status: 'running' as AgentRunStatus, events: [], steps: {} }
+      return { ...prev, [runId]: { ...current, streamError } }
+    })
+  }
+
+  function updateRunError(runId: string, runError: string) {
+    setRunStates((prev) => {
+      const current = prev[runId] || { status: 'running' as AgentRunStatus, events: [], steps: {} }
+      return { ...prev, [runId]: { ...current, runError } }
+    })
+  }
+
+  function updateRunConnection(runId: string, liveConnected: boolean) {
+    setRunStates((prev) => {
+      const current = prev[runId] || { status: 'running' as AgentRunStatus, events: [], steps: {} }
+      return { ...prev, [runId]: { ...current, liveConnected } }
+    })
+  }
+
+  function upsertLiveAssistantMessage(
+    message: Omit<ChatMessage, 'chat_id'>,
+    pendingId: string,
+    chatId: string,
+  ) {
+    setMessages((prev) => {
+      const finalMessage: ChatMessage = {
+        ...message,
+        chat_id: chatId,
+        status: 'done',
+        pending: false,
+      }
+      const existingIndex = prev.findIndex((msg) => msg?.message_id === finalMessage.message_id)
+      if (existingIndex >= 0) {
+        return prev.map((msg, index) => (index === existingIndex ? finalMessage : msg))
+      }
+      return prev
+        .filter(Boolean)
+        .map((msg) =>
+          msg.message_id === pendingId || (msg.pending && msg.run_id === message.run_id)
+            ? finalMessage
+            : msg,
+        )
+    })
+  }
+
+  async function pollFinalMessagesOnce(
+    batchId: string,
+    chatId: string,
+    runId: string,
+    pendingId: string,
+  ) {
+    const data = await listMessages(batchId, chatId)
+    setMessages((prev) => mergePolledMessages(prev, data, runId, pendingId))
+  }
+
+  function startFallbackPolling(
+    batchId: string,
+    chatId: string,
+    runId: string,
+    pendingId: string,
+  ) {
+    if (runPollIntervalRef.current) {
+      window.clearInterval(runPollIntervalRef.current)
+    }
+    const startedAt = Date.now()
+    runPollIntervalRef.current = window.setInterval(() => {
+      void pollFinalMessagesOnce(batchId, chatId, runId, pendingId)
+        .then(() => {
+          if (Date.now() - startedAt > 5 * 60_000) {
+            stopFallbackPolling()
+            setSending(false)
+          }
+        })
+        .catch(console.error)
+    }, 5000)
+  }
+
+  function stopFallbackPolling() {
+    if (runPollIntervalRef.current) {
+      window.clearInterval(runPollIntervalRef.current)
+      runPollIntervalRef.current = null
+    }
+  }
+
+  function mergePolledMessages(
+    previous: ChatMessage[],
+    fetched: ChatMessage[],
+    runId: string,
+    pendingId: string,
+  ): ChatMessage[] {
+    const pendingIndex = previous.findIndex((msg) => msg.message_id === pendingId)
+    if (pendingIndex < 0) return fetched
+
+    const previousAssistantCount = previous.filter(
+      (msg) => msg.role === 'assistant' && msg.message_id !== pendingId,
+    ).length
+    const fetchedAssistant = fetched.filter((msg) => msg.role === 'assistant')
+    if (fetchedAssistant.length <= previousAssistantCount) return previous
+
+    stopFallbackPolling()
+    setSending(false)
+    return fetched.map((msg, index) =>
+      msg.role === 'assistant' && index === fetched.length - 1
+        ? { ...msg, run_id: runId, status: 'done', pending: false }
+        : msg,
+    )
   }
 
   useEffect(() => {
@@ -452,6 +674,7 @@ export function useChatPage() {
     setInput,
     sending,
     currentRunId,
+    runStates,
     inputDisabled,
     messagesEndRef,
     textareaRef,

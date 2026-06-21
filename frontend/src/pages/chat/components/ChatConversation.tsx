@@ -4,6 +4,7 @@ import type { ChatMessage } from '../../../entity/Chat'
 import { Loader2, Send } from 'lucide-react'
 import { MessageRow, ThinkingIndicator } from './MessageRow'
 import { ConnectorToggles, type ConnectorsState } from './ConnectorToggles'
+import type { RunUiState } from '../runTypes'
 
 type Props = {
   input: string
@@ -79,6 +80,7 @@ type MessagesPanelProps = {
   messagesLoading: boolean
   showWelcome: boolean
   sending: boolean
+  runStates: Record<string, RunUiState>
   messagesEndRef: RefObject<HTMLDivElement | null>
   welcomeContent: React.ReactNode
 }
@@ -88,6 +90,7 @@ export function ChatMessagesPanel({
   messagesLoading,
   showWelcome,
   sending,
+  runStates,
   messagesEndRef,
   welcomeContent,
 }: MessagesPanelProps) {
@@ -105,9 +108,13 @@ export function ChatMessagesPanel({
         ) : (
           <div className="space-y-6 pb-4">
             {safeMessages.map((msg) => (
-              <MessageRow key={msg.message_id} msg={msg} />
+              <MessageRow
+                key={msg.message_id}
+                msg={msg}
+                run={msg.run_id ? runStates[msg.run_id] : undefined}
+              />
             ))}
-            {sending && <ThinkingIndicator />}
+            {sending && !safeMessages.some((msg) => msg.pending) && <ThinkingIndicator />}
           </div>
         )}
         <div ref={messagesEndRef} />

@@ -137,3 +137,16 @@ def write_final_message(run_id: str, content: str, role: str = "assistant") -> N
         })
     except Exception as exc:
         logger.warning("RTDB write_final_message failed run_id=%s: %s", run_id, exc)
+
+
+def write_run_error(run_id: str, message: str) -> None:
+    """Write a user-safe run error node for frontend failure details."""
+    if not _ensure_init():
+        return
+    try:
+        _ref(f"agentRuns/{run_id}/error").set({
+            "message": message,
+            "created_at": int(time.time()),
+        })
+    except Exception as exc:
+        logger.warning("RTDB write_run_error failed run_id=%s: %s", run_id, exc)

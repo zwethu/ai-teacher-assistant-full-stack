@@ -45,7 +45,12 @@ from services.agent_sessions import (
 )
 from services.batch_service import get_batch
 from services.chat_service import add_message
-from utils.rtdb_client import create_run_meta, set_run_status, write_final_message
+from utils.rtdb_client import (
+    create_run_meta,
+    set_run_status,
+    write_final_message,
+    write_run_error,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -234,6 +239,22 @@ def _build_session_state(
     }
 
 
+def safe_run_error_message(exc: Exception) -> str:
+    """Map backend/stream exceptions to short user-safe messages."""
+    text = str(exc).lower()
+    if "oauth" in text or "google workspace" in text:
+        return "Google Workspace needs to be connected before this action can continue."
+    if "no assistant text" in text or "no final" in text:
+        return "The Agent Engine stream finished without a final assistant response."
+    if "agent engine" in text and any(word in text for word in ("auth", "credential", "permission", "forbidden", "unauthorized")):
+        return "The Agent Engine credentials or permissions need attention."
+    if "agent engine" in text or "async_stream_query" in text:
+        return "The Agent Engine stream failed before producing a final response."
+    if "rtdb" in text or "realtime database" in text:
+        return "Live updates were unavailable while the agent was running."
+    return "Unexpected backend error."
+
+
 # ---------------------------------------------------------------------------
 # Background task
 # ---------------------------------------------------------------------------
@@ -291,13 +312,24 @@ async def _run_agent_background(
 
     except Exception as exc:
         logger.error("gateway background failed run_id=%s: %s", run_id, exc)
+        safe_error = safe_run_error_message(exc)
+        final_error = (
+            "The agent run failed before producing a final response. "
+            f"Error: {safe_error}"
+        )
         try:
             mark_agent_run_failed(
                 batch_id=batch_id,
                 chat_id=chat_id,
                 run_id=run_id,
-                error=str(exc),
+                error=safe_error,
             )
         except Exception as firestore_exc:
             logger.warning("Firestore mark failed failed run_id=%s: %s", run_id, firestore_exc)
+        try:
+            add_message(batch_id, chat_id, "assistant", final_error, lecturer_id)
+        except Exception as message_exc:
+            logger.warning("Firestore failure message write failed run_id=%s: %s", run_id, message_exc)
+        write_run_error(run_id, safe_error)
+        write_final_message(run_id, final_error)
         set_run_status(run_id, "failed")

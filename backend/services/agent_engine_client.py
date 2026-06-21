@@ -64,6 +64,19 @@ logger = logging.getLogger(__name__)
 
 _LOCATION: str = os.getenv("AGENT_ENGINE_LOCATION", "us-central1").strip()
 _PROJECT: str = os.getenv("GOOGLE_CLOUD_PROJECT", "").strip()
+_DEBUG_STREAM_TEXT: bool = os.getenv("PNAI_DEBUG_AGENT_STREAM_TEXT", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
+_INTERNAL_TEXT_PREFIXES = (
+    "thought:",
+    "thinking:",
+    "<thought>",
+    "model_thinking",
+)
+_INTERNAL_MARKERS = ("thought", "thinking", "reasoning", "internal", "model_thinking")
+_TOOL_FIELDS = ("function_call", "function_response", "tool_call", "tool_response")
 
 
 def get_agent_engine_resource_name() -> str:
@@ -244,19 +257,31 @@ async def _sdk_stream(
 
     try:
         event_count = 0
-        chunk_count = 0
+        final_chunk_count = 0
         last_event_summary = ""
         async for event in stream:
             event_count += 1
             last_event_summary = _event_summary(event)
+            event_kind = _event_kind(event)
+            logger.debug(
+                "Agent Engine stream event resource=%s user_id=%s session_id=%s "
+                "event_kind=%s fields=%s",
+                resource_name,
+                lecturer_id,
+                session_id,
+                event_kind,
+                _event_fields(event),
+            )
             error = _event_error(event)
             if error:
                 raise RuntimeError(f"Agent Engine returned an error event: {error}")
             chunk = _event_text(event)
             if chunk:
-                chunk_count += 1
+                final_chunk_count += 1
+                if _DEBUG_STREAM_TEXT:
+                    logger.debug("Agent Engine final text chunk: %r", chunk)
                 yield chunk
-        if event_count and not chunk_count:
+        if event_count and not final_chunk_count:
             raise RuntimeError(
                 "Agent Engine stream produced events but no assistant text. "
                 f"Last event: {last_event_summary}"
@@ -363,14 +388,17 @@ def _get_agent(vertexai_module: Any, resource_name: str) -> Any:
 
 
 def _event_text(event: Any) -> str:
+    if _event_kind(event) != "final_text":
+        return ""
+
     if isinstance(event, dict):
-        text = event.get("text")
+        text = _part_text_for_final(event)
         if text:
             return str(text)
         return _content_text(event.get("content"))
-    text = getattr(event, "text", None)
+    text = _part_text_for_final(event)
     if text:
-        return str(text)
+        return text
     return _content_text(getattr(event, "content", None))
 
 
@@ -378,24 +406,127 @@ def _content_text(content: Any) -> str:
     if not content:
         return ""
     if isinstance(content, str):
-        return content
+        return "" if _text_has_internal_prefix(content) else content
     if isinstance(content, dict):
-        direct_text = content.get("text")
+        direct_text = _part_text_for_final(content)
         if direct_text:
-            return str(direct_text)
+            return direct_text
         parts = content.get("parts") or []
     else:
+        direct_text = _part_text_for_final(content)
+        if direct_text:
+            return direct_text
         parts = getattr(content, "parts", None) or []
 
     texts: list[str] = []
     for part in parts:
-        if isinstance(part, dict):
-            text = part.get("text")
-        else:
-            text = getattr(part, "text", None)
+        text = _part_text_for_final(part)
         if text:
-            texts.append(str(text))
+            texts.append(text)
     return "".join(texts)
+
+
+def _event_kind(event: Any) -> str:
+    error = _event_error(event)
+    if error:
+        return "error"
+    if _has_internal_marker(event) or _event_level_thought(event):
+        return "thinking"
+    if _event_has_final_text(event):
+        return "final_text"
+    if _event_has_tool_or_function_part(event):
+        return "tool"
+    return "internal"
+
+
+def _event_has_final_text(event: Any) -> bool:
+    if _part_text_for_final(event):
+        return True
+    content = _get_value(event, "content")
+    return bool(_content_text(content))
+
+
+def _event_has_tool_or_function_part(event: Any) -> bool:
+    if _is_tool_or_function_part(event):
+        return True
+    content = _get_value(event, "content")
+    parts = _get_value(content, "parts") if content is not None else None
+    if parts:
+        return any(_is_tool_or_function_part(part) for part in parts)
+    return _is_tool_or_function_part(content)
+
+
+def _event_level_thought(event: Any) -> bool:
+    if _truthy(_get_value(event, "thought")):
+        return True
+    content = _get_value(event, "content")
+    return _is_thought_part(content)
+
+
+def _part_text_for_final(part: Any) -> str:
+    if not part or _is_thought_part(part) or _is_tool_or_function_part(part):
+        return ""
+    text = _get_value(part, "text")
+    if not text:
+        return ""
+    text = str(text)
+    if _text_has_internal_prefix(text):
+        return ""
+    return text
+
+
+def _is_thought_part(part: Any) -> bool:
+    if not part:
+        return False
+    if _truthy(_get_value(part, "thought")):
+        return True
+    if _has_internal_marker(part):
+        return True
+    text = _get_value(part, "text")
+    return bool(text and _text_has_internal_prefix(str(text)))
+
+
+def _is_tool_or_function_part(part: Any) -> bool:
+    if not part:
+        return False
+    return any(_get_value(part, field) is not None for field in _TOOL_FIELDS)
+
+
+def _has_internal_marker(value: Any) -> bool:
+    candidates: list[str] = []
+    for key in ("role", "kind", "type", "category"):
+        item = _get_value(value, key)
+        if item is not None:
+            candidates.append(str(item))
+    metadata = _get_value(value, "metadata")
+    if metadata:
+        for key in ("role", "kind", "type", "category"):
+            item = _get_value(metadata, key)
+            if item is not None:
+                candidates.append(str(item))
+    joined = " ".join(candidates).lower()
+    return any(marker in joined for marker in _INTERNAL_MARKERS)
+
+
+def _text_has_internal_prefix(text: str) -> bool:
+    stripped = text.lstrip().lower()
+    return any(stripped.startswith(prefix) for prefix in _INTERNAL_TEXT_PREFIXES)
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes"}
+    return bool(value)
+
+
+def _get_value(value: Any, key: str) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value.get(key)
+    return getattr(value, key, None)
 
 
 def _event_error(event: Any) -> str:
@@ -412,7 +543,18 @@ def _event_error(event: Any) -> str:
 
 
 def _event_summary(event: Any) -> str:
-    return _short_repr(event)
+    return f"kind={_event_kind(event)} fields={_event_fields(event)}"
+
+
+def _event_fields(event: Any) -> list[str]:
+    if isinstance(event, dict):
+        return sorted(str(key) for key in event.keys())
+    try:
+        return sorted(
+            key for key in vars(event).keys() if not key.startswith("_")
+        )
+    except TypeError:
+        return [event.__class__.__name__]
 
 
 def _short_repr(value: Any, limit: int = 1000) -> str:

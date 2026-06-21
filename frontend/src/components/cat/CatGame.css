@@ -150,7 +150,6 @@
   gap: 2px;
   pointer-events: none;
 }
-
 .cat-zzz {
   font-weight: 900;
   color: #9bb8d4;
@@ -350,6 +349,112 @@
   background: #fdf0f2;
 }
 
+/* ─── Rope & Link mode ─── */
+.rope-panel {
+  padding: 16px 14px 14px;
+}
+
+/* The arena holds the SVG + both columns */
+.rope-arena {
+  position: relative;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 0;
+  min-height: 220px;
+  margin-top: 8px;
+  touch-action: none;
+  user-select: none;
+}
+
+.rope-svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  z-index: 2;
+  overflow: visible;
+}
+
+/* Left and right columns */
+.rope-col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 3;
+  flex: 1;
+}
+.rope-col-left  { align-items: flex-start; padding-right: 8px; }
+.rope-col-right { align-items: flex-end;   padding-left: 8px; }
+
+/* Individual node buttons */
+.rope-node {
+  width: 100%;
+  min-height: 46px;
+  padding: 10px 14px;
+  border: 2.5px solid #f0d4b8;
+  border-radius: 16px;
+  background: #fffaf5;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #5a3825;
+  font-family: inherit;
+  text-align: center;
+  cursor: grab;
+  transition: all 0.18s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.3;
+}
+
+.rope-node-question { cursor: grab; }
+.rope-node-answer   { cursor: default; }
+
+.rope-node-question:hover:not(:disabled) {
+  background: #fff3e4;
+  border-color: #f4a261;
+  transform: translateX(3px);
+  box-shadow: 0 4px 12px rgba(244,162,97,0.2);
+}
+.rope-node-answer:not(:disabled) {
+  cursor: default;
+}
+
+/* While actively dragging from this node */
+.rope-node-dragging {
+  background: #fff8e1;
+  border-color: #f4a261;
+  box-shadow: 0 0 0 3px rgba(244,162,97,0.35);
+  cursor: grabbing;
+}
+
+/* Successfully locked connection */
+.rope-node-locked {
+  background: #edfaf0;
+  border-color: #5cb85c;
+  color: #1a6e1a;
+  cursor: default !important;
+  opacity: 0.9;
+}
+
+/* Wrong connection shake */
+.rope-shake {
+  animation: ropeShake 0.5s ease;
+  border-color: #e05c6d !important;
+  background: #fdf0f2 !important;
+}
+
+/* Hint text at the bottom */
+.rope-hint {
+  margin-top: 10px;
+  text-align: center;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #c8a890;
+  letter-spacing: 0.2px;
+}
+
 /* ─── Result screen ─── */
 .result-screen {
   width: 100vw;
@@ -531,4 +636,11 @@
 @keyframes fishFloat {
   from { transform: translateY(0px); }
   to   { transform: translateY(-4px); }
+}
+@keyframes ropeShake {
+  0%, 100% { transform: translateX(0); }
+  20%       { transform: translateX(-6px); }
+  40%       { transform: translateX(6px); }
+  60%       { transform: translateX(-4px); }
+  80%       { transform: translateX(4px); }
 }

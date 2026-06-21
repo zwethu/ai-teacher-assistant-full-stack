@@ -360,7 +360,7 @@
   display: flex;
   flex-direction: row;
   align-items: stretch;
-  gap: 0;
+  gap: 48px;
   min-height: 220px;
   margin-top: 8px;
   touch-action: none;
@@ -384,8 +384,8 @@
   z-index: 3;
   flex: 1;
 }
-.rope-col-left  { align-items: flex-start; padding-right: 8px; }
-.rope-col-right { align-items: flex-end;   padding-left: 8px; }
+.rope-col-left  { align-items: flex-start; }
+.rope-col-right { align-items: flex-end; }
 
 /* Individual node buttons */
 .rope-node {
@@ -416,9 +416,6 @@
   border-color: #f4a261;
   transform: translateX(3px);
   box-shadow: 0 4px 12px rgba(244,162,97,0.2);
-}
-.rope-node-answer:not(:disabled) {
-  cursor: default;
 }
 
 /* While actively dragging from this node */

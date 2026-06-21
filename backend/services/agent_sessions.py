@@ -161,3 +161,50 @@ def _chat_ref(batch_id: str, chat_id: str):
 
 def _run_ref(batch_id: str, chat_id: str, run_id: str):
     return _chat_ref(batch_id, chat_id).collection(RUNS_SUBCOLLECTION).document(run_id)
+
+
+def _run_to_dict(data: dict[str, Any]) -> dict[str, Any]:
+    created = data.get("created_at")
+    completed = data.get("completed_at")
+    connectors = data.get("connectors") or {}
+    return {
+        "run_id": str(data.get("run_id") or ""),
+        "status": str(data.get("status") or ""),
+        "error": str(data.get("error") or ""),
+        "final_message_id": str(data.get("final_message_id") or ""),
+        "rtdb_run_path": str(data.get("rtdb_run_path") or ""),
+        "connectors": {
+            "web_search": bool(connectors.get("web_search", True)),
+            "google_workspace": bool(connectors.get("google_workspace", False)),
+        },
+        "created_at": (
+            created.isoformat()
+            if hasattr(created, "isoformat")
+            else (str(created) if created else None)
+        ),
+        "completed_at": (
+            completed.isoformat()
+            if hasattr(completed, "isoformat")
+            else (str(completed) if completed else None)
+        ),
+    }
+
+
+def get_agent_run(
+    *,
+    batch_id: str,
+    chat_id: str,
+    run_id: str,
+    lecturer_id: str,
+) -> dict[str, Any] | None:
+    """Return durable run metadata after ownership check."""
+    chat_snap = _chat_ref(batch_id, chat_id).get()
+    if not chat_snap.exists:
+        return None
+    chat_data = chat_snap.to_dict() or {}
+    if chat_data.get("lecturer_id") != lecturer_id:
+        return None
+    run_snap = _run_ref(batch_id, chat_id, run_id).get()
+    if not run_snap.exists:
+        return None
+    return _run_to_dict(run_snap.to_dict() or {})

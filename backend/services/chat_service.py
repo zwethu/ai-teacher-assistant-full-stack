@@ -59,6 +59,7 @@ def _msg_to_dict(doc_id: str, data: dict[str, Any]) -> dict[str, Any]:
         "chat_id": str(data.get("chat_id") or ""),
         "role": str(data.get("role") or "user"),
         "content": str(data.get("content") or ""),
+        "run_id": str(data.get("run_id") or ""),
         "created_at": (created.isoformat() if hasattr(created, "isoformat") else (str(created) if created else None)),
     }
 
@@ -150,21 +151,26 @@ def add_message(
     role: str,
     content: str,
     lecturer_id: str,
+    run_id: str = "",
 ) -> dict[str, Any]:
     """Persist one message and bump chat updated_at."""
     msg_id = str(uuid.uuid4())
+    doc: dict[str, Any] = {
+        "message_id": msg_id,
+        "chat_id": chat_id,
+        "role": role,
+        "content": content,
+        "created_at": SERVER_TIMESTAMP,
+    }
+    if run_id:
+        doc["run_id"] = run_id
     col = _messages_col(batch_id, chat_id)
-    col.document(msg_id).set(
-        {
-            "message_id": msg_id,
-            "chat_id": chat_id,
-            "role": role,
-            "content": content,
-            "created_at": SERVER_TIMESTAMP,
-        }
-    )
+    col.document(msg_id).set(doc)
     _chats_col(batch_id).document(chat_id).update({"updated_at": SERVER_TIMESTAMP})
-    return {"message_id": msg_id, "role": role, "content": content}
+    result: dict[str, Any] = {"message_id": msg_id, "role": role, "content": content}
+    if run_id:
+        result["run_id"] = run_id
+    return result
 
 
 def list_messages(batch_id: str, chat_id: str, lecturer_id: str) -> list[dict[str, Any]]:

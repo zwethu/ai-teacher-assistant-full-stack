@@ -6,6 +6,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from services.agent_gateway import start_chat_run
+from services.agent_sessions import get_agent_run
 from services.batch_service import get_batch
 from services.chat_service import (
     create_chat,
@@ -103,6 +104,26 @@ async def list_messages_endpoint(
     if chat is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
     return list_messages(batch_id, chat_id, lecturer_id)
+
+
+@router.get("/{chat_id}/runs/{run_id}", response_model=dict)
+async def get_run_endpoint(
+    batch_id: str,
+    chat_id: str,
+    run_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Return durable run metadata (status, connectors, RTDB path) for rehydration."""
+    lecturer_id: str = current_user["uid"]
+    run = get_agent_run(
+        batch_id=batch_id,
+        chat_id=chat_id,
+        run_id=run_id,
+        lecturer_id=lecturer_id,
+    )
+    if run is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    return run
 
 
 @router.post("/{chat_id}/messages", response_model=dict, status_code=status.HTTP_201_CREATED)

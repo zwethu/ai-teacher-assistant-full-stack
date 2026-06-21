@@ -42,7 +42,13 @@ type ConnectorsState = {
   google_workspace: boolean
 }
 
+type RouteHydrationState = 'idle' | 'hydrating' | 'hydrated' | 'invalid'
+
+const STREAM_DELAY_MESSAGE =
+  'Live updates are delayed. I will fetch the final response when ready.'
+
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const MAX_HISTORICAL_RUN_SUBSCRIPTIONS = 5
 
 function connectorErrorMessage(err: unknown): string {
   if (!axios.isAxiosError(err)) {
@@ -71,21 +77,42 @@ function connectorErrorMessage(err: unknown): string {
   return message || 'Sorry, something went wrong. Please try again.'
 }
 
+function collectRunIds(messages: ChatMessage[], activeChat: Chat | null): string[] {
+  const runIds = new Set<string>()
+  const assistantMsgs = messages.filter((msg) => msg.role === 'assistant')
+
+  assistantMsgs.slice(-MAX_HISTORICAL_RUN_SUBSCRIPTIONS).forEach((msg) => {
+    if (msg.run_id) runIds.add(msg.run_id)
+  })
+
+  if (activeChat?.active_run_id) {
+    runIds.add(activeChat.active_run_id)
+  }
+
+  const latestAssistant = assistantMsgs.at(-1)
+  if (latestAssistant && !latestAssistant.run_id && activeChat?.last_run_id) {
+    runIds.add(activeChat.last_run_id)
+  }
+
+  return [...runIds]
+}
+
 export function useChatPage() {
   const { user } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
-  
-  const appliedRouteStateRef = useRef<string | null>(null)
-  const isInitializedRef = useRef(false)
-  const pendingChatIdRef = useRef<string | null>(null)
-  const pendingInitialMessageRef = useRef<string | null>(null)
-  const runUnsubscribeRef = useRef<(() => void) | null>(null)
-  const runFallbackTimerRef = useRef<number | null>(null)
-  const runPollIntervalRef = useRef<number | null>(null)
-  const googleWorkspaceManuallyDisabledRef = useRef(false)
 
+  const requestedBatchIdRef = useRef<string | null>(null)
+  const requestedChatIdRef = useRef<string | null>(null)
+  const routeHydratedRef = useRef(false)
+  const routeParamsReadRef = useRef(false)
+  const pendingInitialMessageRef = useRef<string | null>(null)
+  const runUnsubscribesRef = useRef<Record<string, () => void>>({})
+  const runFallbackTimerRef = useRef<number | null>(null)
+  const runPollIntervalRef = useRef<Record<string, number>>({})
+
+  const [routeHydration, setRouteHydration] = useState<RouteHydrationState>('idle')
   const [batches, setBatches] = useState<Batch[]>([])
   const [batchesLoading, setBatchesLoading] = useState(true)
   const [selectedBatch, setSelectedBatch] = useState<Batch | null>(null)
@@ -107,7 +134,8 @@ export function useChatPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const renameInputRef = useRef<HTMLInputElement>(null)
-  
+  const googleWorkspaceManuallyDisabledRef = useRef(false)
+
   const [connectors, setConnectors] = useState<ConnectorsState>({
     web_search: true,
     google_workspace: false,
@@ -160,55 +188,113 @@ export function useChatPage() {
       .finally(() => setBatchesLoading(false))
   }, [user])
 
-  // Initialize from location state or URL params
+  // Read route params once on mount
   useEffect(() => {
-    if (batchesLoading) return
+    if (routeParamsReadRef.current) return
+    routeParamsReadRef.current = true
 
     const routeState = location.state as ChatLocationState | null
-    const paramBatchId = routeState?.batchId || searchParams.get('batch')
-    const paramChatId = routeState?.chatId || searchParams.get('chat')
-
-    if (!paramBatchId || batches.length === 0) {
-      isInitializedRef.current = true
-      return
-    }
-
-    const stateKey = `${paramBatchId}:${paramChatId ?? ''}`
-    if (appliedRouteStateRef.current === stateKey) {
-      isInitializedRef.current = true
-      return
-    }
-
-    const batch = batches.find((b) => b.id === paramBatchId)
-    if (!batch) {
-      isInitializedRef.current = true
-      return
-    }
-
-    setSelectedBatch(batch)
-    pendingChatIdRef.current = paramChatId ?? null
+    requestedBatchIdRef.current = routeState?.batchId || searchParams.get('batch')
+    requestedChatIdRef.current = routeState?.chatId || searchParams.get('chat')
     pendingInitialMessageRef.current = routeState?.initialMessage ?? null
-    appliedRouteStateRef.current = stateKey
-    isInitializedRef.current = true
 
     if (routeState) {
       navigate(location.pathname + location.search, { replace: true, state: null })
     }
-  }, [batchesLoading, batches, location.pathname, location.search, location.state, navigate, searchParams])
+  }, [location.pathname, location.search, location.state, navigate, searchParams])
 
-  // Sync state to URL params
+  // Hydrate batch/chat from URL params
   useEffect(() => {
-    if (!isInitializedRef.current) return
+    const batchId = requestedBatchIdRef.current
+    const chatId = requestedChatIdRef.current
+
+    if (!batchId) {
+      if (!batchesLoading && !routeHydratedRef.current) {
+        routeHydratedRef.current = true
+        setRouteHydration('hydrated')
+      }
+      return
+    }
+
+    if (batchesLoading) {
+      setRouteHydration('hydrating')
+      return
+    }
+
+    const batch = batches.find((item) => item.id === batchId)
+    if (!batch) {
+      if (!routeHydratedRef.current) {
+        routeHydratedRef.current = true
+        setRouteHydration('invalid')
+      }
+      return
+    }
+
+    if (selectedBatch?.id !== batch.id) {
+      setSelectedBatch(batch)
+    }
+
+    if (!chatId) {
+      if (!routeHydratedRef.current) {
+        routeHydratedRef.current = true
+        setRouteHydration('hydrated')
+      }
+      return
+    }
+
+    if (chatsLoading) {
+      setRouteHydration('hydrating')
+      return
+    }
+
+    const chat = chats.find((item) => item.chat_id === chatId)
+    if (!chat) {
+      if (selectedBatch?.id === batch.id && !chatsLoading && !routeHydratedRef.current) {
+        routeHydratedRef.current = true
+        setRouteHydration('invalid')
+      }
+      return
+    }
+
+    if (activeChat?.chat_id !== chat.chat_id) {
+      setActiveChat(chat)
+    }
+
+    if (!routeHydratedRef.current) {
+      routeHydratedRef.current = true
+      setRouteHydration('hydrated')
+    }
+  }, [
+    activeChat?.chat_id,
+    batches,
+    batchesLoading,
+    chats,
+    chatsLoading,
+    selectedBatch?.id,
+  ])
+
+  // Sync state to URL only after hydration completes
+  useEffect(() => {
+    if (!routeHydratedRef.current || routeHydration === 'hydrating') return
+
+    const waitingForBatch =
+      Boolean(requestedBatchIdRef.current) && !selectedBatch && batchesLoading
+    const waitingForChat =
+      Boolean(requestedChatIdRef.current) &&
+      !activeChat &&
+      (chatsLoading || Boolean(selectedBatch))
+
+    if (waitingForBatch || waitingForChat) return
 
     const newParams = new URLSearchParams(searchParams)
     let changed = false
-    
+
     if (selectedBatch) {
       if (newParams.get('batch') !== selectedBatch.id) {
         newParams.set('batch', selectedBatch.id)
         changed = true
       }
-    } else if (newParams.has('batch')) {
+    } else if (newParams.has('batch') && !requestedBatchIdRef.current) {
       newParams.delete('batch')
       changed = true
     }
@@ -218,25 +304,15 @@ export function useChatPage() {
         newParams.set('chat', activeChat.chat_id)
         changed = true
       }
-    } else if (newParams.has('chat')) {
+    } else if (newParams.has('chat') && !requestedChatIdRef.current) {
       newParams.delete('chat')
       changed = true
     }
 
     if (changed) {
       setSearchParams(newParams, { replace: true })
-      appliedRouteStateRef.current = `${selectedBatch?.id || ''}:${activeChat?.chat_id || ''}`
     }
-  }, [selectedBatch, activeChat, searchParams, setSearchParams])
-
-  useEffect(() => {
-    if (!selectedBatch || !pendingChatIdRef.current || chats.length === 0) return
-    const chat = chats.find((c) => c.chat_id === pendingChatIdRef.current)
-    if (chat) {
-      setActiveChat(chat)
-      pendingChatIdRef.current = null
-    }
-  }, [selectedBatch, chats])
+  }, [activeChat, routeHydration, searchParams, selectedBatch, batchesLoading, chatsLoading, setSearchParams])
 
   const loadChats = useCallback(async (batchId: string) => {
     setChatsLoading(true)
@@ -269,30 +345,45 @@ export function useChatPage() {
     }
     setMessagesLoading(true)
     listMessages(selectedBatch.id, activeChat.chat_id)
-      .then(setMessages)
+      .then((data) => {
+        const lastRunId = activeChat.last_run_id
+        const assistantMsgs = data.filter((msg) => msg.role === 'assistant')
+        const latestAssistant = assistantMsgs.at(-1)
+        const enriched = data.map((msg) => {
+          if (msg.run_id) {
+            return msg
+          }
+          if (
+            latestAssistant &&
+            msg.message_id === latestAssistant.message_id &&
+            lastRunId
+          ) {
+            return { ...msg, run_id: lastRunId }
+          }
+          return msg
+        })
+        setMessages(enriched)
+      })
       .catch(console.error)
       .finally(() => setMessagesLoading(false))
   }, [activeChat, selectedBatch])
 
-  useEffect(() => {
-    if (!activeChat?.active_run_id || !selectedBatch || messagesLoading) return
-    const runId = activeChat.active_run_id
-    const pendingId = `pending-${runId}`
-    const batchId = selectedBatch.id
-    const chatId = activeChat.chat_id
-
-    setCurrentRunId(runId)
+  function ensureRunState(runId: string, status: AgentRunStatus = 'running') {
     setRunStates((prev) => ({
       ...prev,
       [runId]: prev[runId] || {
-        status: 'running',
+        status,
         events: [],
         steps: {},
         liveConnected: true,
       },
     }))
+  }
+
+  function ensurePendingAssistantMessage(runId: string, chatId: string) {
+    const pendingId = `pending-${runId}`
     setMessages((prev) => {
-      if (prev.some((msg) => msg.message_id === pendingId || msg.run_id === runId)) {
+      if (prev.some((msg) => msg.message_id === pendingId || (msg.pending && msg.run_id === runId))) {
         return prev
       }
       return [
@@ -301,7 +392,7 @@ export function useChatPage() {
           message_id: pendingId,
           chat_id: chatId,
           role: 'assistant',
-          content: 'Working...',
+          content: '',
           created_at: new Date().toISOString(),
           status: 'pending',
           run_id: runId,
@@ -309,24 +400,42 @@ export function useChatPage() {
         },
       ]
     })
+  }
 
-    runUnsubscribeRef.current?.()
-    stopFallbackPolling()
-    runUnsubscribeRef.current = subscribeAgentRun(runId, {
+  function subscribeToRun(
+    runId: string,
+    batchId: string,
+    chatId: string,
+    options?: { withPolling?: boolean },
+  ) {
+    if (runUnsubscribesRef.current[runId]) return
+
+    const pendingId = `pending-${runId}`
+    ensureRunState(runId)
+
+    runUnsubscribesRef.current[runId] = subscribeAgentRun(runId, {
       onMessage: (message) => {
         upsertLiveAssistantMessage(message, pendingId, chatId)
         setSending(false)
-        stopFallbackTimers()
+        stopFallbackTimers(runId)
       },
       onStatus: (status) => {
         updateRunStatus(runId, status)
         if (status === 'done') {
-          stopFallbackTimers()
-          void pollFinalMessagesOnce(batchId, chatId, runId, pendingId)
-            .finally(() => setSending(false))
+          stopFallbackTimers(runId)
+          void pollFinalMessagesOnce(batchId, chatId, runId, pendingId).finally(() =>
+            setSending(false),
+          )
         }
         if (status === 'failed') {
-          stopFallbackTimers()
+          stopFallbackTimers(runId)
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.pending && msg.run_id === runId
+                ? { ...msg, content: '', status: 'failed', pending: false }
+                : msg,
+            ),
+          )
           setSending(false)
         }
       },
@@ -336,20 +445,69 @@ export function useChatPage() {
       onDisconnected: (connected) => updateRunConnection(runId, connected),
       onError: (error) => {
         console.error(error)
-        updateRunStreamError(runId, 'Live updates are delayed. The run is still active.')
-        startFallbackPolling(batchId, chatId, runId, pendingId)
+        updateRunStreamError(runId, STREAM_DELAY_MESSAGE)
+        if (options?.withPolling) {
+          startFallbackPolling(batchId, chatId, runId, pendingId)
+        }
       },
     })
-  }, [activeChat, selectedBatch, messagesLoading])
 
-  useEffect(() => {
-    return () => {
-      runUnsubscribeRef.current?.()
+    if (options?.withPolling) {
       if (runFallbackTimerRef.current) {
         window.clearTimeout(runFallbackTimerRef.current)
       }
-      if (runPollIntervalRef.current) {
-        window.clearInterval(runPollIntervalRef.current)
+      runFallbackTimerRef.current = window.setTimeout(() => {
+        updateRunStreamError(runId, STREAM_DELAY_MESSAGE)
+        startFallbackPolling(batchId, chatId, runId, pendingId)
+      }, 30000)
+    }
+  }
+
+  function unsubscribeFromRun(runId: string) {
+    runUnsubscribesRef.current[runId]?.()
+    delete runUnsubscribesRef.current[runId]
+    stopFallbackTimers(runId)
+  }
+
+  // Subscribe to visible assistant run_ids after messages load
+  useEffect(() => {
+    if (!activeChat || !selectedBatch || messagesLoading) return
+
+    const batchId = selectedBatch.id
+    const chatId = activeChat.chat_id
+    const runIds = collectRunIds(messages, activeChat)
+
+    if (activeChat.active_run_id) {
+      setCurrentRunId(activeChat.active_run_id)
+      ensurePendingAssistantMessage(activeChat.active_run_id, chatId)
+      subscribeToRun(activeChat.active_run_id, batchId, chatId, { withPolling: true })
+    }
+
+    runIds.forEach((runId) => {
+      if (runId === activeChat.active_run_id) return
+      ensureRunState(
+        runId,
+        activeChat.last_run_id === runId
+          ? (activeChat.last_run_status as AgentRunStatus) || 'done'
+          : 'done',
+      )
+      subscribeToRun(runId, batchId, chatId)
+    })
+
+    for (const subscribedRunId of Object.keys(runUnsubscribesRef.current)) {
+      if (!runIds.includes(subscribedRunId)) {
+        unsubscribeFromRun(subscribedRunId)
+      }
+    }
+  }, [activeChat, selectedBatch, messages, messagesLoading])
+
+  useEffect(() => {
+    return () => {
+      Object.keys(runUnsubscribesRef.current).forEach((runId) => {
+        unsubscribeFromRun(runId)
+      })
+      if (runFallbackTimerRef.current) {
+        window.clearTimeout(runFallbackTimerRef.current)
       }
     }
   }, [])
@@ -364,6 +522,8 @@ export function useChatPage() {
     setChats((prev) => [chat, ...prev])
     setActiveChat(chat)
     setMessages([])
+    requestedBatchIdRef.current = selectedBatch.id
+    requestedChatIdRef.current = chat.chat_id
     emitChatCreated()
     return chat
   }
@@ -394,30 +554,17 @@ export function useChatPage() {
     setMessages((prev) => [...prev, optimisticUser])
 
     try {
-      const result = await sendMessage(
-        batchId,
-        chatId,
-        content,
-        connectors,
-      )
+      const result = await sendMessage(batchId, chatId, content, connectors)
       const pendingId = `pending-${result.run_id}`
       setCurrentRunId(result.run_id)
-      setRunStates((prev) => ({
-        ...prev,
-        [result.run_id]: {
-          status: 'running',
-          events: [],
-          steps: {},
-          liveConnected: true,
-        },
-      }))
+      ensureRunState(result.run_id)
       setMessages((prev) => [
         ...prev.filter(Boolean),
         {
           message_id: pendingId,
           chat_id: chatId,
           role: 'assistant',
-          content: 'Working...',
+          content: '',
           created_at: new Date().toISOString(),
           status: 'pending',
           run_id: result.run_id,
@@ -425,67 +572,8 @@ export function useChatPage() {
         },
       ])
 
-      runUnsubscribeRef.current?.()
-      if (runFallbackTimerRef.current) {
-        window.clearTimeout(runFallbackTimerRef.current)
-      }
-      stopFallbackPolling()
-      runUnsubscribeRef.current = subscribeAgentRun(result.run_id, {
-        onMessage: (message) => {
-          upsertLiveAssistantMessage(message, pendingId, chatId)
-          setSending(false)
-          stopFallbackTimers()
-        },
-        onStatus: (status) => {
-          updateRunStatus(result.run_id, status)
-          if (status === 'failed') {
-            stopFallbackTimers()
-            setMessages((prev) =>
-              prev
-                .filter(Boolean)
-                .map((msg) =>
-                  msg.message_id === pendingId
-                    ? {
-                        ...msg,
-                        content: msg.content || 'The agent run failed before producing a final response.',
-                        status: 'failed',
-                        pending: false,
-                      }
-                    : msg,
-                ),
-            )
-            setSending(false)
-            return
-          }
-
-          if (status === 'done') {
-            stopFallbackTimers()
-            window.setTimeout(() => {
-              void pollFinalMessagesOnce(batchId, chatId, result.run_id, pendingId)
-                .finally(() => setSending(false))
-            }, 1500)
-          }
-        },
-        onEvent: (event) => appendRunEvent(result.run_id, event),
-        onStep: (step) => upsertRunStep(result.run_id, step),
-        onRunError: (message) => updateRunError(result.run_id, message),
-        onDisconnected: (connected) => updateRunConnection(result.run_id, connected),
-        onError: (error) => {
-          console.error(error)
-          updateRunStreamError(
-            result.run_id,
-            'Live updates are delayed. The run is still active.',
-          )
-          startFallbackPolling(batchId, chatId, result.run_id, pendingId)
-        },
-      })
-      runFallbackTimerRef.current = window.setTimeout(() => {
-        updateRunStreamError(
-          result.run_id,
-          'Live updates are delayed. The run is still active.',
-        )
-        startFallbackPolling(batchId, chatId, result.run_id, pendingId)
-      }, 30000)
+      unsubscribeFromRun(result.run_id)
+      subscribeToRun(result.run_id, batchId, chatId, { withPolling: true })
 
       if (chat.title === 'New Chat') {
         const newTitle = content.slice(0, 50)
@@ -577,6 +665,7 @@ export function useChatPage() {
         chat_id: chatId,
         status: 'done',
         pending: false,
+        run_id: message.run_id,
       }
       const existingIndex = prev.findIndex((msg) => msg?.message_id === finalMessage.message_id)
       if (existingIndex >= 0) {
@@ -608,15 +697,15 @@ export function useChatPage() {
     runId: string,
     pendingId: string,
   ) {
-    if (runPollIntervalRef.current) {
-      window.clearInterval(runPollIntervalRef.current)
+    if (runPollIntervalRef.current[runId]) {
+      window.clearInterval(runPollIntervalRef.current[runId])
     }
     const startedAt = Date.now()
-    runPollIntervalRef.current = window.setInterval(() => {
+    runPollIntervalRef.current[runId] = window.setInterval(() => {
       void pollFinalMessagesOnce(batchId, chatId, runId, pendingId)
         .then(() => {
           if (Date.now() - startedAt > 5 * 60_000) {
-            stopFallbackPolling()
+            stopFallbackTimers(runId)
             setSending(false)
           }
         })
@@ -624,19 +713,28 @@ export function useChatPage() {
     }, 5000)
   }
 
-  function stopFallbackPolling() {
-    if (runPollIntervalRef.current) {
-      window.clearInterval(runPollIntervalRef.current)
-      runPollIntervalRef.current = null
+  function stopFallbackPolling(runId?: string) {
+    if (runId) {
+      if (runPollIntervalRef.current[runId]) {
+        window.clearInterval(runPollIntervalRef.current[runId])
+        delete runPollIntervalRef.current[runId]
+      }
+      return
     }
+    Object.values(runPollIntervalRef.current).forEach((timer) => {
+      window.clearInterval(timer)
+    })
+    runPollIntervalRef.current = {}
   }
 
-  function stopFallbackTimers() {
-    if (runFallbackTimerRef.current) {
-      window.clearTimeout(runFallbackTimerRef.current)
-      runFallbackTimerRef.current = null
+  function stopFallbackTimers(runId?: string) {
+    if (!runId || Object.keys(runPollIntervalRef.current).length <= 1) {
+      if (runFallbackTimerRef.current) {
+        window.clearTimeout(runFallbackTimerRef.current)
+        runFallbackTimerRef.current = null
+      }
     }
-    stopFallbackPolling()
+    stopFallbackPolling(runId)
   }
 
   function mergePolledMessages(
@@ -646,24 +744,42 @@ export function useChatPage() {
     pendingId: string,
   ): ChatMessage[] {
     const pendingIndex = previous.findIndex((msg) => msg.message_id === pendingId)
-    if (pendingIndex < 0) {
-      stopFallbackTimers()
-      return previous
-    }
+    const hasPending = pendingIndex >= 0
 
     const previousAssistantCount = previous.filter(
       (msg) => msg.role === 'assistant' && msg.message_id !== pendingId,
     ).length
     const fetchedAssistant = fetched.filter((msg) => msg.role === 'assistant')
-    if (fetchedAssistant.length <= previousAssistantCount) return previous
+    if (hasPending && fetchedAssistant.length <= previousAssistantCount) {
+      return previous
+    }
 
-    stopFallbackPolling()
+    stopFallbackPolling(runId)
     setSending(false)
-    return fetched.map((msg, index) =>
-      msg.role === 'assistant' && index === fetched.length - 1
-        ? { ...msg, run_id: runId, status: 'done', pending: false }
-        : msg,
-    )
+
+    if (!hasPending) {
+      return fetched.map((msg) =>
+        msg.run_id
+          ? { ...msg, status: msg.role === 'assistant' ? 'done' : msg.status, pending: false }
+          : msg,
+      )
+    }
+
+    const latestAssistant = fetchedAssistant.at(-1)
+    return fetched.map((msg) => {
+      if (msg.message_id === latestAssistant?.message_id) {
+        return {
+          ...msg,
+          run_id: msg.run_id || runId,
+          status: 'done',
+          pending: false,
+        }
+      }
+      if (msg.run_id) {
+        return { ...msg, status: msg.role === 'assistant' ? 'done' : msg.status, pending: false }
+      }
+      return msg
+    })
   }
 
   useEffect(() => {
@@ -712,6 +828,7 @@ export function useChatPage() {
     if (activeChat?.chat_id === chat.chat_id) {
       setActiveChat(null)
       setMessages([])
+      requestedChatIdRef.current = null
     }
     emitChatCreated()
   }
@@ -729,7 +846,11 @@ export function useChatPage() {
     batches,
     batchesLoading,
     selectedBatch,
-    setSelectedBatch,
+    setSelectedBatch: (batch: Batch | null) => {
+      requestedBatchIdRef.current = batch?.id ?? null
+      requestedChatIdRef.current = null
+      setSelectedBatch(batch)
+    },
     chats,
     chatsLoading,
     renamingId,
@@ -737,7 +858,10 @@ export function useChatPage() {
     renameValue,
     setRenameValue,
     activeChat,
-    setActiveChat,
+    setActiveChat: (chat: Chat | null) => {
+      requestedChatIdRef.current = chat?.chat_id ?? null
+      setActiveChat(chat)
+    },
     messages,
     messagesLoading,
     input,

@@ -1,5 +1,6 @@
 import {
   child,
+  get,
   onChildAdded,
   onChildChanged,
   onValue,
@@ -65,6 +66,10 @@ export function subscribeAgentRun(
     const handleError = (error: Error) => {
       options.onError?.(error)
     }
+
+    void loadExistingRunSnapshot(runId, runRef, options, seenEvents, seenMessages).catch(
+      handleError,
+    )
 
     const unsubscribers = [
       onValue(
@@ -140,6 +145,48 @@ export function subscribeAgentRun(
   } catch (error) {
     options.onError?.(error instanceof Error ? error : new Error(String(error)))
     return () => undefined
+  }
+}
+
+async function loadExistingRunSnapshot(
+  runId: string,
+  runRef: ReturnType<typeof ref>,
+  options: SubscribeAgentRunOptions,
+  seenEvents: Set<string>,
+  seenMessages: Set<string>,
+): Promise<void> {
+  const [eventsSnap, stepsSnap, messagesSnap] = await Promise.all([
+    get(child(runRef, 'events')),
+    get(child(runRef, 'steps')),
+    get(child(runRef, 'messages')),
+  ])
+
+  if (eventsSnap.exists()) {
+    const raw = eventsSnap.val() as Record<string, unknown>
+    for (const [key, value] of Object.entries(raw)) {
+      const event = normalizeEvent(key, runId, value)
+      if (!event || seenEvents.has(event.event_id)) continue
+      seenEvents.add(event.event_id)
+      options.onEvent?.(event)
+    }
+  }
+
+  if (stepsSnap.exists()) {
+    const raw = stepsSnap.val() as Record<string, unknown>
+    for (const [key, value] of Object.entries(raw)) {
+      const step = normalizeStep(key, value)
+      if (step) options.onStep?.(step)
+    }
+  }
+
+  if (messagesSnap.exists()) {
+    const raw = messagesSnap.val() as Record<string, unknown>
+    for (const [key, value] of Object.entries(raw)) {
+      const message = normalizeMessage(key, runId, value)
+      if (!message || seenMessages.has(message.message_id)) continue
+      seenMessages.add(message.message_id)
+      options.onMessage?.(message)
+    }
   }
 }
 

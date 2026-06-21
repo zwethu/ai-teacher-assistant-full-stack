@@ -122,16 +122,18 @@ async def start_chat_run(
 
     agent_engine_resource_name = get_agent_engine_resource_name()
 
-    # --- 2. Persist user message ---
-    user_msg = add_message(batch_id, chat_id, "user", user_message, lecturer_id)
+    # --- 2. Create run id before persisting messages ---
+    run_id = f"run_{uuid.uuid4().hex[:16]}"
+
+    # --- 3. Persist user message with run_id ---
+    user_msg = add_message(
+        batch_id, chat_id, "user", user_message, lecturer_id, run_id=run_id,
+    )
     agent_session_id = ensure_chat_agent_session(
         batch_id=batch_id,
         chat_id=chat_id,
         lecturer_id=lecturer_id,
     )
-
-    # --- 3. Create run ---
-    run_id = f"run_{uuid.uuid4().hex[:16]}"
     rtdb_run_path = f"agentRuns/{run_id}"
 
     # --- 4. Write RTDB lifecycle nodes ---
@@ -294,7 +296,9 @@ async def _run_agent_background(
             raise RuntimeError("Agent Engine stream completed without any assistant text")
 
         # Persist assistant message to Firestore
-        final_msg = add_message(batch_id, chat_id, "assistant", final_text, lecturer_id)
+        final_msg = add_message(
+            batch_id, chat_id, "assistant", final_text, lecturer_id, run_id=run_id,
+        )
 
         # Write final message to RTDB for frontend live message display
         write_final_message(run_id, final_text)
@@ -329,7 +333,9 @@ async def _run_agent_background(
         except Exception as firestore_exc:
             logger.warning("Firestore mark failed failed run_id=%s: %s", run_id, firestore_exc)
         try:
-            add_message(batch_id, chat_id, "assistant", final_error, lecturer_id)
+            add_message(
+                batch_id, chat_id, "assistant", final_error, lecturer_id, run_id=run_id,
+            )
         except Exception as message_exc:
             logger.warning("Firestore failure message write failed run_id=%s: %s", run_id, message_exc)
         write_run_error(run_id, safe_error)

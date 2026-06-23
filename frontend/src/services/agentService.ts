@@ -1,9 +1,7 @@
 import api from '../lib/api'
-import { checkGoogleAuthStatus } from './authService'
 
 export type AgentConnectors = {
   web_search: boolean
-  google_workspace: boolean
 }
 
 export type AgentInvokePayload = {
@@ -29,19 +27,7 @@ async function invokeAgent(
 }
 
 async function getDefaultConnectors(): Promise<AgentConnectors> {
-  try {
-    const status = await checkGoogleAuthStatus()
-    return {
-      web_search: true,
-      google_workspace: status.valid && status.has_google_scopes,
-    }
-  } catch (err) {
-    console.error(err)
-    return {
-      web_search: true,
-      google_workspace: false,
-    }
-  }
+  return { web_search: true }
 }
 
 export async function generateAssessment(

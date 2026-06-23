@@ -32,7 +32,6 @@ router = APIRouter()
 
 class ConnectorState(BaseModel):
     web_search: bool = True
-    google_workspace: bool = False
 
 
 class AgentInvokeRequest(BaseModel):

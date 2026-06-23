@@ -30,7 +30,6 @@ import {
   type AgentRunStep,
   type AgentRunStreamMeta,
 } from '../../../services/agentRunStream'
-import { checkGoogleAuthStatus } from '../../../services/authService'
 import { emitChatCreated } from '../../../utils/chatEvents'
 import type { RunUiState } from '../runTypes'
 
@@ -42,7 +41,6 @@ type ChatLocationState = {
 
 type ConnectorsState = {
   web_search: boolean
-  google_workspace: boolean
 }
 
 type RouteHydrationState = 'idle' | 'hydrating' | 'hydrated' | 'invalid'
@@ -50,7 +48,6 @@ type RouteHydrationState = 'idle' | 'hydrating' | 'hydrated' | 'invalid'
 const STREAM_DELAY_MESSAGE =
   'Live updates are delayed. I will fetch the final response when ready.'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 const MAX_HISTORICAL_RUN_SUBSCRIPTIONS = 5
 
 function connectorErrorMessage(err: unknown): string {
@@ -59,23 +56,7 @@ function connectorErrorMessage(err: unknown): string {
   }
 
   const detail = err.response?.data?.detail
-  const code = typeof detail?.code === 'string' ? detail.code : ''
   const message = typeof detail?.message === 'string' ? detail.message : ''
-  const connectUrl = typeof detail?.connect_url === 'string' ? detail.connect_url : ''
-
-  if (code === 'GOOGLE_OAUTH_REQUIRED') {
-    const base =
-      'Google Workspace is not connected or needs re-consent. Please connect Google Workspace, then try again.'
-    if (!connectUrl) return base
-    const absoluteUrl = connectUrl.startsWith('http')
-      ? connectUrl
-      : `${API_URL.replace(/\/$/, '')}${connectUrl.startsWith('/') ? connectUrl : `/${connectUrl}`}`
-    return `${base}\n\n[Connect Google Workspace](${absoluteUrl})`
-  }
-
-  if (code === 'GOOGLE_CONNECTOR_DISABLED') {
-    return 'Google Workspace connector is disabled. Enable it in chat connectors to export Docs, Forms, Gmail, or Calendar.'
-  }
 
   return message || 'Sorry, something went wrong. Please try again.'
 }
@@ -167,50 +148,17 @@ export function useChatPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const renameInputRef = useRef<HTMLInputElement>(null)
-  const googleWorkspaceManuallyDisabledRef = useRef(false)
 
   const [connectors, setConnectors] = useState<ConnectorsState>({
     web_search: true,
-    google_workspace: false,
   })
 
   const updateConnectors: Dispatch<SetStateAction<ConnectorsState>> = useCallback((value) => {
     setConnectors((prev) => {
       const next = typeof value === 'function' ? value(prev) : value
-      if (prev.google_workspace && !next.google_workspace) {
-        googleWorkspaceManuallyDisabledRef.current = true
-      }
-      if (!prev.google_workspace && next.google_workspace) {
-        googleWorkspaceManuallyDisabledRef.current = false
-      }
       return next
     })
   }, [])
-
-  useEffect(() => {
-    if (!user) return
-    let cancelled = false
-
-    checkGoogleAuthStatus()
-      .then((status) => {
-        if (cancelled) return
-        const hasValidGoogle = status.valid && status.has_google_scopes
-        setConnectors((prev) => ({
-          ...prev,
-          google_workspace:
-            hasValidGoogle && !googleWorkspaceManuallyDisabledRef.current,
-        }))
-      })
-      .catch((err) => {
-        console.error(err)
-        if (cancelled) return
-        setConnectors((prev) => ({ ...prev, google_workspace: false }))
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [user])
 
   useEffect(() => {
     if (!user) return

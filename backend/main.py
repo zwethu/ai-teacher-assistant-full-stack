@@ -42,7 +42,6 @@ from routers.batches import router as batches_router
 from routers.chats import router as chats_router
 from routers.email import router as email_router
 from routers.files import router as files_router
-from routers.internal_agent_google import router as internal_agent_google_router
 from services.email_scheduler import shutdown_scheduler, start_scheduler
 
 _frontend_url = (os.getenv("FRONTEND_URL") or "http://localhost:5173").rstrip("/")
@@ -67,7 +66,6 @@ app.include_router(files_router)
 app.include_router(chats_router)
 app.include_router(email_router, prefix="", tags=["email"])
 app.include_router(agent_router, prefix="/agent", tags=["agent"])
-app.include_router(internal_agent_google_router, tags=["internal_agent"])
 
 
 @app.on_event("startup")

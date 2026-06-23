@@ -133,7 +133,6 @@ export default function LessonPlans() {
         message,
         connectors: {
           web_search: true,
-          google_workspace: false,
         },
       })) as { run_id: string; chat_id: string }
       const finalMessage = await waitForAssistantMessage(

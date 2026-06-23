@@ -31,7 +31,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import uuid
 from typing import Any
 
@@ -66,18 +65,11 @@ from utils.rtdb_client import (
 
 logger = logging.getLogger(__name__)
 
-GOOGLE_OAUTH_REQUIRED_DETAIL = {
-    "code": "GOOGLE_OAUTH_REQUIRED",
-    "message": "Google OAuth connection is required for Google Workspace actions.",
-    "connect_url": "/auth/google-scopes",
-}
-
 
 def _normalize_connectors(connectors: dict | None) -> dict[str, bool]:
     incoming = connectors or {}
     return {
         "web_search": bool(incoming.get("web_search", True)),
-        "google_workspace": bool(incoming.get("google_workspace", False)),
     }
 
 
@@ -121,20 +113,6 @@ async def start_chat_run(
             detail="Batch not found or access denied",
         )
 
-    # --- 1b. Preflight check for Google Workspace ---
-    google_oauth_status = "missing"
-    if connectors.get("google_workspace"):
-        from services.google_workspace.credentials import assert_google_oauth_valid, GoogleOAuthRequiredError, GoogleOAuthInvalidError
-        try:
-            assert_google_oauth_valid(lecturer_id)
-            google_oauth_status = "valid"
-        except (GoogleOAuthRequiredError, GoogleOAuthInvalidError) as exc:
-            google_oauth_status = "invalid"
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=GOOGLE_OAUTH_REQUIRED_DETAIL,
-            ) from exc
-
     agent_engine_resource_name = get_agent_engine_resource_name()
 
     # --- 2. Create run id before persisting messages ---
@@ -169,7 +147,6 @@ async def start_chat_run(
         message_preview=user_message,
         agent_engine_resource_name=agent_engine_resource_name,
         connectors=connectors,
-        google_oauth_status=google_oauth_status,
         workflow_type=workflow_type,
         week=week,
         save_draft=save_draft,
@@ -185,7 +162,6 @@ async def start_chat_run(
         lecturer_id=lecturer_id,
         lecturer_email=lecturer_email,
         connectors=connectors,
-        google_oauth_status=google_oauth_status,
         workflow_type=workflow_type,
         week=week,
         save_draft=save_draft,
@@ -231,7 +207,6 @@ def _build_session_state(
     lecturer_id: str,
     lecturer_email: str,
     connectors: dict,
-    google_oauth_status: str,
     workflow_type: str = "",
     week: int | None = None,
     save_draft: bool = False,
@@ -259,9 +234,6 @@ def _build_session_state(
         "term": batch.term,
         # Feature flags
         "enable_web_search": connectors.get("web_search", True),
-        "google_workspace_enabled": connectors.get("google_workspace", False),
-        "google_oauth_status": google_oauth_status,
-        "backend_internal_url": os.getenv("PNAI_BACKEND_INTERNAL_URL") or os.getenv("BACKEND_PUBLIC_URL", ""),
         "workflow_type": workflow_type,
         "requested_week": week,
         "save_draft": save_draft,

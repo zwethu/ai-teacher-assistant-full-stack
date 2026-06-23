@@ -54,6 +54,7 @@ export type AgentRunStreamMeta = {
   done?: boolean
   chunk_count?: number
   final_length?: number
+  response_started?: boolean
   updated_at?: number
 }
 
@@ -321,6 +322,10 @@ function normalizeStreamMeta(raw: unknown): AgentRunStreamMeta | null {
     done: typeof value.done === 'boolean' ? value.done : undefined,
     chunk_count: toNumber(value.chunk_count),
     final_length: toNumber(value.final_length),
+    response_started:
+      typeof value.response_started === 'boolean'
+        ? value.response_started
+        : undefined,
     updated_at: toNumber(value.updated_at),
   }
 }

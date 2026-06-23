@@ -170,6 +170,7 @@ def write_stream_meta(
     done: bool = False,
     chunk_count: int = 0,
     final_length: int = 0,
+    response_started: bool = False,
 ) -> None:
     """Write assistant text stream metadata to RTDB."""
     if not _ensure_init():
@@ -179,6 +180,7 @@ def write_stream_meta(
             "done": done,
             "chunk_count": chunk_count,
             "final_length": final_length,
+            "response_started": response_started or chunk_count > 0,
             "updated_at": int(time.time()),
         })
     except Exception as exc:

@@ -531,6 +531,7 @@ async def _run_agent_background(
                     done=False,
                     chunk_count=chunk_index,
                     final_length=streamed_length,
+                    response_started=True,
                 )
                 if delta_delay and len(delta_parts) > 1 and delta_index < len(delta_parts) - 1:
                     await asyncio.sleep(delta_delay)
@@ -541,6 +542,7 @@ async def _run_agent_background(
             done=True,
             chunk_count=chunk_index,
             final_length=len(final_text),
+            response_started=bool(final_text),
         )
         if not final_text:
             raise RuntimeError("Agent Engine stream completed without any assistant text")
@@ -636,6 +638,7 @@ async def _run_agent_background(
                 done=True,
                 chunk_count=chunk_index,
                 final_length=len("".join(final_text_parts)),
+                response_started=chunk_index > 0,
             )
         except Exception as stream_exc:
             logger.warning("RTDB stream meta failure failed run_id=%s: %s", run_id, stream_exc)

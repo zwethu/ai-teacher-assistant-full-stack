@@ -688,6 +688,10 @@ export function useChatPage() {
         [runId]: {
           ...current,
           streamDone: meta.done ?? current.streamDone,
+          responseStarted:
+            current.responseStarted ||
+            meta.response_started === true ||
+            (meta.chunk_count || 0) > 0,
         },
       }
     })

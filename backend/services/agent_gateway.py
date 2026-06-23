@@ -28,13 +28,14 @@ Frontend reads:
 
 from __future__ import annotations
 
-import logging
-import uuid
+import asyncio
 import json
+import logging
+import os
+import uuid
 from typing import Any
 
 from fastapi import BackgroundTasks, HTTPException, status
-import os
 
 from entity.Batch import BatchModel
 from services.agent_engine_client import get_agent_engine_resource_name, stream_agent_response
@@ -47,7 +48,11 @@ from services.agent_sessions import (
     mark_agent_run_draft_saved,
     mark_agent_run_failed,
 )
-from services.artifact_service import save_lesson_plan_draft_from_session
+from services.artifact_service import (
+    save_lab_draft_from_session,
+    save_lesson_plan_draft_from_session,
+    save_quiz_draft_from_session,
+)
 from services.batch_service import get_batch
 from services.chat_service import add_message
 from utils.rtdb_client import (
@@ -287,17 +292,7 @@ def extract_lesson_plan_full_from_state(state: dict[str, Any]) -> dict[str, Any]
     if active_type and active_type != "lesson_plan":
         return None
 
-    raw = state.get("lesson_plan_full")
-    if raw is None:
-        return None
-    if isinstance(raw, str):
-        try:
-            raw = json.loads(raw)
-        except json.JSONDecodeError:
-            return None
-    elif hasattr(raw, "model_dump"):
-        raw = raw.model_dump(mode="json")
-
+    raw = _state_payload(state, "lesson_plan_full")
     if not isinstance(raw, dict):
         return None
 
@@ -317,15 +312,168 @@ def extract_lesson_plan_full_from_state(state: dict[str, Any]) -> dict[str, Any]
     return raw
 
 
+def extract_lab_full_from_state(state: dict[str, Any]) -> dict[str, Any] | None:
+    """Return a plausible LabFull payload from Agent Platform state."""
+    active_type = str(state.get("active_artifact_type") or "").strip()
+    if active_type and active_type != "lab":
+        return None
+
+    raw = _state_payload(state, "lab_full")
+    if not isinstance(raw, dict):
+        return None
+
+    title = str(raw.get("title") or "").strip()
+    topic = str(raw.get("topic") or "").strip()
+    week = raw.get("week")
+    procedure_steps = raw.get("procedure_steps")
+    objectives = raw.get("learning_objectives")
+    try:
+        week_int = int(week)
+    except (TypeError, ValueError):
+        return None
+    if not title or week_int < 1 or not topic:
+        return None
+    if not procedure_steps and not objectives:
+        return None
+    return raw
+
+
+def extract_quiz_full_from_state(state: dict[str, Any]) -> dict[str, Any] | None:
+    """Return a plausible QuizFull payload from Agent Platform state."""
+    active_type = str(state.get("active_artifact_type") or "").strip()
+    if active_type and active_type not in {"quiz", "assessment"}:
+        return None
+
+    raw = _state_payload(state, "quiz_full")
+    if not isinstance(raw, dict):
+        return None
+
+    title = str(raw.get("title") or "").strip()
+    week = raw.get("week")
+    questions = raw.get("questions")
+    try:
+        week_int = int(week)
+    except (TypeError, ValueError):
+        return None
+    if not title or week_int < 1:
+        return None
+    if not isinstance(questions, list) or not questions:
+        return None
+    return raw
+
+
+def _state_payload(state: dict[str, Any], key: str) -> dict[str, Any] | None:
+    raw = state.get(key)
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+    elif hasattr(raw, "model_dump"):
+        raw = raw.model_dump(mode="json")
+    return raw if isinstance(raw, dict) else None
+
+
+def maybe_save_generated_draft_from_session(
+    *,
+    batch_id: str,
+    lecturer_id: str,
+    chat_id: str,
+    run_id: str,
+    state: dict[str, Any],
+    rendered_markdown: str,
+    lecturer_email: str,
+) -> dict[str, Any] | None:
+    """Save a generated lesson/lab/quiz draft from Agent Platform session state."""
+    candidates = (
+        (
+            "lesson_plan",
+            extract_lesson_plan_full_from_state,
+            save_lesson_plan_draft_from_session,
+            "lesson_plan_payload",
+        ),
+        ("lab", extract_lab_full_from_state, save_lab_draft_from_session, "lab_payload"),
+        ("quiz", extract_quiz_full_from_state, save_quiz_draft_from_session, "quiz_payload"),
+    )
+    for artifact_type, extractor, saver, payload_arg in candidates:
+        payload = extractor(state)
+        if not payload:
+            continue
+        draft = saver(
+            batch_id=batch_id,
+            lecturer_id=lecturer_id,
+            chat_id=chat_id,
+            run_id=run_id,
+            rendered_markdown=rendered_markdown,
+            lecturer_email=lecturer_email,
+            **{payload_arg: payload},
+        )
+        logger.info(
+            "%s draft saved run_id=%s artifact_id=%s week=%s",
+            artifact_type,
+            run_id,
+            draft.get("id"),
+            draft.get("week"),
+        )
+        return draft
+    return None
+
+
 def _draft_message_metadata(draft: dict[str, Any] | None) -> dict[str, Any]:
     if not draft:
         return {}
     return {
         "draft_artifact_id": str(draft.get("id") or draft.get("artifact_id") or ""),
-        "artifact_type": "lesson_plan",
+        "artifact_type": str(draft.get("artifact_type") or draft.get("type") or ""),
         "week": draft.get("week"),
         "exportable": True,
     }
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def split_stream_chunk(text: str, *, max_chars: int = 180) -> list[str]:
+    """Split a large user-visible final-text chunk into exact-join deltas."""
+    if max_chars <= 0 or len(text) <= max_chars:
+        return [text] if text else []
+
+    boundaries = ("\n\n", "\n", ". ", "! ", "? ", "; ", ", ", " ")
+    parts: list[str] = []
+    cursor = 0
+    text_len = len(text)
+
+    while cursor < text_len:
+        hard_end = min(cursor + max_chars, text_len)
+        if hard_end >= text_len:
+            piece = text[cursor:text_len]
+            if piece:
+                parts.append(piece)
+            break
+
+        window = text[cursor:hard_end]
+        cut_offset = -1
+        for boundary in boundaries:
+            found = window.rfind(boundary)
+            if found > 0:
+                cut_offset = found + len(boundary)
+                break
+
+        if cut_offset <= 0:
+            cut_offset = hard_end - cursor
+
+        piece = text[cursor : cursor + cut_offset]
+        if piece:
+            parts.append(piece)
+        cursor += cut_offset
+
+    return parts
 
 
 # ---------------------------------------------------------------------------
@@ -353,6 +501,8 @@ async def _run_agent_background(
     final_text_parts: list[str] = []
     chunk_index = 0
     streamed_length = 0
+    delta_max_chars = max(1, _env_int("PNAI_STREAM_DELTA_MAX_CHARS", 180))
+    delta_delay = max(0, _env_int("PNAI_STREAM_DELTA_DELAY_MS", 12)) / 1000
 
     try:
         async for chunk in stream_agent_response(
@@ -364,15 +514,26 @@ async def _run_agent_background(
             if not chunk:
                 continue
             final_text_parts.append(chunk)
-            write_stream_delta(run_id, chunk_index, chunk)
-            chunk_index += 1
-            streamed_length += len(chunk)
-            write_stream_meta(
-                run_id,
-                done=False,
-                chunk_count=chunk_index,
-                final_length=streamed_length,
-            )
+            delta_parts = split_stream_chunk(chunk, max_chars=delta_max_chars)
+            if len(delta_parts) > 1:
+                logger.info(
+                    "stream chunk split run_id=%s original_chars=%d parts=%d",
+                    run_id,
+                    len(chunk),
+                    len(delta_parts),
+                )
+            for delta_index, delta_text in enumerate(delta_parts):
+                write_stream_delta(run_id, chunk_index, delta_text)
+                chunk_index += 1
+                streamed_length += len(delta_text)
+                write_stream_meta(
+                    run_id,
+                    done=False,
+                    chunk_count=chunk_index,
+                    final_length=streamed_length,
+                )
+                if delta_delay and len(delta_parts) > 1 and delta_index < len(delta_parts) - 1:
+                    await asyncio.sleep(delta_delay)
 
         final_text = "".join(final_text_parts).strip()
         write_stream_meta(
@@ -391,21 +552,20 @@ async def _run_agent_background(
                 user_id=lecturer_id,
                 session_id=agent_session_id,
             )
-            lesson_plan_payload = extract_lesson_plan_full_from_state(session_state_after)
-            if lesson_plan_payload:
-                draft = save_lesson_plan_draft_from_session(
-                    batch_id=batch_id,
-                    lecturer_id=lecturer_id,
-                    chat_id=chat_id,
-                    run_id=run_id,
-                    lesson_plan_payload=lesson_plan_payload,
-                    rendered_markdown=final_text,
-                    lecturer_email=str(
-                        session_state_after.get("lecturer_email")
-                        or session_state.get("lecturer_email")
-                        or ""
-                    ),
-                )
+            draft = maybe_save_generated_draft_from_session(
+                batch_id=batch_id,
+                lecturer_id=lecturer_id,
+                chat_id=chat_id,
+                run_id=run_id,
+                state=session_state_after,
+                rendered_markdown=final_text,
+                lecturer_email=str(
+                    session_state_after.get("lecturer_email")
+                    or session_state.get("lecturer_email")
+                    or ""
+                ),
+            )
+            if draft:
                 metadata = _draft_message_metadata(draft)
                 mark_agent_run_draft_saved(
                     batch_id=batch_id,
@@ -415,14 +575,15 @@ async def _run_agent_background(
                     week=draft.get("week"),
                 )
                 logger.info(
-                    "lesson plan draft saved run_id=%s artifact_id=%s week=%s",
+                    "generated draft saved run_id=%s artifact_id=%s type=%s week=%s",
                     run_id,
                     metadata.get("draft_artifact_id"),
+                    metadata.get("artifact_type"),
                     metadata.get("week"),
                 )
         except Exception as draft_exc:
             logger.warning(
-                "Lesson plan generated, but draft artifact save failed run_id=%s: %s",
+                "Generated content returned, but draft artifact save failed run_id=%s: %s",
                 run_id,
                 draft_exc,
             )

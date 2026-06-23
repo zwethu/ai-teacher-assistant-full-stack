@@ -8,6 +8,53 @@ from __future__ import annotations
 from typing import Any
 
 
+def text_item_request(
+    title: str,
+    description: str,
+    index: int,
+) -> dict[str, Any]:
+    """Build a non-question text block for Form structure/instructions."""
+    return {
+        "createItem": {
+            "item": {
+                "title": title,
+                "description": description,
+                "textItem": {},
+            },
+            "location": {"index": index},
+        }
+    }
+
+
+def build_intro_requests(quiz_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Build themed overview blocks mirroring the Docs/Lab export structure."""
+    questions = quiz_payload.get("questions") or []
+    total_points = sum(int(question.get("points") or 0) for question in questions)
+    overview_lines = [
+        f"Batch: {quiz_payload.get('batch_name') or 'N/A'}",
+        f"Week: {quiz_payload.get('week') or 'N/A'}",
+        f"Difficulty: {quiz_payload.get('difficulty') or 'medium'}",
+        f"Mode: {quiz_payload.get('quiz_mode') or 'mixed'}",
+        f"Questions: {len(questions)}",
+        f"Total points: {total_points}",
+        f"Time limit: {quiz_payload.get('time_limit_minutes') or 30} minutes",
+    ]
+    description = str(quiz_payload.get("description") or "").strip()
+    instruction_lines = [
+        description,
+        "Answer all questions. Multiple-choice and true/false items are graded automatically.",
+        "Short-answer items include guidance for review and may require teacher checking.",
+    ]
+    return [
+        text_item_request("Assessment Overview", "\n".join(overview_lines), 0),
+        text_item_request(
+            "Instructions",
+            "\n".join(line for line in instruction_lines if line),
+            1,
+        ),
+    ]
+
+
 def choice_question_request(
     question_text: str,
     options: list[str],
@@ -15,6 +62,7 @@ def choice_question_request(
     points: int,
     explanation: str,
     index: int,
+    description: str = "",
 ) -> dict[str, Any]:
     if not correct_answer:
         preview = question_text[:40]
@@ -25,6 +73,7 @@ def choice_question_request(
         "createItem": {
             "item": {
                 "title": question_text,
+                "description": description,
                 "questionItem": {
                     "question": {
                         "required": True,
@@ -80,17 +129,23 @@ def build_question_request(question: dict[str, Any], index: int) -> dict[str, An
         )
     points = int(question.get("points", 1))
     explanation = question.get("explanation") or ""
+    difficulty = str(question.get("difficulty") or "medium")
+    description = (
+        f"Type: {question_type.replace('_', ' ').title()} | "
+        f"Difficulty: {difficulty.title()} | Points: {points}"
+    )
 
     if question_type == "true_false":
         options = ["True", "False"]
         return choice_question_request(
-            question_text, options, correct_answer, points, explanation, index
+            question_text, options, correct_answer, points, explanation, index, description
         )
     if question_type == "short_answer":
         return {
             "createItem": {
                 "item": {
                     "title": question_text,
+                    "description": description,
                     "questionItem": {
                         "question": {
                             "required": True,
@@ -107,6 +162,6 @@ def build_question_request(question: dict[str, Any], index: int) -> dict[str, An
         }
     if question_type == "multiple_choice":
         return choice_question_request(
-            question_text, options, correct_answer, points, explanation, index
+            question_text, options, correct_answer, points, explanation, index, description
         )
     raise ValueError(f"Unsupported question_type: {question_type}")

@@ -15,7 +15,10 @@ from googleapiclient.errors import HttpError
 
 from services.google_workspace.credentials import build_user_credentials
 from services.google_workspace.drive_folders import move_file_to_folder, rename_file
-from services.google_workspace.forms_rendering.builder import build_question_request
+from services.google_workspace.forms_rendering.builder import (
+    build_intro_requests,
+    build_question_request,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -80,15 +83,17 @@ def create_quiz_form_for_user(
             body={"requests": settings_requests},
         ).execute()
 
-        # Add questions
+        # Add themed overview blocks and questions
+        intro_requests = build_intro_requests(quiz_payload)
         question_requests = [
-            build_question_request(q, index)
+            build_question_request(q, index + len(intro_requests))
             for index, q in enumerate(questions)
         ]
-        if question_requests:
+        item_requests = intro_requests + question_requests
+        if item_requests:
             forms.forms().batchUpdate(
                 formId=form_id,
-                body={"requests": question_requests},
+                body={"requests": item_requests},
             ).execute()
 
         # Share with teacher

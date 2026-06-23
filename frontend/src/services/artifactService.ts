@@ -47,6 +47,14 @@ export type LessonPlanExportResult = {
   doc_url?: string
   doc_id?: string
   drive_file_name?: string
+  form_url?: string
+  form_id?: string
+  lecturer_doc_url?: string
+  lecturer_doc_id?: string
+  lecturer_drive_file_name?: string
+  student_doc_url?: string
+  student_doc_id?: string
+  student_drive_file_name?: string
 }
 
 export async function listArtifacts(
@@ -78,7 +86,7 @@ export async function deleteArtifact(
   return res.data
 }
 
-export async function exportLessonPlanDraftToGoogleDocs(
+export async function exportArtifactDraftToGoogleDocs(
   batchId: string,
   artifactId: string,
 ): Promise<LessonPlanExportResult> {
@@ -86,4 +94,21 @@ export async function exportLessonPlanDraftToGoogleDocs(
     `/batches/${batchId}/artifacts/${artifactId}/export/google-docs`,
   )
   return res.data
+}
+
+export async function exportQuizDraftToGoogleForms(
+  batchId: string,
+  artifactId: string,
+): Promise<LessonPlanExportResult> {
+  const res = await api.post<LessonPlanExportResult>(
+    `/batches/${batchId}/artifacts/${artifactId}/export/google-forms`,
+  )
+  return res.data
+}
+
+export async function exportLessonPlanDraftToGoogleDocs(
+  batchId: string,
+  artifactId: string,
+): Promise<LessonPlanExportResult> {
+  return exportArtifactDraftToGoogleDocs(batchId, artifactId)
 }

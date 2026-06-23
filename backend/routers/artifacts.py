@@ -9,7 +9,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from services.artifact_service import (
     artifact_summary,
     delete_artifact,
+    export_lab_draft_to_google_docs,
     export_lesson_plan_draft_to_google_docs,
+    export_quiz_draft_to_google_forms,
     get_artifact,
     list_artifacts,
 )
@@ -23,7 +25,7 @@ router = APIRouter(prefix="/batches/{batch_id}/artifacts", tags=["artifacts"])
 
 GOOGLE_OAUTH_REQUIRED_DETAIL = {
     "code": "GOOGLE_OAUTH_REQUIRED",
-    "message": "Connect Google Workspace before exporting to Google Docs.",
+    "message": "Connect Google Workspace before exporting.",
     "connect_url": "/auth/google-scopes",
 }
 
@@ -73,13 +75,60 @@ async def get_artifact_endpoint(
 
 
 @router.post("/{artifact_id}/export/google-docs")
-async def export_lesson_plan_google_docs_endpoint(
+async def export_google_docs_endpoint(
     batch_id: str,
     artifact_id: str,
     current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     try:
-        return export_lesson_plan_draft_to_google_docs(
+        artifact = get_artifact(batch_id, artifact_id, current_user["uid"])
+        if artifact is None:
+            raise PermissionError("Artifact not found")
+        artifact_type = str((artifact or {}).get("artifact_type") or (artifact or {}).get("type") or "")
+        if artifact_type == "lesson_plan":
+            return export_lesson_plan_draft_to_google_docs(
+                batch_id=batch_id,
+                artifact_id=artifact_id,
+                lecturer_id=current_user["uid"],
+            )
+        if artifact_type == "lab":
+            return export_lab_draft_to_google_docs(
+                batch_id=batch_id,
+                artifact_id=artifact_id,
+                lecturer_id=current_user["uid"],
+            )
+        raise RuntimeError("Artifact cannot be exported to Google Docs")
+    except (GoogleOAuthRequiredError, GoogleOAuthInvalidError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=GOOGLE_OAUTH_REQUIRED_DETAIL,
+        ) from exc
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Artifact not found",
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+
+
+@router.post("/{artifact_id}/export/google-forms")
+async def export_google_forms_endpoint(
+    batch_id: str,
+    artifact_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    try:
+        artifact = get_artifact(batch_id, artifact_id, current_user["uid"])
+        if artifact is None:
+            raise PermissionError("Artifact not found")
+        artifact_type = str((artifact or {}).get("artifact_type") or (artifact or {}).get("type") or "")
+        if artifact_type != "quiz":
+            raise RuntimeError("Artifact cannot be exported to Google Forms")
+        return export_quiz_draft_to_google_forms(
             batch_id=batch_id,
             artifact_id=artifact_id,
             lecturer_id=current_user["uid"],

@@ -6,8 +6,10 @@ import remarkGfm from 'remark-gfm'
 import type { ChatMessage } from '../../../entity/Chat'
 import { checkGoogleAuthStatus, startGoogleOAuth } from '../../../services/authService'
 import {
-  exportLessonPlanDraftToGoogleDocs,
+  exportArtifactDraftToGoogleDocs,
+  exportQuizDraftToGoogleForms,
   getArtifact,
+  type Artifact,
   type LessonPlanExportResult,
 } from '../../../services/artifactService'
 import type { RunUiState } from '../runTypes'
@@ -70,7 +72,7 @@ export function MessageRow({
                 <ResponseMarkdown content={msg.content} streaming={isPending} />
               ) : null}
             </div>
-            {!isUser && batchId && <LessonPlanExportButton batchId={batchId} msg={msg} />}
+            {!isUser && batchId && <ArtifactExportButton batchId={batchId} msg={msg} />}
           </div>
         )}
       </div>
@@ -166,7 +168,7 @@ function MarkdownBlock({ content }: { content: string }) {
   )
 }
 
-function LessonPlanExportButton({
+function ArtifactExportButton({
   batchId,
   msg,
 }: {
@@ -178,17 +180,33 @@ function LessonPlanExportButton({
   const artifactType = String(metadata.artifact_type || '')
   const exportable = metadata.exportable === true
   const initialDocUrl = typeof metadata.doc_url === 'string' ? metadata.doc_url : ''
+  const initialFormUrl = typeof metadata.form_url === 'string' ? metadata.form_url : ''
+  const initialLecturerDocUrl =
+    typeof metadata.lecturer_doc_url === 'string' ? metadata.lecturer_doc_url : ''
+  const initialStudentDocUrl =
+    typeof metadata.student_doc_url === 'string' ? metadata.student_doc_url : ''
   const [checkingAuth, setCheckingAuth] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [result, setResult] = useState<LessonPlanExportResult | null>(
-    initialDocUrl
+    initialDocUrl || initialFormUrl || initialLecturerDocUrl || initialStudentDocUrl
       ? {
           artifact_id: artifactId,
           status: 'confirmed',
           doc_url: initialDocUrl,
+          form_url: initialFormUrl,
+          lecturer_doc_url: initialLecturerDocUrl,
+          student_doc_url: initialStudentDocUrl,
           version: typeof metadata.version === 'number' ? metadata.version : undefined,
           drive_file_name:
             typeof metadata.drive_file_name === 'string' ? metadata.drive_file_name : undefined,
+          lecturer_drive_file_name:
+            typeof metadata.lecturer_drive_file_name === 'string'
+              ? metadata.lecturer_drive_file_name
+              : undefined,
+          student_drive_file_name:
+            typeof metadata.student_drive_file_name === 'string'
+              ? metadata.student_drive_file_name
+              : undefined,
         }
       : null,
   )
@@ -196,20 +214,13 @@ function LessonPlanExportButton({
   const [error, setError] = useState('')
 
   useEffect(() => {
-    if (!artifactId || artifactType !== 'lesson_plan') return
+    if (!artifactId || !isExportableArtifactType(artifactType)) return
     let cancelled = false
     getArtifact(batchId, artifactId)
       .then((artifact) => {
         if (cancelled) return
-        if (artifact.status === 'confirmed' && artifact.doc_url) {
-          setResult({
-            artifact_id: artifact.id,
-            status: artifact.status,
-            doc_url: artifact.doc_url,
-            doc_id: artifact.doc_id,
-            version: artifact.version,
-            drive_file_name: artifact.drive_file_name,
-          })
+        if (artifact.status === 'confirmed') {
+          setResult(artifactToExportResult(artifact))
           return
         }
         if (artifact.status === 'draft' || artifact.status === 'failed_export') {
@@ -224,7 +235,11 @@ function LessonPlanExportButton({
     }
   }, [artifactId, artifactType, batchId])
 
-  if (!artifactId || artifactType !== 'lesson_plan' || (!exportable && !result?.doc_url)) {
+  const hasConfirmedLink = Boolean(
+    result?.doc_url || result?.form_url || result?.lecturer_doc_url || result?.student_doc_url,
+  )
+
+  if (!artifactId || !isExportableArtifactType(artifactType) || (!exportable && !hasConfirmedLink)) {
     return null
   }
 
@@ -247,7 +262,10 @@ function LessonPlanExportButton({
 
     setExporting(true)
     try {
-      const exported = await exportLessonPlanDraftToGoogleDocs(batchId, artifactId)
+      const exported =
+        artifactType === 'quiz'
+          ? await exportQuizDraftToGoogleForms(batchId, artifactId)
+          : await exportArtifactDraftToGoogleDocs(batchId, artifactId)
       setResult(exported)
     } catch (err) {
       const maybe = err as { response?: { data?: { detail?: unknown } }; message?: string }
@@ -259,28 +277,36 @@ function LessonPlanExportButton({
           return
         }
       }
-      setError(maybe.message || 'Failed to export lesson plan.')
+      setError(maybe.message || 'Failed to export artifact.')
     } finally {
       setExporting(false)
     }
   }
 
+  const exportLabel =
+    artifactType === 'lab'
+      ? 'Export Lab Docs'
+      : artifactType === 'quiz'
+        ? 'Export to Google Forms'
+        : 'Export to Google Docs'
+
   return (
     <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3">
-      {result?.doc_url ? (
+      {hasConfirmedLink ? (
         <>
-          <a
-            href={result.doc_url}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700"
-          >
-            <ExternalLink className="h-4 w-4" />
-            Open Google Doc
-          </a>
+          {artifactType === 'lab' ? (
+            <>
+              <ExportLink href={result?.lecturer_doc_url || result?.doc_url} label="Open Lecturer Guide" />
+              <ExportLink href={result?.student_doc_url} label="Open Student Instructions" />
+            </>
+          ) : artifactType === 'quiz' ? (
+            <ExportLink href={result?.form_url || result?.doc_url} label="Open Google Form" />
+          ) : (
+            <ExportLink href={result?.doc_url} label="Open Google Doc" />
+          )}
           <span className="text-xs text-slate-500">
-            {result.drive_file_name || 'Lesson plan exported'}
-            {result.version ? ` · v${String(result.version).padStart(2, '0')}` : ''}
+            {exportedFileLabel(artifactType, result)}
+            {result?.version ? ` · v${String(result.version).padStart(2, '0')}` : ''}
           </span>
         </>
       ) : (
@@ -295,7 +321,7 @@ function LessonPlanExportButton({
           ) : (
             <FileText className="h-4 w-4" />
           )}
-          {exporting ? 'Exporting...' : 'Export to Google Docs'}
+          {exporting ? 'Exporting...' : exportLabel}
         </button>
       )}
       {needsGoogle && (
@@ -309,6 +335,56 @@ function LessonPlanExportButton({
       )}
       {error && <span className="text-sm text-red-600">{error}</span>}
     </div>
+  )
+}
+
+function isExportableArtifactType(artifactType: string) {
+  return artifactType === 'lesson_plan' || artifactType === 'lab' || artifactType === 'quiz'
+}
+
+function metadataString(artifact: Artifact, key: string) {
+  const value = artifact.metadata?.[key]
+  return typeof value === 'string' ? value : ''
+}
+
+function artifactToExportResult(artifact: Artifact): LessonPlanExportResult {
+  return {
+    artifact_id: artifact.id,
+    status: artifact.status || 'confirmed',
+    doc_url: artifact.doc_url,
+    doc_id: artifact.doc_id,
+    form_url: artifact.form_url || metadataString(artifact, 'form_url'),
+    form_id: artifact.form_id || metadataString(artifact, 'form_id'),
+    version: artifact.version,
+    drive_file_name: artifact.drive_file_name,
+    lecturer_doc_url: metadataString(artifact, 'lecturer_doc_url') || artifact.doc_url,
+    lecturer_doc_id: metadataString(artifact, 'lecturer_doc_id') || artifact.doc_id,
+    lecturer_drive_file_name: metadataString(artifact, 'lecturer_drive_file_name') || artifact.drive_file_name,
+    student_doc_url: metadataString(artifact, 'student_doc_url'),
+    student_doc_id: metadataString(artifact, 'student_doc_id'),
+    student_drive_file_name: metadataString(artifact, 'student_drive_file_name'),
+  }
+}
+
+function exportedFileLabel(artifactType: string, result: LessonPlanExportResult | null) {
+  if (!result) return 'Exported'
+  if (artifactType === 'lab') return result.drive_file_name || 'Lab docs exported'
+  if (artifactType === 'quiz') return result.drive_file_name || 'Quiz exported'
+  return result.drive_file_name || 'Lesson plan exported'
+}
+
+function ExportLink({ href, label }: { href?: string; label: string }) {
+  if (!href) return null
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+    >
+      <ExternalLink className="h-4 w-4" />
+      {label}
+    </a>
   )
 }
 

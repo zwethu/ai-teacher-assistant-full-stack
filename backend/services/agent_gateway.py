@@ -371,6 +371,14 @@ def _state_payload(state: dict[str, Any], key: str) -> dict[str, Any] | None:
     return raw if isinstance(raw, dict) else None
 
 
+def _coerce_week(value: Any) -> int | None:
+    try:
+        week = int(value)
+    except (TypeError, ValueError):
+        return None
+    return week if week >= 1 else None
+
+
 def maybe_save_generated_draft_from_session(
     *,
     batch_id: str,
@@ -380,40 +388,99 @@ def maybe_save_generated_draft_from_session(
     state: dict[str, Any],
     rendered_markdown: str,
     lecturer_email: str,
+    workflow_type: str = "",
+    requested_week: int | None = None,
 ) -> dict[str, Any] | None:
-    """Save a generated lesson/lab/quiz draft from Agent Platform session state."""
-    candidates = (
-        (
+    """Save a generated draft using the trusted workflow type for this run."""
+    normalized_workflow = workflow_type.strip().lower()
+    if not normalized_workflow:
+        logger.info(
+            "generated draft save skipped run_id=%s reason=empty_workflow_type",
+            run_id,
+        )
+        return None
+
+    candidates = {
+        "lesson_plan": (
             "lesson_plan",
             extract_lesson_plan_full_from_state,
             save_lesson_plan_draft_from_session,
             "lesson_plan_payload",
         ),
-        ("lab", extract_lab_full_from_state, save_lab_draft_from_session, "lab_payload"),
-        ("quiz", extract_quiz_full_from_state, save_quiz_draft_from_session, "quiz_payload"),
-    )
-    for artifact_type, extractor, saver, payload_arg in candidates:
-        payload = extractor(state)
-        if not payload:
-            continue
-        draft = saver(
-            batch_id=batch_id,
-            lecturer_id=lecturer_id,
-            chat_id=chat_id,
-            run_id=run_id,
-            rendered_markdown=rendered_markdown,
-            lecturer_email=lecturer_email,
-            **{payload_arg: payload},
-        )
+        "lesson_plan.generate": (
+            "lesson_plan",
+            extract_lesson_plan_full_from_state,
+            save_lesson_plan_draft_from_session,
+            "lesson_plan_payload",
+        ),
+        "lab": ("lab", extract_lab_full_from_state, save_lab_draft_from_session, "lab_payload"),
+        "lab.generate": ("lab", extract_lab_full_from_state, save_lab_draft_from_session, "lab_payload"),
+        "assessment": (
+            "quiz",
+            extract_quiz_full_from_state,
+            save_quiz_draft_from_session,
+            "quiz_payload",
+        ),
+        "assessment.generate": (
+            "quiz",
+            extract_quiz_full_from_state,
+            save_quiz_draft_from_session,
+            "quiz_payload",
+        ),
+        "quiz": ("quiz", extract_quiz_full_from_state, save_quiz_draft_from_session, "quiz_payload"),
+        "quiz.generate": (
+            "quiz",
+            extract_quiz_full_from_state,
+            save_quiz_draft_from_session,
+            "quiz_payload",
+        ),
+    }
+    selected = candidates.get(normalized_workflow)
+    if not selected:
         logger.info(
-            "%s draft saved run_id=%s artifact_id=%s week=%s",
-            artifact_type,
+            "generated draft save skipped run_id=%s reason=unsupported_workflow_type workflow_type=%s",
             run_id,
-            draft.get("id"),
-            draft.get("week"),
+            workflow_type,
         )
-        return draft
-    return None
+        return None
+
+    artifact_type, extractor, saver, payload_arg = selected
+    payload = extractor(state)
+    if not payload:
+        logger.info(
+            "generated draft save skipped run_id=%s workflow_type=%s artifact_type=%s reason=missing_payload",
+            run_id,
+            workflow_type,
+            artifact_type,
+        )
+        return None
+
+    expected_week = _coerce_week(requested_week)
+    payload_week = _coerce_week(payload.get("week"))
+    if expected_week is not None and payload_week != expected_week:
+        raise RuntimeError(
+            f"{artifact_type} payload week mismatch: requested_week={expected_week}, "
+            f"payload_week={payload_week}"
+        )
+
+    draft = saver(
+        batch_id=batch_id,
+        lecturer_id=lecturer_id,
+        chat_id=chat_id,
+        run_id=run_id,
+        rendered_markdown=rendered_markdown,
+        lecturer_email=lecturer_email,
+        **{payload_arg: payload},
+    )
+    logger.info(
+        "%s draft saved run_id=%s workflow_type=%s artifact_id=%s week=%s",
+        artifact_type,
+        run_id,
+        workflow_type,
+        draft.get("id"),
+        draft.get("week"),
+    )
+    return draft
 
 
 def _draft_message_metadata(draft: dict[str, Any] | None) -> dict[str, Any]:
@@ -561,6 +628,8 @@ async def _run_agent_background(
                     or session_state.get("lecturer_email")
                     or ""
                 ),
+                workflow_type=str(session_state.get("workflow_type") or ""),
+                requested_week=_coerce_week(session_state.get("requested_week")),
             )
             if draft:
                 metadata = _draft_message_metadata(draft)

@@ -1,6 +1,7 @@
 """Chat and message endpoints for batch-scoped conversations."""
 
 import logging
+import re
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -22,6 +23,15 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/batches/{batch_id}/chats", tags=["chats"])
 
+_WEEK_RE = re.compile(r"\bweek\s*(\d{1,2})\b", re.IGNORECASE)
+_GENERATE_RE = re.compile(
+    r"\b(generate|create|craft|make|build|produce|prepare|write)\b",
+    re.IGNORECASE,
+)
+_LAB_RE = re.compile(r"\b(lab|labs|practical|practicals|laboratory)\b", re.IGNORECASE)
+_LESSON_PLAN_RE = re.compile(r"\blesson\s*plan\b", re.IGNORECASE)
+_ASSESSMENT_RE = re.compile(r"\b(quiz|assessment|assessments|test|exam)\b", re.IGNORECASE)
+
 
 class CreateChatBody(BaseModel):
     title: str = "New Chat"
@@ -38,6 +48,26 @@ class SendMessageBody(BaseModel):
 
 class UpdateTitleBody(BaseModel):
     title: str
+
+
+def classify_chat_workflow_intent(content: str) -> tuple[str, int | None, bool]:
+    """Infer draft-generating workflow hints from a normal chat message."""
+    text = content.strip()
+    if not text or not _GENERATE_RE.search(text):
+        return "", None, False
+
+    week_match = _WEEK_RE.search(text)
+    if not week_match:
+        return "", None, False
+
+    week = int(week_match.group(1))
+    if _LAB_RE.search(text):
+        return "lab", week, True
+    if _LESSON_PLAN_RE.search(text):
+        return "lesson_plan", week, True
+    if _ASSESSMENT_RE.search(text):
+        return "assessment", week, True
+    return "", None, False
 
 
 # ---------------------------------------------------------------------------
@@ -166,6 +196,16 @@ async def send_message_endpoint(
     if chat is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
 
+    workflow_type, week, save_draft = classify_chat_workflow_intent(body.content)
+    if save_draft:
+        logger.info(
+            "chat workflow intent classified batch_id=%s chat_id=%s workflow_type=%s week=%s",
+            batch_id,
+            chat_id,
+            workflow_type,
+            week,
+        )
+
     return await start_chat_run(
         user_message=body.content,
         batch_id=batch_id,
@@ -174,4 +214,7 @@ async def send_message_endpoint(
         lecturer_email=current_user.get("email", ""),
         connectors=body.connectors.model_dump(),
         background_tasks=background_tasks,
+        workflow_type=workflow_type,
+        week=week,
+        save_draft=save_draft,
     )

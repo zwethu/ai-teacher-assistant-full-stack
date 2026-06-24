@@ -478,8 +478,11 @@ def export_lesson_plan_draft_to_google_docs(
     artifact_type = str(artifact.get("artifact_type") or artifact.get("type") or "")
     if artifact_type != "lesson_plan":
         raise RuntimeError("Artifact is not a lesson plan")
-    if artifact.get("status") not in {"draft", "failed_export"}:
-        raise RuntimeError("Only draft lesson plans can be exported")
+    was_confirmed = artifact.get("status") == "confirmed"
+    original_status = str(artifact.get("status") or "")
+    original_is_current = bool(artifact.get("is_current", False))
+    if artifact.get("status") not in {"draft", "failed_export", "confirmed"}:
+        raise RuntimeError("Only draft or confirmed lesson plans can be exported")
 
     payload = artifact.get("content_json")
     if not isinstance(payload, dict) or not payload:
@@ -489,7 +492,11 @@ def export_lesson_plan_draft_to_google_docs(
 
     week = int(payload.get("week") or artifact.get("week") or 0)
     title = str(payload.get("title") or artifact.get("title") or "Lesson Plan")
-    next_version = _next_confirmed_version(batch_id, "lesson_plan", week)
+    next_version = (
+        int(artifact.get("version") or 0)
+        if was_confirmed and artifact.get("version")
+        else _next_confirmed_version(batch_id, "lesson_plan", week)
+    )
     folders = ensure_batch_artifact_folders(
         uid=lecturer_id,
         batch_id=batch_id,
@@ -524,22 +531,23 @@ def export_lesson_plan_draft_to_google_docs(
         safe_error = str(exc)[:1000]
         ref.update(
             {
-                "status": "failed_export",
+                "status": original_status if was_confirmed else "failed_export",
                 "export_error": safe_error,
-                "is_current": False,
+                "is_current": original_is_current if was_confirmed else False,
                 "updated_at": _now(),
             }
         )
         raise RuntimeError(safe_error) from exc
 
-    _supersede_current_artifacts(batch_id, "lesson_plan", week, artifact_id)
+    if not was_confirmed:
+        _supersede_current_artifacts(batch_id, "lesson_plan", week, artifact_id)
     export_metadata = _google_doc_export_metadata(
         uid=lecturer_id,
         doc_id=str(doc_result.get("doc_id") or ""),
     )
     updates = {
         "status": "confirmed",
-        "is_current": True,
+        "is_current": original_is_current if was_confirmed else True,
         "version": next_version,
         "doc_url": doc_result.get("doc_url", ""),
         "doc_id": doc_result.get("doc_id", ""),
@@ -589,7 +597,14 @@ def export_lab_draft_to_google_docs(
 
     week = int(payload.get("week") or artifact.get("week") or 0)
     title = str(payload.get("title") or artifact.get("title") or "Lab")
-    next_version = _next_confirmed_version(batch_id, "lab", week)
+    was_confirmed = artifact.get("status") == "confirmed"
+    original_status = str(artifact.get("status") or "")
+    original_is_current = bool(artifact.get("is_current", False))
+    next_version = (
+        int(artifact.get("version") or 0)
+        if was_confirmed and artifact.get("version")
+        else _next_confirmed_version(batch_id, "lab", week)
+    )
     folders = ensure_batch_artifact_folders(
         uid=lecturer_id,
         batch_id=batch_id,
@@ -628,15 +643,16 @@ def export_lab_draft_to_google_docs(
         safe_error = str(exc)[:1000]
         ref.update(
             {
-                "status": "failed_export",
+                "status": original_status if was_confirmed else "failed_export",
                 "export_error": safe_error,
-                "is_current": False,
+                "is_current": original_is_current if was_confirmed else False,
                 "updated_at": _now(),
             }
         )
         raise RuntimeError(safe_error) from exc
 
-    _supersede_current_artifacts(batch_id, "lab", week, artifact_id)
+    if not was_confirmed:
+        _supersede_current_artifacts(batch_id, "lab", week, artifact_id)
     export_metadata = _google_doc_export_metadata(
         uid=lecturer_id,
         doc_id=str(doc_result.get("lecturer_doc_id") or ""),
@@ -651,7 +667,7 @@ def export_lab_draft_to_google_docs(
     }
     updates = {
         "status": "confirmed",
-        "is_current": True,
+        "is_current": original_is_current if was_confirmed else True,
         "version": next_version,
         "doc_url": doc_result.get("lecturer_doc_url", ""),
         "doc_id": doc_result.get("lecturer_doc_id", ""),
@@ -710,7 +726,14 @@ def export_quiz_draft_to_google_forms(
 
     week = int(payload.get("week") or artifact.get("week") or 0)
     title = str(payload.get("title") or artifact.get("title") or "Quiz")
-    next_version = _next_confirmed_version(batch_id, "quiz", week)
+    was_confirmed = artifact.get("status") == "confirmed"
+    original_status = str(artifact.get("status") or "")
+    original_is_current = bool(artifact.get("is_current", False))
+    next_version = (
+        int(artifact.get("version") or 0)
+        if was_confirmed and artifact.get("version")
+        else _next_confirmed_version(batch_id, "quiz", week)
+    )
     folders = ensure_batch_artifact_folders(
         uid=lecturer_id,
         batch_id=batch_id,
@@ -740,22 +763,23 @@ def export_quiz_draft_to_google_forms(
         safe_error = str(exc)[:1000]
         ref.update(
             {
-                "status": "failed_export",
+                "status": original_status if was_confirmed else "failed_export",
                 "export_error": safe_error,
-                "is_current": False,
+                "is_current": original_is_current if was_confirmed else False,
                 "updated_at": _now(),
             }
         )
         raise RuntimeError(safe_error) from exc
 
-    _supersede_current_artifacts(batch_id, "quiz", week, artifact_id)
+    if not was_confirmed:
+        _supersede_current_artifacts(batch_id, "quiz", week, artifact_id)
     metadata = {
         "form_url": form_result.get("form_url", ""),
         "form_id": form_result.get("form_id", ""),
     }
     updates = {
         "status": "confirmed",
-        "is_current": True,
+        "is_current": original_is_current if was_confirmed else True,
         "version": next_version,
         "doc_url": form_result.get("form_url", ""),
         "doc_id": form_result.get("form_id", ""),
@@ -815,8 +839,8 @@ def _load_exportable_draft(
     actual_type = str(artifact.get("artifact_type") or artifact.get("type") or "")
     if actual_type != artifact_type:
         raise RuntimeError(f"Artifact is not a {label}")
-    if artifact.get("status") not in {"draft", "failed_export"}:
-        raise RuntimeError(f"Only draft {label} artifacts can be exported")
+    if artifact.get("status") not in {"draft", "failed_export", "confirmed"}:
+        raise RuntimeError(f"Only draft or confirmed {label} artifacts can be exported")
 
     payload = artifact.get("content_json")
     if not isinstance(payload, dict) or not payload:

@@ -266,6 +266,26 @@ function ArtifactExportButton({
         artifactType === 'quiz'
           ? await exportQuizDraftToGoogleForms(batchId, artifactId)
           : await exportArtifactDraftToGoogleDocs(batchId, artifactId)
+      if (artifactType === 'lab' && (!exported.lecturer_doc_url || !exported.student_doc_url)) {
+        try {
+          const artifact = await getArtifact(batchId, artifactId)
+          const refreshed = artifactToExportResult(artifact)
+          setResult({
+            ...exported,
+            lecturer_doc_url: exported.lecturer_doc_url || refreshed.lecturer_doc_url,
+            lecturer_doc_id: exported.lecturer_doc_id || refreshed.lecturer_doc_id,
+            lecturer_drive_file_name:
+              exported.lecturer_drive_file_name || refreshed.lecturer_drive_file_name,
+            student_doc_url: exported.student_doc_url || refreshed.student_doc_url,
+            student_doc_id: exported.student_doc_id || refreshed.student_doc_id,
+            student_drive_file_name:
+              exported.student_drive_file_name || refreshed.student_drive_file_name,
+          })
+          return
+        } catch {
+          // The export succeeded; keep the direct response if the follow-up read is unavailable.
+        }
+      }
       setResult(exported)
     } catch (err) {
       const maybe = err as { response?: { data?: { detail?: unknown } }; message?: string }

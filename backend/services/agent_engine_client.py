@@ -553,10 +553,18 @@ def _event_error(event: Any) -> str:
             value = event.get(key)
             if value:
                 return _short_repr(value)
+        code = event.get("code")
+        message = event.get("message")
+        if code or message:
+            return f"{code or 'UNKNOWN'}: {message or ''}".strip()
     for key in ("error", "error_message", "exception"):
         value = getattr(event, key, None)
         if value:
             return _short_repr(value)
+    code = getattr(event, "code", None)
+    message = getattr(event, "message", None)
+    if code or message:
+        return f"{code or 'UNKNOWN'}: {message or ''}".strip()
     return ""
 
 

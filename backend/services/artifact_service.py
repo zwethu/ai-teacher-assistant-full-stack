@@ -21,6 +21,7 @@ from services.google_workspace.drive_folders import (
     build_artifact_file_name,
     delete_drive_file,
     ensure_batch_artifact_folders,
+    get_drive_file_metadata,
 )
 from services.google_workspace.forms_service import create_quiz_form_for_user
 
@@ -310,6 +311,10 @@ def save_lesson_plan_artifact(
         "doc_id": doc_id,
         "week": week,
         "created_by": lecturer_email,
+        "export_status": "exported",
+        "content_source": "agent_generated",
+        "content_stale": False,
+        "sync_error": "",
         "metadata": {},
     }
     return save_versioned_artifact(batch_id, artifact_data)
@@ -431,6 +436,10 @@ def _save_generated_draft_from_session(
         "week": week,
         "content_json": payload,
         "rendered_markdown": rendered_markdown,
+        "export_status": "not_exported",
+        "content_source": "agent_generated",
+        "content_stale": False,
+        "sync_error": "",
         "source_run_id": run_id,
         "source_chat_id": chat_id,
         "created_by": lecturer_id,
@@ -524,6 +533,10 @@ def export_lesson_plan_draft_to_google_docs(
         raise RuntimeError(safe_error) from exc
 
     _supersede_current_artifacts(batch_id, "lesson_plan", week, artifact_id)
+    export_metadata = _google_doc_export_metadata(
+        uid=lecturer_id,
+        doc_id=str(doc_result.get("doc_id") or ""),
+    )
     updates = {
         "status": "confirmed",
         "is_current": True,
@@ -532,9 +545,14 @@ def export_lesson_plan_draft_to_google_docs(
         "doc_id": doc_result.get("doc_id", ""),
         "drive_file_name": doc_result.get("drive_file_name", drive_file_name),
         "drive_folder_id": doc_result.get("drive_folder_id", folder_id),
+        "export_status": "exported",
+        "content_source": "agent_generated",
+        "content_stale": False,
+        "sync_error": "",
         "exported_at": _now(),
         "updated_at": _now(),
         "export_error": "",
+        **export_metadata,
     }
     ref.update(updates)
     _update_source_message_export_metadata(
@@ -619,6 +637,10 @@ def export_lab_draft_to_google_docs(
         raise RuntimeError(safe_error) from exc
 
     _supersede_current_artifacts(batch_id, "lab", week, artifact_id)
+    export_metadata = _google_doc_export_metadata(
+        uid=lecturer_id,
+        doc_id=str(doc_result.get("lecturer_doc_id") or ""),
+    )
     metadata = {
         "student_doc_url": doc_result.get("student_doc_url", ""),
         "student_doc_id": doc_result.get("student_doc_id", ""),
@@ -637,9 +659,14 @@ def export_lab_draft_to_google_docs(
         "drive_folder_id": doc_result.get("drive_folder_id", folder_id),
         "drive_folder_url": folder_url,
         "metadata": metadata,
+        "export_status": "exported",
+        "content_source": "agent_generated",
+        "content_stale": False,
+        "sync_error": "",
         "exported_at": _now(),
         "updated_at": _now(),
         "export_error": "",
+        **export_metadata,
     }
     ref.update(updates)
     _update_source_message_export_metadata(
@@ -738,6 +765,10 @@ def export_quiz_draft_to_google_forms(
         "drive_folder_id": form_result.get("drive_folder_id", folder_id),
         "drive_folder_url": folder_url,
         "metadata": metadata,
+        "export_status": "exported",
+        "content_source": "agent_generated",
+        "content_stale": False,
+        "sync_error": "",
         "exported_at": _now(),
         "updated_at": _now(),
         "export_error": "",
@@ -878,6 +909,22 @@ def _update_source_message_export_metadata(
         message.reference.update({"metadata": metadata, "updated_at": _now()})
 
 
+def _google_doc_export_metadata(uid: str, doc_id: str) -> dict[str, Any]:
+    """Best-effort Drive metadata captured after Google Docs export."""
+    if not doc_id:
+        return {}
+    try:
+        metadata = get_drive_file_metadata(uid, doc_id)
+    except Exception:
+        logger.exception("Failed to read Drive metadata for exported doc_id=%s", doc_id)
+        return {"last_synced_from_google_at": _now()}
+    return {
+        "google_modified_time": str(metadata.get("modifiedTime") or ""),
+        "google_version": str(metadata.get("version") or ""),
+        "last_synced_from_google_at": _now(),
+    }
+
+
 def save_lab_artifact(
     batch_id: str,
     week: int,
@@ -902,6 +949,10 @@ def save_lab_artifact(
         "doc_id": doc_id,
         "week": week,
         "created_by": lecturer_email,
+        "export_status": "exported",
+        "content_source": "agent_generated",
+        "content_stale": False,
+        "sync_error": "",
         "metadata": {
             "student_doc_url": student_doc_url,
             "student_doc_id": student_doc_id,
@@ -934,6 +985,10 @@ def save_quiz_artifact(
         "form_id": form_id,
         "week": week,
         "created_by": lecturer_email,
+        "export_status": "exported",
+        "content_source": "agent_generated",
+        "content_stale": False,
+        "sync_error": "",
         "metadata": {
             "form_url": form_url,
             "form_id": form_id,
@@ -988,6 +1043,45 @@ def get_artifact(batch_id: str, artifact_id: str, lecturer_id: str) -> dict[str,
     if not snap.exists:
         return None
     return _doc_to_dict(snap)
+
+
+def confirm_artifact(
+    batch_id: str,
+    artifact_id: str,
+    lecturer_id: str,
+) -> dict[str, Any] | None:
+    """Confirm a draft artifact without exporting or calling Google APIs."""
+    if not _batch_owned_by(batch_id, lecturer_id):
+        return None
+
+    ref = _artifacts_col(batch_id).document(artifact_id)
+    snap = ref.get()
+    if not snap.exists:
+        return None
+
+    artifact = _doc_to_dict(snap)
+    if artifact.get("status") not in {"draft", "failed_export"}:
+        raise RuntimeError("Only draft artifacts can be confirmed")
+    if not artifact.get("content_json") and not str(artifact.get("rendered_markdown") or "").strip():
+        raise RuntimeError("Draft artifact has no saved content")
+
+    artifact_type = str(artifact.get("artifact_type") or artifact.get("type") or "")
+    week = artifact.get("week")
+    next_version = _next_confirmed_version(batch_id, artifact_type, week)
+    _supersede_current_artifacts(batch_id, artifact_type, week, artifact_id)
+    ref.update(
+        {
+            "status": "confirmed",
+            "is_current": True,
+            "version": next_version,
+            "export_status": artifact.get("export_status") or "not_exported",
+            "content_source": artifact.get("content_source") or "agent_generated",
+            "content_stale": bool(artifact.get("content_stale", False)),
+            "sync_error": str(artifact.get("sync_error") or ""),
+            "updated_at": _now(),
+        }
+    )
+    return _doc_to_dict(ref.get())
 
 
 def artifact_summary(batch_id: str, lecturer_id: str) -> dict[str, Any] | None:

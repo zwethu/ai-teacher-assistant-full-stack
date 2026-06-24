@@ -196,6 +196,17 @@ def rename_file(uid: str, file_id: str, name: str) -> None:
     ).execute()
 
 
+def get_drive_file_metadata(uid: str, file_id: str) -> dict[str, Any]:
+    """Return Drive metadata used to detect user edits to Google editor files."""
+    if not file_id:
+        raise ValueError("file_id is required")
+    drive = _build_drive_service(uid)
+    return drive.files().get(
+        fileId=file_id,
+        fields="id,name,mimeType,modifiedTime,version,webViewLink,trashed",
+    ).execute()
+
+
 def delete_drive_file(uid: str, file_id: str) -> bool:
     if not file_id:
         return False

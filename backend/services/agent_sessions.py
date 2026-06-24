@@ -64,6 +64,7 @@ def create_agent_run_record(
     workflow_type: str = "",
     week: int | None = None,
     save_draft: bool = False,
+    artifact_sync_preflight: dict[str, Any] | None = None,
 ) -> None:
     connectors = {
         "web_search": bool((connectors or {}).get("web_search", True)),
@@ -84,6 +85,7 @@ def create_agent_run_record(
             "workflow_type": workflow_type,
             "week": week,
             "save_draft": save_draft,
+            "artifact_sync_preflight": artifact_sync_preflight or {},
             "created_at": SERVER_TIMESTAMP,
             "updated_at": SERVER_TIMESTAMP,
         }
@@ -213,6 +215,7 @@ def _run_to_dict(data: dict[str, Any]) -> dict[str, Any]:
         "workflow_type": str(data.get("workflow_type") or ""),
         "week": data.get("week"),
         "save_draft": bool(data.get("save_draft", False)),
+        "artifact_sync_preflight": data.get("artifact_sync_preflight") or {},
         "draft_artifact_id": str(data.get("draft_artifact_id") or ""),
         "draft_status": str(data.get("draft_status") or ""),
         "draft_error": str(data.get("draft_error") or ""),

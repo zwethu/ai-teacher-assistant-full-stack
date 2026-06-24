@@ -39,6 +39,7 @@ from fastapi import BackgroundTasks, HTTPException, status
 from entity.Batch import BatchModel
 from services.agent_engine_client import get_agent_engine_resource_name, stream_agent_response
 from services.agent_platform_sessions import get_agent_session_state
+from services.artifact_sync_service import preflight_sync_artifacts_for_agent_run
 from services.agent_sessions import (
     create_agent_run_record,
     ensure_chat_agent_session,
@@ -117,6 +118,21 @@ async def start_chat_run(
 
     # --- 2. Create run id before persisting messages ---
     run_id = f"run_{uuid.uuid4().hex[:16]}"
+    try:
+        artifact_sync_preflight = preflight_sync_artifacts_for_agent_run(
+            batch_id=batch_id,
+            lecturer_id=lecturer_id,
+            workflow_type=workflow_type,
+            week=week,
+            user_message=user_message,
+        )
+    except Exception as exc:
+        logger.exception("artifact sync preflight failed run_id=%s", run_id)
+        artifact_sync_preflight = {
+            "status": "failed",
+            "summary": "Artifact sync preflight failed; using saved Firestore content.",
+            "items": [{"status": "sync_failed", "error": str(exc)[:1000]}],
+        }
 
     # --- 3. Persist user message with run_id ---
     user_msg = add_message(
@@ -136,6 +152,7 @@ async def start_chat_run(
         batch_id=batch_id,
         lecturer_id=lecturer_id,
         message_preview=user_message[:200],
+        artifact_sync_preflight=artifact_sync_preflight,
     )
     create_agent_run_record(
         run_id=run_id,
@@ -150,6 +167,7 @@ async def start_chat_run(
         workflow_type=workflow_type,
         week=week,
         save_draft=save_draft,
+        artifact_sync_preflight=artifact_sync_preflight,
     )
 
     # --- 5. Build trusted session state for the agent ---
@@ -165,6 +183,7 @@ async def start_chat_run(
         workflow_type=workflow_type,
         week=week,
         save_draft=save_draft,
+        artifact_sync_preflight=artifact_sync_preflight,
     )
 
     # --- 6. Schedule background agent task ---
@@ -210,6 +229,7 @@ def _build_session_state(
     workflow_type: str = "",
     week: int | None = None,
     save_draft: bool = False,
+    artifact_sync_preflight: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the trusted session state payload sent to the agent.
 
@@ -237,6 +257,8 @@ def _build_session_state(
         "workflow_type": workflow_type,
         "requested_week": week,
         "save_draft": save_draft,
+        "artifact_sync_status": (artifact_sync_preflight or {}).get("status", ""),
+        "artifact_sync_summary": (artifact_sync_preflight or {}).get("summary", ""),
     }
 
 

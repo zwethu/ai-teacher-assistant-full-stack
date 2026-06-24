@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from services.artifact_service import (
     artifact_summary,
+    confirm_artifact,
     delete_artifact,
     export_lab_draft_to_google_docs,
     export_lesson_plan_draft_to_google_docs,
@@ -15,6 +16,7 @@ from services.artifact_service import (
     get_artifact,
     list_artifacts,
 )
+from services.artifact_sync_service import sync_artifact_from_google_doc_if_stale
 from services.google_workspace.credentials import (
     GoogleOAuthInvalidError,
     GoogleOAuthRequiredError,
@@ -148,6 +150,42 @@ async def export_google_forms_endpoint(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=str(exc),
         ) from exc
+
+
+@router.post("/{artifact_id}/sync/google-docs")
+async def sync_google_docs_endpoint(
+    batch_id: str,
+    artifact_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    result = sync_artifact_from_google_doc_if_stale(
+        batch_id=batch_id,
+        artifact_id=artifact_id,
+        lecturer_id=current_user["uid"],
+    )
+    if result.get("status") in {"not_found", "missing"}:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found")
+    artifact = get_artifact(batch_id, artifact_id, current_user["uid"])
+    return {"sync": result, "artifact": artifact}
+
+
+@router.post("/{artifact_id}/confirm")
+async def confirm_artifact_endpoint(
+    batch_id: str,
+    artifact_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    try:
+        artifact = confirm_artifact(
+            batch_id=batch_id,
+            artifact_id=artifact_id,
+            lecturer_id=current_user["uid"],
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    if artifact is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found")
+    return artifact
 
 
 @router.delete("/{artifact_id}")

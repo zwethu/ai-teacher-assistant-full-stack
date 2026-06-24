@@ -88,6 +88,7 @@ def create_run_meta(
     batch_id: str,
     lecturer_id: str,
     message_preview: str = "",
+    artifact_sync_preflight: dict | None = None,
 ) -> None:
     """Write initial run metadata and set status=running."""
     if not _ensure_init():
@@ -95,7 +96,7 @@ def create_run_meta(
     try:
         now = int(time.time())
         run_path = f"agentRuns/{run_id}"
-        _ref(f"{run_path}/meta").set({
+        meta = {
             "run_id": run_id,
             "rtdb_run_path": run_path,
             "chat_id": chat_id,
@@ -103,7 +104,10 @@ def create_run_meta(
             "lecturer_id": lecturer_id,
             "message_preview": message_preview[:200],
             "created_at": now,
-        })
+        }
+        if artifact_sync_preflight:
+            meta["artifact_sync_preflight"] = artifact_sync_preflight
+        _ref(f"{run_path}/meta").set(meta)
         _ref(f"{run_path}/status").set("running")
         _ref(f"chats/{chat_id}/activeRunId").set(run_id)
         logger.debug("RTDB: created run meta run_id=%s", run_id)

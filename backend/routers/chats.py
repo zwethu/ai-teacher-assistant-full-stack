@@ -24,6 +24,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/batches/{batch_id}/chats", tags=["chats"])
 
 _WEEK_RE = re.compile(r"\bweek\s*(\d{1,2})\b", re.IGNORECASE)
+_ORDINAL_WEEK_RE = re.compile(
+    r"\b(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)\s+"
+    r"(?:week|lecture|class)\b",
+    re.IGNORECASE,
+)
 _GENERATE_RE = re.compile(
     r"\b(generate|create|craft|make|build|produce|prepare|write)\b",
     re.IGNORECASE,
@@ -31,6 +36,22 @@ _GENERATE_RE = re.compile(
 _LAB_RE = re.compile(r"\b(lab|labs|practical|practicals|laboratory)\b", re.IGNORECASE)
 _LESSON_PLAN_RE = re.compile(r"\blesson\s*plan\b", re.IGNORECASE)
 _ASSESSMENT_RE = re.compile(r"\b(quiz|assessment|assessments|test|exam)\b", re.IGNORECASE)
+_AMBIGUOUS_GENERATION_RE = re.compile(
+    r"\b(lesson\s*plan.*lab|lab.*lesson\s*plan|lesson\s+and\s+lab|materials)\b",
+    re.IGNORECASE,
+)
+_ORDINAL_WEEKS = {
+    "first": 1,
+    "second": 2,
+    "third": 3,
+    "fourth": 4,
+    "fifth": 5,
+    "sixth": 6,
+    "seventh": 7,
+    "eighth": 8,
+    "ninth": 9,
+    "tenth": 10,
+}
 
 
 class CreateChatBody(BaseModel):
@@ -50,24 +71,44 @@ class UpdateTitleBody(BaseModel):
     title: str
 
 
-def classify_chat_workflow_intent(content: str) -> tuple[str, int | None, bool]:
-    """Infer draft-generating workflow hints from a normal chat message."""
+def propose_chat_workflow_intent(content: str) -> dict | None:
+    """Return a conservative generation proposal; never triggers autosave."""
     text = content.strip()
     if not text or not _GENERATE_RE.search(text):
-        return "", None, False
+        return None
+    if _AMBIGUOUS_GENERATION_RE.search(text):
+        return None
 
     week_match = _WEEK_RE.search(text)
-    if not week_match:
-        return "", None, False
-
-    week = int(week_match.group(1))
-    if _LAB_RE.search(text):
-        return "lab", week, True
+    ordinal_match = _ORDINAL_WEEK_RE.search(text)
+    if week_match:
+        week = int(week_match.group(1))
+    elif ordinal_match:
+        week = _ORDINAL_WEEKS.get(ordinal_match.group(1).lower())
+    else:
+        return None
+    if week is None:
+        return None
+    artifact_type = ""
+    workflow_type = ""
     if _LESSON_PLAN_RE.search(text):
-        return "lesson_plan", week, True
-    if _ASSESSMENT_RE.search(text):
-        return "assessment", week, True
-    return "", None, False
+        artifact_type = "lesson_plan"
+        workflow_type = "lesson_plan"
+    elif _ASSESSMENT_RE.search(text):
+        artifact_type = "assessment"
+        workflow_type = "assessment"
+    elif _LAB_RE.search(text):
+        artifact_type = "lab"
+        workflow_type = "lab"
+    if not workflow_type:
+        return None
+    return {
+        "artifact_type": artifact_type,
+        "workflow_type": workflow_type,
+        "week": week,
+        "confidence": "high",
+        "reason": f"User explicitly asked to create {artifact_type} for week {week}",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -196,14 +237,13 @@ async def send_message_endpoint(
     if chat is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
 
-    workflow_type, week, save_draft = classify_chat_workflow_intent(body.content)
-    if save_draft:
+    proposal = propose_chat_workflow_intent(body.content)
+    if proposal:
         logger.info(
-            "chat workflow intent classified batch_id=%s chat_id=%s workflow_type=%s week=%s",
+            "chat workflow proposal detected without autosave batch_id=%s chat_id=%s proposal=%s",
             batch_id,
             chat_id,
-            workflow_type,
-            week,
+            proposal,
         )
 
     return await start_chat_run(
@@ -214,7 +254,7 @@ async def send_message_endpoint(
         lecturer_email=current_user.get("email", ""),
         connectors=body.connectors.model_dump(),
         background_tasks=background_tasks,
-        workflow_type=workflow_type,
-        week=week,
-        save_draft=save_draft,
+        workflow_type="",
+        week=None,
+        save_draft=False,
     )

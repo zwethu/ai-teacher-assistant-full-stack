@@ -684,8 +684,6 @@ def export_lab_draft_to_google_docs(
         label="lab",
     )
 
-    assert_google_oauth_valid(lecturer_id, ["documents", "drive.file"])
-
     week = int(payload.get("week") or artifact.get("week") or 0)
     title = str(payload.get("title") or artifact.get("title") or "Lab")
     was_confirmed = artifact.get("status") == "confirmed"
@@ -719,6 +717,7 @@ def export_lab_draft_to_google_docs(
             was_confirmed=was_confirmed,
         )
         raise
+    assert_google_oauth_valid(lecturer_id, ["documents", "drive.file"])
     next_version = (
         int(artifact.get("version") or 0)
         if was_confirmed and artifact.get("version")
@@ -844,8 +843,6 @@ def export_quiz_draft_to_google_forms(
         label="quiz",
     )
 
-    assert_google_oauth_valid(lecturer_id, ["forms.body", "drive.file"])
-
     week = int(payload.get("week") or artifact.get("week") or 0)
     title = str(payload.get("title") or artifact.get("title") or "Quiz")
     was_confirmed = artifact.get("status") == "confirmed"
@@ -863,6 +860,7 @@ def export_quiz_draft_to_google_forms(
             "doc_id": artifact.get("doc_id", ""),
             "drive_file_name": artifact.get("drive_file_name", ""),
         }
+    assert_google_oauth_valid(lecturer_id, ["forms.body", "drive.file"])
     next_version = (
         int(artifact.get("version") or 0)
         if was_confirmed and artifact.get("version")

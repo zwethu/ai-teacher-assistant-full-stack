@@ -13,6 +13,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 from services.google_workspace.credentials import build_user_credentials
+from services.artifact_export_validation import validate_rendered_blocks_coverage
 from services.google_workspace.drive_folders import move_file_to_folder, rename_file
 from services.google_workspace.docs_rendering.builder import DocBuilder
 from services.google_workspace.docs_rendering.lab_builder import LabDocBuilder
@@ -141,6 +142,7 @@ def create_lesson_plan_doc_for_user(
     plan = LessonPlanFull.model_validate(lesson_plan_payload)
     document_title = drive_file_name or plan.title
     blocks = DocBuilder(plan).build()
+    validate_rendered_blocks_coverage("lesson_plan", lesson_plan_payload, blocks)
 
     docs = _build_docs_service(uid)
     drive = _build_drive_service(uid)
@@ -216,6 +218,13 @@ def create_lab_docs_for_user(
     "student_doc_url", "student_doc_id"}``.
     """
     lab = LabFull.model_validate(lab_payload)
+    mode_blocks = {
+        mode: LabDocBuilder(lab, mode=mode).build()  # type: ignore[arg-type]
+        for mode in ("lecturer", "student")
+    }
+    for mode, blocks in mode_blocks.items():
+        validate_rendered_blocks_coverage("lab", lab_payload, blocks, mode=mode)
+
     docs = _build_docs_service(uid)
     drive = _build_drive_service(uid)
     result: dict[str, str] = {}
@@ -226,7 +235,7 @@ def create_lab_docs_for_user(
         else:
             doc_title = student_drive_file_name or f"Week {lab.week} Lab — {lab.title} (Student Instructions)"
 
-        blocks = LabDocBuilder(lab, mode=mode).build()  # type: ignore[arg-type]
+        blocks = mode_blocks[mode]
 
         try:
             document = docs.documents().create(body={"title": doc_title}).execute()

@@ -45,6 +45,12 @@ class TeachingActivity(BaseModel):
     materials_needed: list[str] = Field(default_factory=list)
     instructions: list[str] = Field(default_factory=list)
     learning_outcomes: list[str] = Field(default_factory=list)
+    teacher_actions: list[str] = Field(default_factory=list)
+    student_actions: list[str] = Field(default_factory=list)
+    materials_table: list[dict[str, Any]] = Field(default_factory=list)
+    prompt_templates: list[str] = Field(default_factory=list)
+    code_blocks: list[dict[str, Any] | str] = Field(default_factory=list)
+    assessment_checks: list[str] = Field(default_factory=list)
 
 
 class TimelineSegment(BaseModel):
@@ -156,7 +162,15 @@ class SafetyProfile(BaseModel):
 class LabStep(BaseModel):
     step_number: int = 1
     title: str = ""
+    phase_title: str | None = None
     student_instruction: str = ""
+    student_actions: list[str] = Field(default_factory=list)
+    prompt_templates: list[str] = Field(default_factory=list)
+    code_blocks: list[dict[str, Any] | str] = Field(default_factory=list)
+    config_templates: list[dict[str, Any] | str] = Field(default_factory=list)
+    common_errors: list[str] = Field(default_factory=list)
+    recovery_actions: list[str] = Field(default_factory=list)
+    evidence_required: str | None = None
     lecturer_note: str | None = None
     estimated_minutes: int = 10
     expected_result: str | None = None
@@ -201,5 +215,8 @@ class LabFull(BaseModel):
     expected_results: list[str] = Field(default_factory=list)
     troubleshooting: list[dict] = Field(default_factory=list)
     deliverables: list[str] = Field(default_factory=list)
+    submission_checklist: list[str] = Field(default_factory=list)
+    callouts: list[str] = Field(default_factory=list)
+    safety_notes: list[str] = Field(default_factory=list)
     post_lab_questions: list[str] = Field(default_factory=list)
     rubric: list[LabRubricCriterion] = Field(default_factory=list)

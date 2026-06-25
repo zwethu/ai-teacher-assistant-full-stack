@@ -94,6 +94,8 @@ class LabDocBuilder:
         blocks.append(TextBlock(BlockType.HEADING1, "Safety and Risk Profile"))
         safety = lab.safety_profile
         blocks.append(TextBlock(BlockType.BODY, f"Risk level: {safety.risk_level}"))
+        for note in lab.safety_notes:
+            blocks.append(TextBlock(BlockType.BODY, f"Note: {note}", italic=True))
         for label, items in (
             ("Hazards", safety.hazards),
             ("PPE", safety.ppe),
@@ -133,20 +135,20 @@ class LabDocBuilder:
 
         blocks.append(TextBlock(BlockType.HEADING1, "Instructor Walkthrough"))
         for step in lab.procedure_steps:
+            if step.phase_title:
+                blocks.append(TextBlock(BlockType.HEADING2, step.phase_title))
             blocks.append(
                 TextBlock(BlockType.HEADING2, f"Step {step.step_number}: {step.title}")
             )
-            blocks.append(
-                TableBlock(
-                    headers=["Field", "Content"],
-                    rows=[
-                        ["Student sees", step.student_instruction],
-                        ["Lecturer note", step.lecturer_note or "—"],
-                        ["Expected result", step.expected_result or "—"],
-                        ["Est. time", f"{step.estimated_minutes} min"],
-                    ],
-                )
-            )
+            rows = [
+                ["Student sees", step.student_instruction],
+                ["Lecturer note", step.lecturer_note or "—"],
+                ["Expected result", step.expected_result or "—"],
+                ["Evidence required", step.evidence_required or "—"],
+                ["Est. time", f"{step.estimated_minutes} min"],
+            ]
+            blocks.append(TableBlock(headers=["Field", "Content"], rows=rows))
+            self._append_rich_step_blocks(blocks, step, include_recovery=True)
             blocks.append(TextBlock(BlockType.BODY, ""))
 
         blocks.append(TextBlock(BlockType.HEADING1, "Checkpoints"))
@@ -179,8 +181,17 @@ class LabDocBuilder:
         for item in lab.expected_results:
             blocks.append(TextBlock(BlockType.BULLET, item))
 
+        if lab.callouts:
+            blocks.append(TextBlock(BlockType.HEADING1, "Instructor Callouts"))
+            for item in lab.callouts:
+                blocks.append(TextBlock(BlockType.BODY, f"Note: {item}", italic=True))
+
         blocks.append(TextBlock(BlockType.HEADING1, "Troubleshooting Matrix"))
         trouble_rows = [self._troubleshooting_row(item) for item in lab.troubleshooting]
+        for step in lab.procedure_steps:
+            for index, error in enumerate(step.common_errors):
+                recovery = step.recovery_actions[index] if index < len(step.recovery_actions) else ""
+                trouble_rows.append([f"Step {step.step_number}: {error}", "", recovery])
         blocks.append(
             TableBlock(
                 headers=["Issue", "Cause", "Fix"],
@@ -242,20 +253,29 @@ class LabDocBuilder:
 
         blocks.append(TextBlock(BlockType.HEADING1, "Step-by-Step Procedure"))
         for step in lab.procedure_steps:
+            if step.phase_title:
+                blocks.append(TextBlock(BlockType.HEADING2, step.phase_title))
             blocks.append(
                 TextBlock(BlockType.HEADING2, f"Step {step.step_number}: {step.title}")
             )
-            raw = step.student_instruction.strip()
-            sub_steps = re.split(r"(?<=[.!?])\s+(?=Step\s+\d)", raw)
-            if len(sub_steps) > 1:
-                for sub in sub_steps:
-                    if sub.strip():
-                        blocks.append(TextBlock(BlockType.BULLET, sub.strip()))
+            if step.student_actions:
+                for action in step.student_actions:
+                    blocks.append(TextBlock(BlockType.BULLET, action))
             else:
-                blocks.append(TextBlock(BlockType.BODY, raw))
+                raw = step.student_instruction.strip()
+                sub_steps = re.split(r"(?<=[.!?])\s+(?=Step\s+\d)", raw)
+                if len(sub_steps) > 1:
+                    for sub in sub_steps:
+                        if sub.strip():
+                            blocks.append(TextBlock(BlockType.BULLET, sub.strip()))
+                else:
+                    blocks.append(TextBlock(BlockType.BODY, raw))
+            self._append_rich_step_blocks(blocks, step, include_recovery=False)
             blocks.append(
                 TextBlock(BlockType.BODY, f"⏱ Estimated time: {step.estimated_minutes} min")
             )
+            if step.evidence_required:
+                blocks.append(TextBlock(BlockType.BODY, f"Evidence required: {step.evidence_required}"))
             blocks.append(TextBlock(BlockType.BODY, ""))
 
         blocks.append(TextBlock(BlockType.HEADING1, "Checkpoints"))
@@ -272,6 +292,10 @@ class LabDocBuilder:
         blocks.append(TextBlock(BlockType.HEADING1, "What to Submit"))
         for item in lab.deliverables:
             blocks.append(TextBlock(BlockType.BULLET, item))
+        if lab.submission_checklist:
+            blocks.append(TextBlock(BlockType.HEADING2, "Submission Checklist"))
+            for item in lab.submission_checklist:
+                blocks.append(TextBlock(BlockType.BULLET, f"☐ {item}"))
 
         blocks.append(TextBlock(BlockType.HEADING1, "Reflection Questions"))
         for index, question in enumerate(lab.post_lab_questions, start=1):
@@ -294,6 +318,52 @@ class LabDocBuilder:
         while len(values) < 3:
             values.append("")
         return [str(values[0]), str(values[1]), str(values[2])]
+
+    @classmethod
+    def _append_rich_step_blocks(
+        cls,
+        blocks: list[Block],
+        step: object,
+        *,
+        include_recovery: bool,
+    ) -> None:
+        prompt_templates = getattr(step, "prompt_templates", []) or []
+        if prompt_templates:
+            blocks.append(TextBlock(BlockType.HEADING2, "Prompt Templates"))
+            for prompt in prompt_templates:
+                blocks.append(TextBlock(BlockType.BODY, f"> {prompt}"))
+
+        for heading, values in (
+            ("Code Blocks", getattr(step, "code_blocks", []) or []),
+            ("Configuration Templates", getattr(step, "config_templates", []) or []),
+        ):
+            if values:
+                blocks.append(TextBlock(BlockType.HEADING2, heading))
+                for value in values:
+                    blocks.append(TextBlock(BlockType.BODY, cls._format_code_block(value)))
+
+        if include_recovery and (getattr(step, "common_errors", []) or getattr(step, "recovery_actions", [])):
+            errors = getattr(step, "common_errors", []) or []
+            recoveries = getattr(step, "recovery_actions", []) or []
+            row_count = max(len(errors), len(recoveries), 1)
+            rows = [
+                [
+                    str(errors[index]) if index < len(errors) else "",
+                    str(recoveries[index]) if index < len(recoveries) else "",
+                ]
+                for index in range(row_count)
+            ]
+            blocks.append(TableBlock(headers=["Common Error", "Recovery Action"], rows=rows))
+
+    @staticmethod
+    def _format_code_block(block: dict | str) -> str:
+        if isinstance(block, str):
+            return f"```\n{block}\n```"
+        language = str(block.get("language") or block.get("type") or "").strip()
+        title = str(block.get("title") or "").strip()
+        code = str(block.get("code") or block.get("content") or block.get("text") or "").strip()
+        prefix = f"{title}\n" if title else ""
+        return f"{prefix}```{language}\n{code}\n```"
 
     @staticmethod
     def _rubric_item_dict(item: dict | object) -> dict:

@@ -522,6 +522,8 @@ def _draft_message_metadata(draft: dict[str, Any] | None) -> dict[str, Any]:
         "draft_artifact_id": str(draft.get("id") or draft.get("artifact_id") or ""),
         "artifact_type": str(draft.get("artifact_type") or draft.get("type") or ""),
         "week": draft.get("week"),
+        "content_hash": draft.get("content_hash"),
+        "preview_renderer_version": draft.get("preview_renderer_version"),
         "exportable": True,
     }
 
@@ -642,6 +644,7 @@ async def _run_agent_background(
             raise RuntimeError("Agent Engine stream completed without any assistant text")
 
         metadata: dict[str, Any] = {}
+        assistant_message_text = final_text
         try:
             session_state_after = await get_agent_session_state(
                 resource_name=get_agent_engine_resource_name(),
@@ -665,6 +668,9 @@ async def _run_agent_background(
             )
             if draft:
                 metadata = _draft_message_metadata(draft)
+                preview_markdown = str(draft.get("preview_markdown") or "").strip()
+                if preview_markdown:
+                    assistant_message_text = preview_markdown
                 mark_agent_run_draft_saved(
                     batch_id=batch_id,
                     chat_id=chat_id,
@@ -704,14 +710,14 @@ async def _run_agent_background(
             batch_id,
             chat_id,
             "assistant",
-            final_text,
+            assistant_message_text,
             lecturer_id,
             run_id=run_id,
             metadata=metadata,
         )
 
         # Write final message to RTDB for frontend live message display
-        write_final_message(run_id, final_text, metadata=metadata)
+        write_final_message(run_id, assistant_message_text, metadata=metadata)
 
         # Mark run complete
         try:

@@ -7,6 +7,8 @@ Matches the schema and versioning logic of Pnai-ai's firebase module.
 from __future__ import annotations
 
 import logging
+import hashlib
+import json
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -24,6 +26,18 @@ from services.google_workspace.drive_folders import (
     get_drive_file_metadata,
 )
 from services.google_workspace.forms_service import create_quiz_form_for_user
+from services.artifact_export_validation import (
+    ArtifactExportCoverageError,
+    validate_export_coverage,
+)
+from services.artifact_renderers.lab_markdown import (
+    RENDERER_VERSION as LAB_MARKDOWN_RENDERER_VERSION,
+    render_lab_markdown,
+)
+from services.artifact_renderers.lesson_plan_markdown import (
+    RENDERER_VERSION as LESSON_PLAN_MARKDOWN_RENDERER_VERSION,
+    render_lesson_plan_markdown,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +59,47 @@ def _doc_to_dict(snapshot) -> dict[str, Any]:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _canonical_content_json(payload: dict[str, Any]) -> str:
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _content_hash(payload: dict[str, Any]) -> str:
+    return hashlib.sha256(_canonical_content_json(payload).encode("utf-8")).hexdigest()
+
+
+def _render_preview_markdown(artifact_type: str, payload: dict[str, Any], fallback: str) -> tuple[str, str]:
+    if artifact_type == "lesson_plan":
+        return render_lesson_plan_markdown(payload), LESSON_PLAN_MARKDOWN_RENDERER_VERSION
+    if artifact_type == "lab":
+        return render_lab_markdown(payload), LAB_MARKDOWN_RENDERER_VERSION
+    return fallback, "agent_final_text.v1"
+
+
+def _export_idempotency_key(artifact_id: str, export_target: str, content_hash: str) -> str:
+    return f"{artifact_id}:{export_target}:{content_hash}"
+
+
+def _has_existing_export(artifact: dict[str, Any], content_hash: str, export_target: str) -> bool:
+    return (
+        artifact.get("export_status") == "exported"
+        and str(artifact.get("content_hash") or "") == content_hash
+        and str(artifact.get("export_idempotency_key") or "")
+        == _export_idempotency_key(str(artifact.get("id") or ""), export_target, content_hash)
+    )
+
+
+def _mark_export_failed(ref: Any, original_status: str, original_is_current: bool, error: str, *, was_confirmed: bool) -> None:
+    ref.update(
+        {
+            "status": original_status if was_confirmed else "failed_export",
+            "export_status": "failed",
+            "export_error": error[:1000],
+            "is_current": original_is_current if was_confirmed else False,
+            "updated_at": _now(),
+        }
+    )
 
 
 def _artifacts_col(batch_id: str):
@@ -424,6 +479,12 @@ def _save_generated_draft_from_session(
     ]
     artifact_id = str(existing[0]["id"]) if existing else str(uuid.uuid4())
     now = _now()
+    preview_markdown, preview_renderer_version = _render_preview_markdown(
+        artifact_type,
+        payload,
+        rendered_markdown,
+    )
+    content_hash = _content_hash(payload)
     data = {
         "id": artifact_id,
         "type": artifact_type,
@@ -435,7 +496,11 @@ def _save_generated_draft_from_session(
         "batch_id": batch_id,
         "week": week,
         "content_json": payload,
+        "content_schema_version": "v2",
+        "content_hash": content_hash,
         "rendered_markdown": rendered_markdown,
+        "preview_markdown": preview_markdown,
+        "preview_renderer_version": preview_renderer_version,
         "export_status": "not_exported",
         "content_source": "agent_generated",
         "content_stale": False,
@@ -448,6 +513,8 @@ def _save_generated_draft_from_session(
         "metadata": {
             "source": "agent_platform_session",
             "exportable": True,
+            "content_hash": content_hash,
+            "preview_renderer_version": preview_renderer_version,
         },
     }
     if not existing:
@@ -487,6 +554,27 @@ def export_lesson_plan_draft_to_google_docs(
     payload = artifact.get("content_json")
     if not isinstance(payload, dict) or not payload:
         raise RuntimeError("Draft lesson plan content is missing")
+    content_hash = _content_hash(payload)
+    if _has_existing_export(artifact, content_hash, "google_docs"):
+        return {
+            "artifact_id": artifact_id,
+            "status": artifact.get("status"),
+            "version": artifact.get("version"),
+            "doc_url": artifact.get("doc_url", ""),
+            "doc_id": artifact.get("doc_id", ""),
+            "drive_file_name": artifact.get("drive_file_name", ""),
+        }
+    try:
+        validate_export_coverage("lesson_plan", payload)
+    except ArtifactExportCoverageError as exc:
+        _mark_export_failed(
+            ref,
+            original_status,
+            original_is_current,
+            str(exc),
+            was_confirmed=was_confirmed,
+        )
+        raise
 
     assert_google_oauth_valid(lecturer_id, ["documents", "drive.file"])
 
@@ -532,6 +620,7 @@ def export_lesson_plan_draft_to_google_docs(
         ref.update(
             {
                 "status": original_status if was_confirmed else "failed_export",
+                "export_status": "failed",
                 "export_error": safe_error,
                 "is_current": original_is_current if was_confirmed else False,
                 "updated_at": _now(),
@@ -554,6 +643,8 @@ def export_lesson_plan_draft_to_google_docs(
         "drive_file_name": doc_result.get("drive_file_name", drive_file_name),
         "drive_folder_id": doc_result.get("drive_folder_id", folder_id),
         "export_status": "exported",
+        "content_hash": content_hash,
+        "export_idempotency_key": _export_idempotency_key(artifact_id, "google_docs", content_hash),
         "content_source": "agent_generated",
         "content_stale": False,
         "sync_error": "",
@@ -600,6 +691,34 @@ def export_lab_draft_to_google_docs(
     was_confirmed = artifact.get("status") == "confirmed"
     original_status = str(artifact.get("status") or "")
     original_is_current = bool(artifact.get("is_current", False))
+    content_hash = _content_hash(payload)
+    if _has_existing_export(artifact, content_hash, "google_docs"):
+        saved_metadata = artifact.get("metadata") or {}
+        return {
+            "artifact_id": artifact_id,
+            "status": artifact.get("status"),
+            "version": artifact.get("version"),
+            "doc_url": artifact.get("doc_url", ""),
+            "doc_id": artifact.get("doc_id", ""),
+            "drive_file_name": artifact.get("drive_file_name", ""),
+            "lecturer_doc_url": saved_metadata.get("lecturer_doc_url", ""),
+            "lecturer_doc_id": saved_metadata.get("lecturer_doc_id", ""),
+            "lecturer_drive_file_name": saved_metadata.get("lecturer_drive_file_name", ""),
+            "student_doc_url": saved_metadata.get("student_doc_url", ""),
+            "student_doc_id": saved_metadata.get("student_doc_id", ""),
+            "student_drive_file_name": saved_metadata.get("student_drive_file_name", ""),
+        }
+    try:
+        validate_export_coverage("lab", payload)
+    except ArtifactExportCoverageError as exc:
+        _mark_export_failed(
+            ref,
+            original_status,
+            original_is_current,
+            str(exc),
+            was_confirmed=was_confirmed,
+        )
+        raise
     next_version = (
         int(artifact.get("version") or 0)
         if was_confirmed and artifact.get("version")
@@ -644,6 +763,7 @@ def export_lab_draft_to_google_docs(
         ref.update(
             {
                 "status": original_status if was_confirmed else "failed_export",
+                "export_status": "failed",
                 "export_error": safe_error,
                 "is_current": original_is_current if was_confirmed else False,
                 "updated_at": _now(),
@@ -676,6 +796,8 @@ def export_lab_draft_to_google_docs(
         "drive_folder_url": folder_url,
         "metadata": metadata,
         "export_status": "exported",
+        "content_hash": content_hash,
+        "export_idempotency_key": _export_idempotency_key(artifact_id, "google_docs", content_hash),
         "content_source": "agent_generated",
         "content_stale": False,
         "sync_error": "",
@@ -729,6 +851,18 @@ def export_quiz_draft_to_google_forms(
     was_confirmed = artifact.get("status") == "confirmed"
     original_status = str(artifact.get("status") or "")
     original_is_current = bool(artifact.get("is_current", False))
+    content_hash = _content_hash(payload)
+    if _has_existing_export(artifact, content_hash, "google_forms"):
+        return {
+            "artifact_id": artifact_id,
+            "status": artifact.get("status"),
+            "version": artifact.get("version"),
+            "form_url": artifact.get("form_url", ""),
+            "form_id": artifact.get("form_id", ""),
+            "doc_url": artifact.get("doc_url", ""),
+            "doc_id": artifact.get("doc_id", ""),
+            "drive_file_name": artifact.get("drive_file_name", ""),
+        }
     next_version = (
         int(artifact.get("version") or 0)
         if was_confirmed and artifact.get("version")
@@ -764,6 +898,7 @@ def export_quiz_draft_to_google_forms(
         ref.update(
             {
                 "status": original_status if was_confirmed else "failed_export",
+                "export_status": "failed",
                 "export_error": safe_error,
                 "is_current": original_is_current if was_confirmed else False,
                 "updated_at": _now(),
@@ -790,6 +925,8 @@ def export_quiz_draft_to_google_forms(
         "drive_folder_url": folder_url,
         "metadata": metadata,
         "export_status": "exported",
+        "content_hash": content_hash,
+        "export_idempotency_key": _export_idempotency_key(artifact_id, "google_forms", content_hash),
         "content_source": "agent_generated",
         "content_stale": False,
         "sync_error": "",

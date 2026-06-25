@@ -123,8 +123,37 @@ class DocBuilder:
                 )
             )
             blocks.append(TextBlock(BlockType.BODY, activity.description))
+            if activity.teacher_actions:
+                blocks.append(TextBlock(BlockType.HEADING2, "Teacher Actions"))
+                for action in activity.teacher_actions:
+                    blocks.append(TextBlock(BlockType.BULLET, action))
+            if activity.student_actions:
+                blocks.append(TextBlock(BlockType.HEADING2, "Student Actions"))
+                for action in activity.student_actions:
+                    blocks.append(TextBlock(BlockType.BULLET, action))
             for step in activity.instructions:
                 blocks.append(TextBlock(BlockType.BULLET, step))
+            if activity.materials_table:
+                rows = [
+                    [
+                        str(item.get("item") or item.get("name") or ""),
+                        str(item.get("purpose") or item.get("use") or item.get("notes") or ""),
+                    ]
+                    for item in activity.materials_table
+                ]
+                blocks.append(TableBlock(headers=["Material", "Purpose"], rows=rows))
+            if activity.prompt_templates:
+                blocks.append(TextBlock(BlockType.HEADING2, "Prompt Templates"))
+                for prompt in activity.prompt_templates:
+                    blocks.append(TextBlock(BlockType.BODY, f"> {prompt}"))
+            if activity.code_blocks:
+                blocks.append(TextBlock(BlockType.HEADING2, "Code / Configuration Blocks"))
+                for block in activity.code_blocks:
+                    blocks.append(TextBlock(BlockType.BODY, self._format_code_block(block)))
+            if activity.assessment_checks:
+                blocks.append(TextBlock(BlockType.HEADING2, "Assessment Checks"))
+                for check in activity.assessment_checks:
+                    blocks.append(TextBlock(BlockType.BULLET, check))
             for outcome in activity.learning_outcomes:
                 blocks.append(
                     TextBlock(BlockType.BULLET, f"Outcome: {outcome}", italic=True)
@@ -208,3 +237,13 @@ class DocBuilder:
                 blocks.append(TextBlock(BlockType.BULLET, " ".join(parts)))
 
         return blocks
+
+    @staticmethod
+    def _format_code_block(block: dict | str) -> str:
+        if isinstance(block, str):
+            return f"```\n{block}\n```"
+        language = str(block.get("language") or block.get("type") or "").strip()
+        title = str(block.get("title") or "").strip()
+        code = str(block.get("code") or block.get("content") or block.get("text") or "").strip()
+        prefix = f"{title}\n" if title else ""
+        return f"{prefix}```{language}\n{code}\n```"

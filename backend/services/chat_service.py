@@ -266,6 +266,31 @@ def add_message(
     return result
 
 
+def update_assistant_message_metadata_for_run(
+    *,
+    batch_id: str,
+    chat_id: str,
+    run_id: str,
+    metadata: dict[str, Any],
+) -> None:
+    """Merge metadata into assistant messages for a run."""
+    for msg in (
+        _messages_col(batch_id, chat_id)
+        .where("run_id", "==", run_id)
+        .where("role", "==", "assistant")
+        .stream()
+    ):
+        existing = (msg.to_dict() or {}).get("metadata") or {}
+        if not isinstance(existing, dict):
+            existing = {}
+        msg.reference.update(
+            {
+                "metadata": {**existing, **metadata},
+                "updated_at": SERVER_TIMESTAMP,
+            }
+        )
+
+
 def list_messages(batch_id: str, chat_id: str, lecturer_id: str) -> list[dict[str, Any]]:
     """Return messages for a chat oldest-first, after ownership check."""
     chat = get_chat(batch_id, chat_id, lecturer_id)

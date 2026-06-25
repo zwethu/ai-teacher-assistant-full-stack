@@ -5,6 +5,7 @@ import rehypeSanitize from 'rehype-sanitize'
 import remarkGfm from 'remark-gfm'
 import type { ChatMessage } from '../../../entity/Chat'
 import { checkGoogleAuthStatus, startGoogleOAuth } from '../../../services/authService'
+import { generateDocsFromPendingArtifact } from '../../../services/chatService'
 import {
   exportArtifactDraftToGoogleDocs,
   exportQuizDraftToGoogleForms,
@@ -177,8 +178,11 @@ function ArtifactExportButton({
 }) {
   const metadata = msg.metadata || {}
   const artifactId = String(metadata.draft_artifact_id || '')
-  const artifactType = String(metadata.artifact_type || '')
+  const pendingArtifactType = String(metadata.pending_artifact_type || '')
+  const pendingExportable = metadata.pending_exportable === true
+  const artifactType = String(metadata.artifact_type || pendingArtifactType || '')
   const exportable = metadata.exportable === true
+  const runId = String(msg.run_id || '')
   const initialDocUrl = typeof metadata.doc_url === 'string' ? metadata.doc_url : ''
   const initialFormUrl = typeof metadata.form_url === 'string' ? metadata.form_url : ''
   const initialLecturerDocUrl =
@@ -238,8 +242,17 @@ function ArtifactExportButton({
   const hasConfirmedLink = Boolean(
     result?.doc_url || result?.form_url || result?.lecturer_doc_url || result?.student_doc_url,
   )
+  const canExportPending = Boolean(
+    pendingExportable &&
+      runId &&
+      msg.chat_id &&
+      (pendingArtifactType === 'lesson_plan' || pendingArtifactType === 'lab'),
+  )
 
-  if (!artifactId || !isExportableArtifactType(artifactType) || (!exportable && !hasConfirmedLink)) {
+  if (
+    !isExportableArtifactType(artifactType) ||
+    (!canExportPending && (!artifactId || (!exportable && !hasConfirmedLink)))
+  ) {
     return null
   }
 
@@ -262,13 +275,14 @@ function ArtifactExportButton({
 
     setExporting(true)
     try {
-      const exported =
-        artifactType === 'quiz'
+      const exported = canExportPending
+        ? await generateDocsFromPendingArtifact(batchId, msg.chat_id, runId)
+        : artifactType === 'quiz'
           ? await exportQuizDraftToGoogleForms(batchId, artifactId)
           : await exportArtifactDraftToGoogleDocs(batchId, artifactId)
       if (artifactType === 'lab' && (!exported.lecturer_doc_url || !exported.student_doc_url)) {
         try {
-          const artifact = await getArtifact(batchId, artifactId)
+          const artifact = await getArtifact(batchId, exported.artifact_id || artifactId)
           const refreshed = artifactToExportResult(artifact)
           setResult({
             ...exported,
@@ -304,9 +318,13 @@ function ArtifactExportButton({
   }
 
   const exportLabel =
-    artifactType === 'lab'
-      ? 'Export Lab Docs'
-      : artifactType === 'quiz'
+    canExportPending
+      ? artifactType === 'lab'
+        ? 'Generate Lab Docs'
+        : 'Generate Google Doc'
+      : artifactType === 'lab'
+        ? 'Export Lab Docs'
+        : artifactType === 'quiz'
         ? 'Export to Google Forms'
         : 'Export to Google Docs'
 

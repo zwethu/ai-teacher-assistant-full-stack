@@ -42,6 +42,7 @@ class AgentInvokeRequest(BaseModel):
     workflow_type: str | None = None
     week: int | None = None
     save_draft: bool = False
+    pending_artifact: bool = False
     connectors: ConnectorState = Field(default_factory=ConnectorState)
 
 
@@ -55,6 +56,56 @@ class AgentInvokeResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+_SAVE_DRAFT_WORKFLOWS = {
+    "lesson_plan",
+    "lesson_plan.generate",
+    "lab",
+    "lab.generate",
+    "assessment",
+    "assessment.generate",
+    "quiz",
+    "quiz.generate",
+}
+_WEEK_REQUIRED_WORKFLOWS = _SAVE_DRAFT_WORKFLOWS
+_PENDING_ARTIFACT_WORKFLOWS = {"lesson_plan", "lab"}
+
+
+def _validate_invoke_request(body: AgentInvokeRequest) -> None:
+    workflow_type = (body.workflow_type or "").strip()
+    if body.save_draft and body.pending_artifact:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="save_draft and pending_artifact cannot both be true",
+        )
+    if body.save_draft:
+        if workflow_type not in _SAVE_DRAFT_WORKFLOWS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="save_draft requires a supported workflow_type",
+            )
+        if workflow_type in _WEEK_REQUIRED_WORKFLOWS and body.week is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="week is required when save_draft is true",
+            )
+    if body.pending_artifact:
+        if body.save_draft:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="pending_artifact requires save_draft=false",
+            )
+        if workflow_type not in _PENDING_ARTIFACT_WORKFLOWS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="pending_artifact supports only lesson_plan or lab workflow_type",
+            )
+        if body.week is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="week is required when pending_artifact is true",
+            )
+
 
 @router.post("/invoke", response_model=AgentInvokeResponse)
 async def invoke_agent(
@@ -71,6 +122,7 @@ async def invoke_agent(
     to agentRuns/{run_id}/events before the agent finishes.
     """
     lecturer_id: str = user["uid"]
+    _validate_invoke_request(body)
 
     chat_id = body.chat_id
     if chat_id:
@@ -106,6 +158,7 @@ async def invoke_agent(
         workflow_type=body.workflow_type or "",
         week=body.week,
         save_draft=body.save_draft,
+        pending_artifact=body.pending_artifact,
     )
 
     return AgentInvokeResponse(

@@ -48,8 +48,11 @@ from services.agent_sessions import (
     mark_agent_run_draft_failed,
     mark_agent_run_draft_saved,
     mark_agent_run_failed,
+    mark_agent_run_pending_artifact,
 )
 from services.artifact_service import (
+    content_hash,
+    render_preview_markdown,
     save_lab_draft_from_session,
     save_lesson_plan_draft_from_session,
     save_quiz_draft_from_session,
@@ -91,6 +94,7 @@ async def start_chat_run(
     workflow_type: str = "",
     week: int | None = None,
     save_draft: bool = False,
+    pending_artifact: bool = False,
 ) -> dict[str, Any]:
     """Persist the user message, create a run, start the agent in the background.
 
@@ -168,6 +172,7 @@ async def start_chat_run(
         workflow_type=workflow_type,
         week=week,
         save_draft=save_draft,
+        pending_artifact=pending_artifact,
         artifact_sync_preflight=artifact_sync_preflight,
     )
 
@@ -184,6 +189,7 @@ async def start_chat_run(
         workflow_type=workflow_type,
         week=week,
         save_draft=save_draft,
+        pending_artifact=pending_artifact,
         artifact_sync_preflight=artifact_sync_preflight,
     )
 
@@ -230,6 +236,7 @@ def _build_session_state(
     workflow_type: str = "",
     week: int | None = None,
     save_draft: bool = False,
+    pending_artifact: bool = False,
     artifact_sync_preflight: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the trusted session state payload sent to the agent.
@@ -258,6 +265,7 @@ def _build_session_state(
         "workflow_type": workflow_type,
         "requested_week": week,
         "save_draft": save_draft,
+        "pending_artifact": pending_artifact,
         "artifact_sync_status": (artifact_sync_preflight or {}).get("status", ""),
         "artifact_sync_summary": (artifact_sync_preflight or {}).get("summary", ""),
     }
@@ -483,6 +491,92 @@ def maybe_save_generated_draft_from_session(
     return draft
 
 
+def maybe_store_pending_artifact_from_session(
+    *,
+    batch_id: str,
+    lecturer_id: str,
+    chat_id: str,
+    run_id: str,
+    state: dict[str, Any],
+    rendered_markdown: str,
+    lecturer_email: str,
+    workflow_type: str = "",
+    requested_week: int | None = None,
+) -> dict[str, Any] | None:
+    """Store a run-scoped pending artifact for normal chat export confirmation."""
+    del lecturer_id, lecturer_email
+    normalized_workflow = workflow_type.strip().lower()
+    candidates = {
+        "lesson_plan": ("lesson_plan", extract_lesson_plan_full_from_state),
+        "lesson_plan.generate": ("lesson_plan", extract_lesson_plan_full_from_state),
+        "lab": ("lab", extract_lab_full_from_state),
+        "lab.generate": ("lab", extract_lab_full_from_state),
+    }
+    selected = candidates.get(normalized_workflow)
+    if not selected:
+        logger.info(
+            "pending artifact skipped run_id=%s reason=unsupported_workflow_type workflow_type=%s",
+            run_id,
+            workflow_type,
+        )
+        return None
+
+    artifact_type, extractor = selected
+    payload = extractor(state)
+    if not payload:
+        logger.info(
+            "pending artifact skipped run_id=%s workflow_type=%s artifact_type=%s reason=missing_payload",
+            run_id,
+            workflow_type,
+            artifact_type,
+        )
+        return None
+
+    expected_week = _coerce_week(requested_week)
+    payload_week = _coerce_week(payload.get("week"))
+    if expected_week is None or payload_week != expected_week:
+        raise RuntimeError(
+            f"{artifact_type} pending artifact week mismatch: requested_week={expected_week}, "
+            f"payload_week={payload_week}"
+        )
+
+    preview_markdown, preview_renderer_version = render_preview_markdown(
+        artifact_type,
+        payload,
+        rendered_markdown,
+    )
+    pending = {
+        "pending_artifact_id": f"pending_{run_id}",
+        "artifact_type": artifact_type,
+        "workflow_type": artifact_type,
+        "week": payload_week,
+        "title": str(payload.get("title") or ("Lesson Plan" if artifact_type == "lesson_plan" else "Lab")),
+        "content_json": payload,
+        "content_hash": content_hash(payload),
+        "preview_markdown": preview_markdown,
+        "preview_renderer_version": preview_renderer_version,
+        "content_schema_version": "v2",
+        "source_run_id": run_id,
+        "source_chat_id": chat_id,
+        "batch_id": batch_id,
+        "status": "pending_export",
+    }
+    mark_agent_run_pending_artifact(
+        batch_id=batch_id,
+        chat_id=chat_id,
+        run_id=run_id,
+        pending_artifact=pending,
+    )
+    logger.info(
+        "pending artifact stored run_id=%s type=%s week=%s hash=%s",
+        run_id,
+        artifact_type,
+        payload_week,
+        pending["content_hash"],
+    )
+    return pending
+
+
 def _draft_message_metadata(draft: dict[str, Any] | None) -> dict[str, Any]:
     if not draft:
         return {}
@@ -493,6 +587,21 @@ def _draft_message_metadata(draft: dict[str, Any] | None) -> dict[str, Any]:
         "content_hash": draft.get("content_hash"),
         "preview_renderer_version": draft.get("preview_renderer_version"),
         "exportable": True,
+    }
+
+
+def _pending_artifact_message_metadata(pending: dict[str, Any] | None) -> dict[str, Any]:
+    if not pending:
+        return {}
+    return {
+        "pending_artifact_id": str(pending.get("pending_artifact_id") or ""),
+        "pending_artifact_type": str(pending.get("artifact_type") or ""),
+        "pending_artifact_week": pending.get("week"),
+        "pending_artifact_content_hash": str(pending.get("content_hash") or ""),
+        "pending_exportable": True,
+        "pending_export_target": "google_docs",
+        "artifact_type": str(pending.get("artifact_type") or ""),
+        "week": pending.get("week"),
     }
 
 
@@ -636,6 +745,32 @@ async def _run_agent_background(
                     workflow_type=str(session_state.get("workflow_type") or ""),
                     requested_week=_coerce_week(session_state.get("requested_week")),
                 )
+            elif bool(session_state.get("pending_artifact")):
+                session_state_after = await get_agent_session_state(
+                    resource_name=get_agent_engine_resource_name(),
+                    user_id=lecturer_id,
+                    session_id=agent_session_id,
+                )
+                pending = maybe_store_pending_artifact_from_session(
+                    batch_id=batch_id,
+                    lecturer_id=lecturer_id,
+                    chat_id=chat_id,
+                    run_id=run_id,
+                    state=session_state_after,
+                    rendered_markdown=final_text,
+                    lecturer_email=str(
+                        session_state_after.get("lecturer_email")
+                        or session_state.get("lecturer_email")
+                        or ""
+                    ),
+                    workflow_type=str(session_state.get("workflow_type") or ""),
+                    requested_week=_coerce_week(session_state.get("requested_week")),
+                )
+                if pending:
+                    metadata = _pending_artifact_message_metadata(pending)
+                    preview_markdown = str(pending.get("preview_markdown") or "").strip()
+                    if preview_markdown:
+                        assistant_message_text = preview_markdown
             else:
                 logger.info("generated draft save skipped run_id=%s reason=save_draft_false", run_id)
             if draft:

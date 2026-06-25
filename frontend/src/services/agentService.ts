@@ -11,6 +11,7 @@ export type AgentInvokePayload = {
   workflow_type?: string
   week?: number
   save_draft?: boolean
+  pending_artifact?: boolean
   connectors?: AgentConnectors
 }
 
@@ -38,6 +39,13 @@ export async function generateAssessment(
 }
 
 export async function generateLessonPlan(
+  _token: string,
+  payload: AgentInvokePayload | Record<string, unknown>,
+) {
+  return invokeAgent(payload)
+}
+
+export async function generateLab(
   _token: string,
   payload: AgentInvokePayload | Record<string, unknown>,
 ) {

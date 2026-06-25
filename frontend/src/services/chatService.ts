@@ -1,5 +1,6 @@
 import type { Chat, ChatMessage } from '../entity/Chat'
 import api from '../lib/api'
+import type { LessonPlanExportResult } from './artifactService'
 
 // ---------------------------------------------------------------------------
 // Chat CRUD
@@ -58,5 +59,16 @@ export async function sendMessage(
     rtdb_run_path: string
     status: 'running' | 'done' | 'failed'
   }>(`/batches/${batchId}/chats/${chatId}/messages`, { content, connectors })
+  return res.data
+}
+
+export async function generateDocsFromPendingArtifact(
+  batchId: string,
+  chatId: string,
+  runId: string,
+): Promise<LessonPlanExportResult & { pending_artifact_id?: string; artifact_type?: string }> {
+  const res = await api.post<LessonPlanExportResult & { pending_artifact_id?: string; artifact_type?: string }>(
+    `/batches/${batchId}/chats/${chatId}/runs/${runId}/pending-artifact/generate-docs`,
+  )
   return res.data
 }

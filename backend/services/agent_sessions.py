@@ -64,6 +64,7 @@ def create_agent_run_record(
     workflow_type: str = "",
     week: int | None = None,
     save_draft: bool = False,
+    pending_artifact: bool = False,
     artifact_sync_preflight: dict[str, Any] | None = None,
 ) -> None:
     connectors = {
@@ -85,6 +86,7 @@ def create_agent_run_record(
             "workflow_type": workflow_type,
             "week": week,
             "save_draft": save_draft,
+            "pending_artifact": pending_artifact,
             "artifact_sync_preflight": artifact_sync_preflight or {},
             "created_at": SERVER_TIMESTAMP,
             "updated_at": SERVER_TIMESTAMP,
@@ -188,6 +190,42 @@ def mark_agent_run_draft_failed(
     )
 
 
+def mark_agent_run_pending_artifact(
+    *,
+    batch_id: str,
+    chat_id: str,
+    run_id: str,
+    pending_artifact: dict[str, Any],
+) -> None:
+    _run_ref(batch_id, chat_id, run_id).update(
+        {
+            "pending_artifact": pending_artifact,
+            "pending_artifact_id": str(pending_artifact.get("pending_artifact_id") or ""),
+            "pending_artifact_status": str(pending_artifact.get("status") or ""),
+            "updated_at": SERVER_TIMESTAMP,
+        }
+    )
+
+
+def mark_agent_run_pending_artifact_exported(
+    *,
+    batch_id: str,
+    chat_id: str,
+    run_id: str,
+    pending_artifact: dict[str, Any],
+) -> None:
+    _run_ref(batch_id, chat_id, run_id).update(
+        {
+            "pending_artifact": pending_artifact,
+            "pending_artifact_id": str(pending_artifact.get("pending_artifact_id") or ""),
+            "pending_artifact_status": str(pending_artifact.get("status") or ""),
+            "draft_artifact_id": str(pending_artifact.get("artifact_id") or ""),
+            "draft_status": "exported",
+            "updated_at": SERVER_TIMESTAMP,
+        }
+    )
+
+
 def _chat_ref(batch_id: str, chat_id: str):
     return (
         get_firestore()
@@ -215,6 +253,9 @@ def _run_to_dict(data: dict[str, Any]) -> dict[str, Any]:
         "workflow_type": str(data.get("workflow_type") or ""),
         "week": data.get("week"),
         "save_draft": bool(data.get("save_draft", False)),
+        "pending_artifact": bool(data.get("pending_artifact", False)),
+        "pending_artifact_id": str(data.get("pending_artifact_id") or ""),
+        "pending_artifact_status": str(data.get("pending_artifact_status") or ""),
         "artifact_sync_preflight": data.get("artifact_sync_preflight") or {},
         "draft_artifact_id": str(data.get("draft_artifact_id") or ""),
         "draft_status": str(data.get("draft_status") or ""),
@@ -253,3 +294,27 @@ def get_agent_run(
     if not run_snap.exists:
         return None
     return _run_to_dict(run_snap.to_dict() or {})
+
+
+def get_agent_run_with_pending_artifact(
+    *,
+    batch_id: str,
+    chat_id: str,
+    run_id: str,
+    lecturer_id: str,
+) -> dict[str, Any] | None:
+    """Return durable run metadata including pending artifact after ownership check."""
+    chat_snap = _chat_ref(batch_id, chat_id).get()
+    if not chat_snap.exists:
+        return None
+    chat_data = chat_snap.to_dict() or {}
+    if chat_data.get("lecturer_id") != lecturer_id:
+        return None
+    run_snap = _run_ref(batch_id, chat_id, run_id).get()
+    if not run_snap.exists:
+        return None
+    data = run_snap.to_dict() or {}
+    result = _run_to_dict(data)
+    pending = data.get("pending_artifact")
+    result["pending_artifact"] = pending if isinstance(pending, dict) else None
+    return result

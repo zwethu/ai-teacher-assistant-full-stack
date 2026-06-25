@@ -7,7 +7,17 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from services.agent_gateway import start_chat_run
-from services.agent_sessions import get_agent_run
+from services.agent_sessions import (
+    get_agent_run,
+    get_agent_run_with_pending_artifact,
+    mark_agent_run_pending_artifact_exported,
+)
+from services.artifact_service import (
+    content_hash,
+    export_lab_draft_to_google_docs,
+    export_lesson_plan_draft_to_google_docs,
+    save_pending_artifact_as_draft,
+)
 from services.batch_service import get_batch
 from services.chat_service import (
     create_chat,
@@ -15,13 +25,24 @@ from services.chat_service import (
     get_chat,
     list_chats,
     list_messages,
+    update_assistant_message_metadata_for_run,
     update_chat_title,
+)
+from services.google_workspace.credentials import (
+    GoogleOAuthInvalidError,
+    GoogleOAuthRequiredError,
 )
 from utils.firebase_auth import CurrentUser, get_current_user
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/batches/{batch_id}/chats", tags=["chats"])
+
+GOOGLE_OAUTH_REQUIRED_DETAIL = {
+    "code": "GOOGLE_OAUTH_REQUIRED",
+    "message": "Connect Google Workspace before exporting.",
+    "connect_url": "/auth/google-scopes",
+}
 
 _WEEK_RE = re.compile(r"\bweek\s*(\d{1,2})\b", re.IGNORECASE)
 _ORDINAL_WEEK_RE = re.compile(
@@ -240,11 +261,12 @@ async def send_message_endpoint(
     proposal = propose_chat_workflow_intent(body.content)
     if proposal:
         logger.info(
-            "chat workflow proposal detected without autosave batch_id=%s chat_id=%s proposal=%s",
+            "chat workflow proposal detected batch_id=%s chat_id=%s proposal=%s",
             batch_id,
             chat_id,
             proposal,
         )
+    use_pending = bool(proposal and proposal.get("workflow_type") in {"lesson_plan", "lab"})
 
     return await start_chat_run(
         user_message=body.content,
@@ -254,7 +276,124 @@ async def send_message_endpoint(
         lecturer_email=current_user.get("email", ""),
         connectors=body.connectors.model_dump(),
         background_tasks=background_tasks,
-        workflow_type="",
-        week=None,
+        workflow_type=str(proposal.get("workflow_type") or "") if use_pending else "",
+        week=int(proposal["week"]) if use_pending else None,
         save_draft=False,
+        pending_artifact=use_pending,
     )
+
+
+@router.post("/{chat_id}/runs/{run_id}/pending-artifact/generate-docs", response_model=dict)
+async def generate_docs_from_pending_artifact_endpoint(
+    batch_id: str,
+    chat_id: str,
+    run_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Create/export Google Docs from the exact pending artifact JSON for a run."""
+    lecturer_id: str = current_user["uid"]
+    if get_batch(batch_id, lecturer_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch not found")
+    chat = get_chat(batch_id, chat_id, lecturer_id)
+    if chat is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
+    run = get_agent_run_with_pending_artifact(
+        batch_id=batch_id,
+        chat_id=chat_id,
+        run_id=run_id,
+        lecturer_id=lecturer_id,
+    )
+    if run is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    pending = run.get("pending_artifact")
+    if not isinstance(pending, dict):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pending artifact not found")
+
+    status_value = str(pending.get("status") or "")
+    artifact_type = str(pending.get("artifact_type") or "")
+    if artifact_type not in {"lesson_plan", "lab"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pending artifact type is not supported")
+    if status_value not in {"pending_export", "exported"}:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Pending artifact is not exportable")
+
+    content = pending.get("content_json")
+    if not isinstance(content, dict) or not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pending artifact content is missing")
+    expected_hash = str(pending.get("content_hash") or "")
+    actual_hash = content_hash(content)
+    if expected_hash and expected_hash != actual_hash:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Pending artifact content hash mismatch")
+
+    try:
+        artifact_id = str(pending.get("artifact_id") or "")
+        if not artifact_id:
+            draft = save_pending_artifact_as_draft(
+                batch_id=batch_id,
+                lecturer_id=lecturer_id,
+                pending_artifact=pending,
+                lecturer_email=current_user.get("email", ""),
+            )
+            artifact_id = str(draft.get("id") or draft.get("artifact_id") or "")
+        if artifact_type == "lab":
+            result = export_lab_draft_to_google_docs(batch_id, artifact_id, lecturer_id)
+        else:
+            result = export_lesson_plan_draft_to_google_docs(batch_id, artifact_id, lecturer_id)
+    except (GoogleOAuthRequiredError, GoogleOAuthInvalidError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=GOOGLE_OAUTH_REQUIRED_DETAIL,
+        ) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("pending artifact export failed run_id=%s", run_id)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    exported_pending = {
+        **pending,
+        "status": "exported",
+        "artifact_id": artifact_id,
+        "export_result": result,
+    }
+    mark_agent_run_pending_artifact_exported(
+        batch_id=batch_id,
+        chat_id=chat_id,
+        run_id=run_id,
+        pending_artifact=exported_pending,
+    )
+
+    metadata = {
+        "draft_artifact_id": artifact_id,
+        "artifact_id": artifact_id,
+        "artifact_type": artifact_type,
+        "week": pending.get("week"),
+        "exportable": False,
+        "pending_exportable": False,
+        "pending_artifact_id": str(pending.get("pending_artifact_id") or ""),
+        "pending_artifact_type": artifact_type,
+        "pending_artifact_week": pending.get("week"),
+        "pending_artifact_content_hash": actual_hash,
+        "version": result.get("version"),
+        "drive_file_name": result.get("drive_file_name", ""),
+        "doc_url": result.get("doc_url", ""),
+        "doc_id": result.get("doc_id", ""),
+        "lecturer_doc_url": result.get("lecturer_doc_url", ""),
+        "lecturer_doc_id": result.get("lecturer_doc_id", ""),
+        "lecturer_drive_file_name": result.get("lecturer_drive_file_name", ""),
+        "student_doc_url": result.get("student_doc_url", ""),
+        "student_doc_id": result.get("student_doc_id", ""),
+        "student_drive_file_name": result.get("student_drive_file_name", ""),
+    }
+    update_assistant_message_metadata_for_run(
+        batch_id=batch_id,
+        chat_id=chat_id,
+        run_id=run_id,
+        metadata={key: value for key, value in metadata.items() if value not in ("", None)},
+    )
+
+    return {
+        **result,
+        "artifact_id": artifact_id,
+        "pending_artifact_id": str(pending.get("pending_artifact_id") or ""),
+        "artifact_type": artifact_type,
+    }

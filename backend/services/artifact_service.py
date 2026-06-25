@@ -69,12 +69,26 @@ def _content_hash(payload: dict[str, Any]) -> str:
     return hashlib.sha256(_canonical_content_json(payload).encode("utf-8")).hexdigest()
 
 
+def content_hash(payload: dict[str, Any]) -> str:
+    """Public content hash helper for pending-artifact integrity checks."""
+    return _content_hash(payload)
+
+
 def _render_preview_markdown(artifact_type: str, payload: dict[str, Any], fallback: str) -> tuple[str, str]:
     if artifact_type == "lesson_plan":
         return render_lesson_plan_markdown(payload), LESSON_PLAN_MARKDOWN_RENDERER_VERSION
     if artifact_type == "lab":
         return render_lab_markdown(payload), LAB_MARKDOWN_RENDERER_VERSION
     return fallback, "agent_final_text.v1"
+
+
+def render_preview_markdown(
+    artifact_type: str,
+    payload: dict[str, Any],
+    fallback: str = "",
+) -> tuple[str, str]:
+    """Public preview renderer used by pending artifacts and saved drafts."""
+    return _render_preview_markdown(artifact_type, payload, fallback)
 
 
 def _export_idempotency_key(artifact_id: str, export_target: str, content_hash: str) -> str:
@@ -420,6 +434,45 @@ def save_lab_draft_from_session(
         lecturer_email=lecturer_email,
         default_title="Untitled Lab",
         missing_week_message="lab_full.week is required for draft artifact save",
+    )
+
+
+def save_pending_artifact_as_draft(
+    *,
+    batch_id: str,
+    lecturer_id: str,
+    pending_artifact: dict[str, Any],
+    lecturer_email: str = "",
+) -> dict[str, Any]:
+    """Create/update a real draft artifact from immutable pending-artifact JSON."""
+    artifact_type = str(pending_artifact.get("artifact_type") or "").strip()
+    payload = pending_artifact.get("content_json")
+    if artifact_type not in {"lesson_plan", "lab"}:
+        raise RuntimeError("Pending artifact type is not exportable")
+    if not isinstance(payload, dict) or not payload:
+        raise RuntimeError("Pending artifact content is missing")
+
+    expected_hash = str(pending_artifact.get("content_hash") or "")
+    actual_hash = _content_hash(payload)
+    if expected_hash and expected_hash != actual_hash:
+        raise RuntimeError("Pending artifact content hash mismatch")
+
+    common = {
+        "batch_id": batch_id,
+        "lecturer_id": lecturer_id,
+        "chat_id": str(pending_artifact.get("source_chat_id") or ""),
+        "run_id": str(pending_artifact.get("source_run_id") or ""),
+        "rendered_markdown": str(pending_artifact.get("preview_markdown") or ""),
+        "lecturer_email": lecturer_email,
+    }
+    if artifact_type == "lesson_plan":
+        return save_lesson_plan_draft_from_session(
+            lesson_plan_payload=payload,
+            **common,
+        )
+    return save_lab_draft_from_session(
+        lab_payload=payload,
+        **common,
     )
 
 

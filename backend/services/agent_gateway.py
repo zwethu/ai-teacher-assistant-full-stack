@@ -379,6 +379,28 @@ def _coerce_week(value: Any) -> int | None:
     return week if week >= 1 else None
 
 
+def _active_workflow_fallback(
+    state: dict[str, Any],
+    rendered_markdown: str,
+) -> tuple[str, int | None]:
+    """Infer a workflow only when the current response clearly generated an artifact."""
+    active_type = str(state.get("active_artifact_type") or "").strip().lower()
+    active_week = _coerce_week(state.get("active_week"))
+    if active_type not in {"lesson_plan", "lab", "quiz", "assessment"}:
+        return "", None
+
+    normalized = "assessment" if active_type in {"quiz", "assessment"} else active_type
+    text = rendered_markdown.lower()
+    markers = {
+        "lesson_plan": ("lesson_plan_full", "export to google docs", "lesson plan"),
+        "lab": ("lab_full", "export lab docs", "lab document generation", "student instructions"),
+        "assessment": ("quiz_full", "export to google forms", "google form", "quiz"),
+    }
+    if not any(marker in text for marker in markers[normalized]):
+        return "", None
+    return normalized, active_week
+
+
 def maybe_save_generated_draft_from_session(
     *,
     batch_id: str,
@@ -394,11 +416,21 @@ def maybe_save_generated_draft_from_session(
     """Save a generated draft using the trusted workflow type for this run."""
     normalized_workflow = workflow_type.strip().lower()
     if not normalized_workflow:
-        logger.info(
-            "generated draft save skipped run_id=%s reason=empty_workflow_type",
-            run_id,
-        )
-        return None
+        normalized_workflow, fallback_week = _active_workflow_fallback(state, rendered_markdown)
+        if normalized_workflow:
+            requested_week = requested_week or fallback_week
+            logger.info(
+                "generated draft save using active workflow fallback run_id=%s workflow_type=%s week=%s",
+                run_id,
+                normalized_workflow,
+                requested_week,
+            )
+        else:
+            logger.info(
+                "generated draft save skipped run_id=%s reason=empty_workflow_type",
+                run_id,
+            )
+            return None
 
     candidates = {
         "lesson_plan": (

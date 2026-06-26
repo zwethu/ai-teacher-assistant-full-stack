@@ -23,7 +23,8 @@ export default function Chat() {
         messagesEndRef={state.messagesEndRef}
         textareaRef={state.textareaRef}
         handleSend={state.handleSend}
-        handleGeneratePreview={state.handleGeneratePreview}
+        activeGenerateMode={state.activeGenerateMode}
+        setActiveGenerateMode={state.setActiveGenerateMode}
         handleInputKeyDown={state.handleInputKeyDown}
         handleTextareaInput={state.handleTextareaInput}
         showWelcome={state.showWelcome}

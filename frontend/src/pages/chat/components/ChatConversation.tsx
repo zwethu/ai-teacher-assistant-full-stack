@@ -6,6 +6,8 @@ import { MessageRow, ThinkingIndicator } from './MessageRow'
 import { ConnectorToggles, type ConnectorsState } from './ConnectorToggles'
 import type { RunUiState } from '../runTypes'
 
+export type GenerateMode = 'lesson_plan' | 'lab'
+
 type Props = {
   input: string
   sending: boolean
@@ -18,11 +20,9 @@ type Props = {
   onSend: () => void
   connectors: ConnectorsState
   onConnectorsChange: (key: keyof ConnectorsState, value: boolean) => void
-  onGeneratePreview: (input: {
-    artifactType: 'lesson_plan' | 'lab'
-    week: number
-    topic: string
-  }) => void
+  activeGenerateMode: GenerateMode | null
+  onSelectGenerateMode: (mode: GenerateMode) => void
+  onClearGenerateMode: () => void
 }
 
 export function ChatInput({
@@ -37,29 +37,25 @@ export function ChatInput({
   onSend,
   connectors,
   onConnectorsChange,
-  onGeneratePreview,
+  activeGenerateMode,
+  onSelectGenerateMode,
+  onClearGenerateMode,
 }: Props) {
   const [menuOpen, setMenuOpen] = useState(false)
-  const [modalType, setModalType] = useState<'lesson_plan' | 'lab' | null>(null)
-  const [week, setWeek] = useState('1')
-  const [topic, setTopic] = useState('')
 
-  function openModal(type: 'lesson_plan' | 'lab') {
-    setModalType(type)
+  function selectGenerateMode(mode: GenerateMode) {
+    onSelectGenerateMode(mode)
     setMenuOpen(false)
+    requestAnimationFrame(() => textareaRef.current?.focus())
   }
 
-  function closeModal() {
-    setModalType(null)
-    setTopic('')
-  }
-
-  function submitPreview() {
-    const parsedWeek = Number.parseInt(week, 10)
-    if (!modalType || Number.isNaN(parsedWeek) || parsedWeek < 1) return
-    onGeneratePreview({ artifactType: modalType, week: parsedWeek, topic })
-    closeModal()
-  }
+  const modeLabel = activeGenerateMode === 'lab' ? 'Lab Preview' : 'Lesson Plan Preview'
+  const placeholder =
+    activeGenerateMode === 'lesson_plan'
+      ? 'Describe the lesson plan preview you want, e.g. Week 1 intro to Power BI...'
+      : activeGenerateMode === 'lab'
+        ? 'Describe the lab preview you want, e.g. Week 3 Firebase guestbook lab...'
+        : 'Message your teaching assistant...'
 
   return (
     <footer
@@ -83,7 +79,7 @@ export function ChatInput({
               <div className="absolute bottom-full left-0 z-30 mb-2 w-56 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl">
                 <button
                   type="button"
-                  onClick={() => openModal('lesson_plan')}
+                  onClick={() => selectGenerateMode('lesson_plan')}
                   className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-emerald-50"
                 >
                   <BookOpen className="h-4 w-4 text-emerald-600" />
@@ -91,7 +87,7 @@ export function ChatInput({
                 </button>
                 <button
                   type="button"
-                  onClick={() => openModal('lab')}
+                  onClick={() => selectGenerateMode('lab')}
                   className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-emerald-50"
                 >
                   <FlaskConical className="h-4 w-4 text-emerald-600" />
@@ -106,6 +102,24 @@ export function ChatInput({
             disabled={disabled || sending}
           />
         </div>
+        {activeGenerateMode && (
+          <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50/90 px-3 py-1.5 text-sm font-medium text-emerald-800 shadow-sm">
+            {activeGenerateMode === 'lab' ? (
+              <FlaskConical className="h-4 w-4" />
+            ) : (
+              <BookOpen className="h-4 w-4" />
+            )}
+            <span>{modeLabel}</span>
+            <button
+              type="button"
+              onClick={onClearGenerateMode}
+              className="inline-flex h-5 w-5 items-center justify-center rounded-full text-emerald-700 hover:bg-emerald-100"
+              aria-label={`Clear ${modeLabel}`}
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
         <div className="flex items-end gap-2 p-2 rounded-[28px] bg-white/55 border border-white/60 shadow-[0_8px_32px_rgba(15,23,42,0.08)]">
           <textarea
             ref={textareaRef}
@@ -114,7 +128,7 @@ export function ChatInput({
             onChange={(e) => onInputChange(e.target.value)}
             onInput={onTextareaInput}
             onKeyDown={onInputKeyDown}
-            placeholder="Message your teaching assistant…"
+            placeholder={placeholder}
             disabled={disabled || sending}
             className="flex-1 resize-none bg-transparent px-4 py-3 text-[15px] text-slate-800 placeholder:text-slate-400 focus:outline-none disabled:cursor-not-allowed max-h-40 overflow-y-auto leading-6"
           />
@@ -132,62 +146,6 @@ export function ChatInput({
           Enter to send · Shift+Enter for new line
         </p>
       </div>
-      {modalType && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/20 px-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-xl border border-white/70 bg-white p-4 shadow-2xl">
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-base font-semibold text-slate-900">
-                {modalType === 'lab' ? 'Lab Preview' : 'Lesson Plan Preview'}
-              </h3>
-              <button
-                type="button"
-                onClick={closeModal}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100"
-                aria-label="Close"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <label className="mb-3 block">
-              <span className="mb-1 block text-sm font-medium text-slate-700">Week</span>
-              <input
-                type="number"
-                min={1}
-                value={week}
-                onChange={(event) => setWeek(event.target.value)}
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
-              />
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-sm font-medium text-slate-700">Topic / instructions</span>
-              <textarea
-                rows={4}
-                value={topic}
-                onChange={(event) => setTopic(event.target.value)}
-                className="w-full resize-none rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
-                placeholder="Add topic, constraints, duration, or teaching preferences..."
-              />
-            </label>
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={closeModal}
-                className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={submitPreview}
-                disabled={disabled || sending}
-                className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Generate Preview
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </footer>
   )
 }

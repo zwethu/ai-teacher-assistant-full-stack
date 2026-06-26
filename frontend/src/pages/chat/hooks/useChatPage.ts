@@ -33,6 +33,7 @@ import {
 } from '../../../services/agentRunStream'
 import { emitChatCreated } from '../../../utils/chatEvents'
 import type { RunUiState } from '../runTypes'
+import type { GenerateMode } from '../components/ChatConversation'
 
 type ChatLocationState = {
   batchId?: string
@@ -45,11 +46,6 @@ type ConnectorsState = {
 }
 
 type RouteHydrationState = 'idle' | 'hydrating' | 'hydrated' | 'invalid'
-type GeneratePreviewInput = {
-  artifactType: 'lesson_plan' | 'lab'
-  week: number
-  topic: string
-}
 type StartRunResult = {
   run_id: string
   chat_id?: string
@@ -137,6 +133,7 @@ export function useChatPage() {
   const runDeltaIndexesRef = useRef<Record<string, Set<number>>>({})
   const runFallbackTimerRef = useRef<number | null>(null)
   const runPollIntervalRef = useRef<Record<string, number>>({})
+  const workflowModeRunIdsRef = useRef<Record<string, GenerateMode>>({})
 
   const [routeHydration, setRouteHydration] = useState<RouteHydrationState>('idle')
   const [batches, setBatches] = useState<Batch[]>([])
@@ -153,6 +150,7 @@ export function useChatPage() {
   const [messagesLoading, setMessagesLoading] = useState(false)
 
   const [input, setInput] = useState('')
+  const [activeGenerateMode, setActiveGenerateMode] = useState<GenerateMode | null>(null)
   const [sending, setSending] = useState(false)
   const [currentRunId, setCurrentRunId] = useState<string | null>(null)
   const [runStates, setRunStates] = useState<Record<string, RunUiState>>({})
@@ -406,6 +404,7 @@ export function useChatPage() {
     runUnsubscribesRef.current[runId]?.()
     delete runUnsubscribesRef.current[runId]
     delete runDeltaIndexesRef.current[runId]
+    delete workflowModeRunIdsRef.current[runId]
     stopFallbackTimers(runId)
   }
 
@@ -485,54 +484,33 @@ export function useChatPage() {
 
     setInput('')
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
-    await startRunInChat({
-      batchId,
-      chat,
-      message: content,
-      invoke: () => sendMessage(batchId, chatId, content, connectors),
-      updateTitleIfNew: true,
-    })
-  }
-
-  async function handleGeneratePreview(input: GeneratePreviewInput) {
-    if (!selectedBatch || sending) return
-    const topic = input.topic.trim()
-    const label = input.artifactType === 'lab' ? 'lab preview' : 'lesson plan preview'
-    const content =
-      input.artifactType === 'lab'
-        ? `Generate a complete Week ${input.week} lab preview. Do not create Google Docs. The backend will store this as a pending preview only. Topic/instructions: ${topic || 'Use the course context and ask only if essential details are missing.'}`
-        : `Generate a complete Week ${input.week} lesson plan preview. Do not create Google Docs. The backend will store this as a pending preview only. Topic/instructions: ${topic || 'Use the course context and ask only if essential details are missing.'}`
-
-    let chat = activeChat
-    if (!chat) {
-      chat = await handleNewChat(`Week ${input.week} ${label}`)
-      if (!chat) return
-    }
-
-    const batchId = selectedBatch.id
-    const chatId = chat.chat_id
+    const generateMode = activeGenerateMode
     await startRunInChat({
       batchId,
       chat,
       message: content,
       invoke: async () => {
+        if (!generateMode) {
+          return sendMessage(batchId, chatId, content, connectors)
+        }
         const payload = {
           batch_id: batchId,
           chat_id: chatId,
-          workflow_type: input.artifactType,
-          week: input.week,
+          workflow_type: generateMode,
+          week: undefined,
           pending_artifact: true,
           save_draft: false,
           message: content,
           connectors,
         }
         const result =
-          input.artifactType === 'lab'
+          generateMode === 'lab'
             ? await generateLab('', payload)
             : await generateLessonPlan('', payload)
         return result as StartRunResult
       },
-      updateTitleIfNew: chat.title === 'New Chat',
+      updateTitleIfNew: true,
+      workflowMode: generateMode,
     })
   }
 
@@ -542,12 +520,14 @@ export function useChatPage() {
     message,
     invoke,
     updateTitleIfNew = false,
+    workflowMode = null,
   }: {
     batchId: string
     chat: Chat
     message: string
     invoke: () => Promise<StartRunResult>
     updateTitleIfNew?: boolean
+    workflowMode?: GenerateMode | null
   }) {
     const chatId = chat.chat_id
     setSending(true)
@@ -563,6 +543,10 @@ export function useChatPage() {
 
     try {
       const result = await invoke()
+      unsubscribeFromRun(result.run_id)
+      if (workflowMode) {
+        workflowModeRunIdsRef.current[result.run_id] = workflowMode
+      }
       const pendingId = `pending-${result.run_id}`
       setCurrentRunId(result.run_id)
       ensureRunState(result.run_id)
@@ -580,7 +564,6 @@ export function useChatPage() {
         },
       ])
 
-      unsubscribeFromRun(result.run_id)
       subscribeToRun(result.run_id, batchId, chatId, { withPolling: true })
 
       if (updateTitleIfNew && chat.title === 'New Chat') {
@@ -757,11 +740,21 @@ export function useChatPage() {
     })
   }
 
+  function maybeClearGenerateModeFromFinalMessage(message: Pick<ChatMessage, 'run_id' | 'metadata'>) {
+    const runId = message.run_id
+    if (!runId || !workflowModeRunIdsRef.current[runId]) return
+    if (message.metadata?.pending_exportable === true) {
+      setActiveGenerateMode(null)
+      delete workflowModeRunIdsRef.current[runId]
+    }
+  }
+
   function upsertLiveAssistantMessage(
     message: Omit<ChatMessage, 'chat_id'>,
     pendingId: string,
     chatId: string,
   ) {
+    maybeClearGenerateModeFromFinalMessage(message)
     setMessages((prev) => {
       const finalMessage: ChatMessage = {
         ...message,
@@ -870,6 +863,12 @@ export function useChatPage() {
     }
 
     const latestAssistant = fetchedAssistant.at(-1)
+    if (latestAssistant) {
+      maybeClearGenerateModeFromFinalMessage({
+        ...latestAssistant,
+        run_id: latestAssistant.run_id || runId,
+      })
+    }
     return fetched.map((msg) => {
       if (msg.message_id === latestAssistant?.message_id) {
         return {
@@ -1012,6 +1011,8 @@ export function useChatPage() {
     messagesLoading,
     input,
     setInput,
+    activeGenerateMode,
+    setActiveGenerateMode,
     sending,
     currentRunId,
     runStates,
@@ -1021,7 +1022,6 @@ export function useChatPage() {
     renameInputRef,
     handleNewChat,
     handleSend,
-    handleGeneratePreview,
     handleInputKeyDown,
     handleTextareaInput,
     startRename,

@@ -539,11 +539,13 @@ def maybe_store_pending_artifact_from_session(
 
     expected_week = _coerce_week(requested_week)
     payload_week = _coerce_week(payload.get("week"))
-    if expected_week is None or payload_week != expected_week:
+    if expected_week is not None and payload_week != expected_week:
         raise RuntimeError(
             f"{artifact_type} pending artifact week mismatch: requested_week={expected_week}, "
             f"payload_week={payload_week}"
         )
+    if expected_week is None and payload_week is None:
+        raise RuntimeError(f"{artifact_type} pending artifact payload.week is required")
 
     preview_markdown, preview_renderer_version = render_preview_markdown(
         artifact_type,

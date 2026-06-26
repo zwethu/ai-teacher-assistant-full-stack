@@ -89,6 +89,11 @@ def _validate_invoke_request(body: AgentInvokeRequest) -> None:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="week is required when save_draft is true",
             )
+        if body.week is not None and body.week < 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="week must be 1 or greater",
+            )
     if body.pending_artifact:
         if body.save_draft:
             raise HTTPException(
@@ -100,10 +105,10 @@ def _validate_invoke_request(body: AgentInvokeRequest) -> None:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="pending_artifact supports only lesson_plan or lab workflow_type",
             )
-        if body.week is None:
+        if body.week is not None and body.week < 1:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="week is required when pending_artifact is true",
+                detail="week must be 1 or greater",
             )
 
 

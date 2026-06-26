@@ -40,6 +40,7 @@ from fastapi import BackgroundTasks, HTTPException, status
 from entity.Batch import BatchModel
 from services.agent_engine_client import get_agent_engine_resource_name, stream_agent_response
 from services.agent_platform_sessions import get_agent_session_state
+from services.agent_artifact_context import build_agent_artifact_manifest
 from services.artifact_sync_service import preflight_sync_artifacts_for_agent_run
 from services.agent_sessions import (
     create_agent_run_record,
@@ -268,6 +269,10 @@ def _build_session_state(
         "pending_artifact": pending_artifact,
         "artifact_sync_status": (artifact_sync_preflight or {}).get("status", ""),
         "artifact_sync_summary": (artifact_sync_preflight or {}).get("summary", ""),
+        "artifact_manifest": build_agent_artifact_manifest(
+            batch_id=batch.batch_id,
+            lecturer_id=lecturer_id,
+        ),
     }
 
 

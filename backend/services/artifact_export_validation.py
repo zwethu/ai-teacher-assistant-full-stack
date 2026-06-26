@@ -176,9 +176,13 @@ def _require_terms(text: str, missing: list[str], terms: tuple[str, ...]) -> Non
 
 
 def _require_rich_values(text: str, missing: list[str], key: str, values: Any) -> None:
+    normalized_text = _normalize_text(text)
     for value in values or []:
         candidates = _value_candidates(value)
-        if candidates and not any(candidate in text for candidate in candidates):
+        if candidates and not any(
+            candidate in text or candidate in normalized_text
+            for candidate in candidates
+        ):
             missing.append(f"{key}: {candidates[0][:80]}")
 
 
@@ -195,7 +199,7 @@ def _value_candidates(value: Any) -> list[str]:
 
 
 def _text_candidates(value: str) -> list[str]:
-    clean = " ".join(value.strip().lower().split())
+    clean = _normalize_text(value)
     if not clean:
         return []
     candidates = [clean]
@@ -205,6 +209,10 @@ def _text_candidates(value: str) -> list[str]:
     if len(clean) > 120:
         candidates.append(clean[:120])
     return candidates
+
+
+def _normalize_text(value: str) -> str:
+    return " ".join(str(value or "").strip().lower().split())
 
 
 def _raise_if_missing(prefix: str, missing: list[str]) -> None:

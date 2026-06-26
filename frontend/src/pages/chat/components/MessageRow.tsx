@@ -4,7 +4,7 @@ import ReactMarkdown from 'react-markdown'
 import rehypeSanitize from 'rehype-sanitize'
 import remarkGfm from 'remark-gfm'
 import type { ChatMessage } from '../../../entity/Chat'
-import { checkGoogleAuthStatus, startGoogleOAuth } from '../../../services/authService'
+import { startGoogleOAuth } from '../../../services/authService'
 import { generateDocsFromPendingArtifact } from '../../../services/chatService'
 import {
   exportArtifactDraftToGoogleDocs,
@@ -189,7 +189,6 @@ function ArtifactExportButton({
     typeof metadata.lecturer_doc_url === 'string' ? metadata.lecturer_doc_url : ''
   const initialStudentDocUrl =
     typeof metadata.student_doc_url === 'string' ? metadata.student_doc_url : ''
-  const [checkingAuth, setCheckingAuth] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [result, setResult] = useState<LessonPlanExportResult | null>(
     initialDocUrl || initialFormUrl || initialLecturerDocUrl || initialStudentDocUrl
@@ -259,20 +258,6 @@ function ArtifactExportButton({
   async function handleExport() {
     setError('')
     setNeedsGoogle(false)
-    setCheckingAuth(true)
-    try {
-      const status = await checkGoogleAuthStatus()
-      if (!status.valid || !status.has_google_scopes) {
-        setNeedsGoogle(true)
-        return
-      }
-    } catch {
-      setNeedsGoogle(true)
-      return
-    } finally {
-      setCheckingAuth(false)
-    }
-
     setExporting(true)
     try {
       const exported = canExportPending
@@ -304,6 +289,10 @@ function ArtifactExportButton({
     } catch (err) {
       const maybe = err as { response?: { data?: { detail?: unknown } }; message?: string }
       const detail = maybe.response?.data?.detail
+      if (typeof detail === 'string') {
+        setError(detail)
+        return
+      }
       if (detail && typeof detail === 'object' && 'code' in detail) {
         const code = String((detail as { code?: unknown }).code || '')
         if (code === 'GOOGLE_OAUTH_REQUIRED') {
@@ -351,10 +340,10 @@ function ArtifactExportButton({
         <button
           type="button"
           onClick={() => void handleExport()}
-          disabled={checkingAuth || exporting}
+          disabled={exporting}
           className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
         >
-          {checkingAuth || exporting ? (
+          {exporting ? (
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
             <FileText className="h-4 w-4" />

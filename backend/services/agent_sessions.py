@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import re
+import uuid
+from datetime import datetime, timezone
 from typing import Any
 
+from google.cloud import firestore
 from google.cloud.firestore import SERVER_TIMESTAMP
 
 from utils.firestore_client import get_firestore
@@ -12,6 +15,7 @@ from utils.firestore_client import get_firestore
 BATCHES_COLLECTION = "batches"
 CHATS_SUBCOLLECTION = "chats"
 RUNS_SUBCOLLECTION = "runs"
+PENDING_EXPORT_LOCK_STALE_SECONDS = 10 * 60
 
 _SAFE_SESSION_CHARS = re.compile(r"[^a-z0-9-]+")
 _REPEATED_HYPHENS = re.compile(r"-+")
@@ -214,13 +218,138 @@ def mark_agent_run_pending_artifact_exported(
     run_id: str,
     pending_artifact: dict[str, Any],
 ) -> None:
+    updated = {
+        **pending_artifact,
+        "status": "exported",
+        "export_lock_id": "",
+        "export_error": "",
+    }
     _run_ref(batch_id, chat_id, run_id).update(
         {
-            "pending_artifact": pending_artifact,
-            "pending_artifact_id": str(pending_artifact.get("pending_artifact_id") or ""),
-            "pending_artifact_status": str(pending_artifact.get("status") or ""),
-            "draft_artifact_id": str(pending_artifact.get("artifact_id") or ""),
+            "pending_artifact": updated,
+            "pending_artifact_id": str(updated.get("pending_artifact_id") or ""),
+            "pending_artifact_status": "exported",
+            "draft_artifact_id": str(updated.get("artifact_id") or ""),
             "draft_status": "exported",
+            "updated_at": SERVER_TIMESTAMP,
+        }
+    )
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _lock_is_fresh(started_at: Any) -> bool:
+    if not started_at:
+        return False
+    try:
+        if isinstance(started_at, datetime):
+            started = started_at
+        else:
+            started = datetime.fromisoformat(str(started_at).replace("Z", "+00:00"))
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return False
+    return (datetime.now(timezone.utc) - started).total_seconds() < PENDING_EXPORT_LOCK_STALE_SECONDS
+
+
+def claim_pending_artifact_export(
+    *,
+    batch_id: str,
+    chat_id: str,
+    run_id: str,
+    lecturer_id: str,
+) -> dict[str, Any]:
+    """Transactionally claim a pending artifact export lock."""
+    db = get_firestore()
+    chat_ref = _chat_ref(batch_id, chat_id)
+    run_ref = _run_ref(batch_id, chat_id, run_id)
+    transaction = db.transaction()
+
+    @firestore.transactional
+    def _claim(txn):
+        chat_snap = chat_ref.get(transaction=txn)
+        if not chat_snap.exists or (chat_snap.to_dict() or {}).get("lecturer_id") != lecturer_id:
+            raise PermissionError("Chat not found or access denied")
+
+        run_snap = run_ref.get(transaction=txn)
+        if not run_snap.exists:
+            raise RuntimeError("Run not found")
+        data = run_snap.to_dict() or {}
+        pending = data.get("pending_artifact")
+        if not isinstance(pending, dict):
+            raise RuntimeError("Pending artifact not found")
+
+        status_value = str(pending.get("status") or "")
+        if status_value == "exported":
+            return {
+                "state": "already_exported",
+                "pending_artifact": pending,
+                "export_lock_id": str(pending.get("export_lock_id") or ""),
+            }
+        if status_value == "exporting" and _lock_is_fresh(pending.get("export_started_at")):
+            return {
+                "state": "in_progress",
+                "pending_artifact": pending,
+                "export_lock_id": str(pending.get("export_lock_id") or ""),
+            }
+
+        lock_id = uuid.uuid4().hex
+        claimed = {
+            **pending,
+            "status": "exporting",
+            "export_lock_id": lock_id,
+            "export_started_at": _utc_now_iso(),
+            "export_error": "",
+        }
+        txn.update(
+            run_ref,
+            {
+                "pending_artifact": claimed,
+                "pending_artifact_id": str(claimed.get("pending_artifact_id") or ""),
+                "pending_artifact_status": "exporting",
+                "updated_at": SERVER_TIMESTAMP,
+            },
+        )
+        return {
+            "state": "claimed",
+            "pending_artifact": claimed,
+            "export_lock_id": lock_id,
+        }
+
+    return _claim(transaction)
+
+
+def mark_agent_run_pending_artifact_export_failed(
+    *,
+    batch_id: str,
+    chat_id: str,
+    run_id: str,
+    error: str,
+    export_lock_id: str,
+) -> None:
+    run_ref = _run_ref(batch_id, chat_id, run_id)
+    snap = run_ref.get()
+    if not snap.exists:
+        return
+    data = snap.to_dict() or {}
+    pending = data.get("pending_artifact")
+    if not isinstance(pending, dict):
+        return
+    if str(pending.get("export_lock_id") or "") != export_lock_id:
+        return
+    updated = {
+        **pending,
+        "status": "failed_export",
+        "export_error": str(error)[:1000],
+        "export_lock_id": "",
+    }
+    run_ref.update(
+        {
+            "pending_artifact": updated,
+            "pending_artifact_status": "failed_export",
             "updated_at": SERVER_TIMESTAMP,
         }
     )

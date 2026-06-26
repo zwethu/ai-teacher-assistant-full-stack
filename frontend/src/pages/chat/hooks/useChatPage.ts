@@ -22,6 +22,7 @@ import {
   sendMessage,
   updateChatTitle,
 } from '../../../services/chatService'
+import { generateLab, generateLessonPlan } from '../../../services/agentService'
 import {
   subscribeAgentRun,
   type AgentRunDelta,
@@ -44,6 +45,17 @@ type ConnectorsState = {
 }
 
 type RouteHydrationState = 'idle' | 'hydrating' | 'hydrated' | 'invalid'
+type GeneratePreviewInput = {
+  artifactType: 'lesson_plan' | 'lab'
+  week: number
+  topic: string
+}
+type StartRunResult = {
+  run_id: string
+  chat_id?: string
+  rtdb_run_path?: string
+  status: 'running' | 'done' | 'failed'
+}
 
 const STREAM_DELAY_MESSAGE =
   'Live updates are delayed. I will fetch the final response when ready.'
@@ -473,19 +485,84 @@ export function useChatPage() {
 
     setInput('')
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
+    await startRunInChat({
+      batchId,
+      chat,
+      message: content,
+      invoke: () => sendMessage(batchId, chatId, content, connectors),
+      updateTitleIfNew: true,
+    })
+  }
+
+  async function handleGeneratePreview(input: GeneratePreviewInput) {
+    if (!selectedBatch || sending) return
+    const topic = input.topic.trim()
+    const label = input.artifactType === 'lab' ? 'lab preview' : 'lesson plan preview'
+    const content =
+      input.artifactType === 'lab'
+        ? `Generate a complete Week ${input.week} lab preview. Do not create Google Docs. The backend will store this as a pending preview only. Topic/instructions: ${topic || 'Use the course context and ask only if essential details are missing.'}`
+        : `Generate a complete Week ${input.week} lesson plan preview. Do not create Google Docs. The backend will store this as a pending preview only. Topic/instructions: ${topic || 'Use the course context and ask only if essential details are missing.'}`
+
+    let chat = activeChat
+    if (!chat) {
+      chat = await handleNewChat(`Week ${input.week} ${label}`)
+      if (!chat) return
+    }
+
+    const batchId = selectedBatch.id
+    const chatId = chat.chat_id
+    await startRunInChat({
+      batchId,
+      chat,
+      message: content,
+      invoke: async () => {
+        const payload = {
+          batch_id: batchId,
+          chat_id: chatId,
+          workflow_type: input.artifactType,
+          week: input.week,
+          pending_artifact: true,
+          save_draft: false,
+          message: content,
+          connectors,
+        }
+        const result =
+          input.artifactType === 'lab'
+            ? await generateLab('', payload)
+            : await generateLessonPlan('', payload)
+        return result as StartRunResult
+      },
+      updateTitleIfNew: chat.title === 'New Chat',
+    })
+  }
+
+  async function startRunInChat({
+    batchId,
+    chat,
+    message,
+    invoke,
+    updateTitleIfNew = false,
+  }: {
+    batchId: string
+    chat: Chat
+    message: string
+    invoke: () => Promise<StartRunResult>
+    updateTitleIfNew?: boolean
+  }) {
+    const chatId = chat.chat_id
     setSending(true)
 
     const optimisticUser: ChatMessage = {
       message_id: crypto.randomUUID(),
       chat_id: chatId,
       role: 'user',
-      content,
+      content: message,
       created_at: new Date().toISOString(),
     }
     setMessages((prev) => [...prev, optimisticUser])
 
     try {
-      const result = await sendMessage(batchId, chatId, content, connectors)
+      const result = await invoke()
       const pendingId = `pending-${result.run_id}`
       setCurrentRunId(result.run_id)
       ensureRunState(result.run_id)
@@ -506,8 +583,8 @@ export function useChatPage() {
       unsubscribeFromRun(result.run_id)
       subscribeToRun(result.run_id, batchId, chatId, { withPolling: true })
 
-      if (chat.title === 'New Chat') {
-        const newTitle = titleFromMessage(content)
+      if (updateTitleIfNew && chat.title === 'New Chat') {
+        const newTitle = titleFromMessage(message)
         void updateChatTitle(batchId, chatId, newTitle).then(() => {
           setChats((prev) =>
             prev.map((c) => (c.chat_id === chatId ? { ...c, title: newTitle } : c)),
@@ -944,6 +1021,7 @@ export function useChatPage() {
     renameInputRef,
     handleNewChat,
     handleSend,
+    handleGeneratePreview,
     handleInputKeyDown,
     handleTextareaInput,
     startRename,

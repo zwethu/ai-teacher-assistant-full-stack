@@ -209,6 +209,8 @@ def create_lab_docs_for_user(
     lab_payload: dict[str, Any],
     lecturer_email: str,
     target_folder_id: str | None = None,
+    lecturer_target_folder_id: str | None = None,
+    student_target_folder_id: str | None = None,
     lecturer_drive_file_name: str | None = None,
     student_drive_file_name: str | None = None,
 ) -> dict[str, str]:
@@ -265,8 +267,13 @@ def create_lab_docs_for_user(
             requested_name = lecturer_drive_file_name if mode == "lecturer" else student_drive_file_name
             if requested_name:
                 rename_file(uid, doc_id, requested_name)
-            if target_folder_id:
-                move_file_to_folder(uid, doc_id, target_folder_id)
+            folder_id = (
+                lecturer_target_folder_id
+                if mode == "lecturer"
+                else student_target_folder_id
+            ) or target_folder_id
+            if folder_id:
+                move_file_to_folder(uid, doc_id, folder_id)
         except HttpError as exc:
             logger.exception(
                 "Google Docs API error for uid=%s week=%s mode=%s", uid, lab.week, mode,
@@ -282,6 +289,8 @@ def create_lab_docs_for_user(
         result[f"{mode}_drive_file_name"] = doc_title
 
     result["drive_folder_id"] = target_folder_id or ""
+    result["lecturer_drive_folder_id"] = lecturer_target_folder_id or target_folder_id or ""
+    result["student_drive_folder_id"] = student_target_folder_id or target_folder_id or ""
     return result
 
 import io

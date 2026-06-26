@@ -53,13 +53,22 @@ def main() -> None:
     for doc in batch_ref.collection("artifacts").stream():
         artifact = doc.to_dict() or {}
         artifact_type = str(artifact.get("type") or artifact.get("artifact_type") or "other")
-        folder_key = "assessment" if artifact_type == "quiz" else artifact_type
-        folder = folder_map.get(folder_key) or folder_map["other"]
+        if artifact_type == "lab":
+            lab_folder = folder_map.get("lab") or folder_map["other"]
+            lecturer_folder = folder_map.get("lab_lecturer") or lab_folder
+            student_folder = folder_map.get("lab_student") or lab_folder
+            folder = lecturer_folder
+            suffix = "Lecturer Guide"
+        else:
+            folder_key = "assessment" if artifact_type == "quiz" else artifact_type
+            folder = folder_map.get(folder_key) or folder_map["other"]
+            suffix = ""
         name = build_artifact_file_name(
             version=int(artifact.get("version") or 1),
             week=artifact.get("week"),
             artifact_type=artifact_type,
             title=str(artifact.get("title") or "Artifact"),
+            suffix=suffix,
         )
         file_id = str(artifact.get("doc_id") or artifact.get("form_id") or "")
         if file_id:
@@ -67,6 +76,11 @@ def main() -> None:
             move_file_to_folder(lecturer_id, file_id, folder["id"])
 
         metadata = artifact.get("metadata") or {}
+        if artifact_type == "lab" and file_id:
+            metadata["lecturer_drive_file_name"] = name
+            metadata["lecturer_drive_folder_id"] = folder["id"]
+            metadata["lecturer_drive_folder_url"] = folder["url"]
+
         student_doc_id = str(metadata.get("student_doc_id") or "")
         if artifact_type == "lab" and student_doc_id:
             student_name = build_artifact_file_name(
@@ -77,8 +91,10 @@ def main() -> None:
                 suffix="Student Instructions",
             )
             rename_file(lecturer_id, student_doc_id, student_name)
-            move_file_to_folder(lecturer_id, student_doc_id, folder["id"])
+            move_file_to_folder(lecturer_id, student_doc_id, student_folder["id"])
             metadata["student_drive_file_name"] = student_name
+            metadata["student_drive_folder_id"] = student_folder["id"]
+            metadata["student_drive_folder_url"] = student_folder["url"]
 
         doc.reference.update(
             {

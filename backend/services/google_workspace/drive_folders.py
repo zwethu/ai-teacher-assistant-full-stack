@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 
@@ -13,6 +14,7 @@ from utils.firestore_client import get_firestore
 
 FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
 BATCHES_COLLECTION = "batches"
+logger = logging.getLogger(__name__)
 
 SUBFOLDER_NAMES = {
     "lesson_plan": "Lesson Plans",
@@ -24,6 +26,11 @@ SUBFOLDER_NAMES = {
 }
 
 FOLDER_KEYS = ("lesson_plan", "lab", "assessment", "email", "other")
+
+LAB_SUBFOLDER_NAMES = {
+    "lab_lecturer": "Lecturer Guides",
+    "lab_student": "Student Instructions",
+}
 
 
 def sanitize_drive_name(name: str) -> str:
@@ -159,6 +166,24 @@ def ensure_batch_artifact_folders(
         if folder is None:
             folder = get_or_create_folder(uid, SUBFOLDER_NAMES[key], parent_id=root["id"])
         folders[key] = folder
+
+    lab_root = folders.get("lab") or {}
+    lab_root_id = str(lab_root.get("id") or "")
+    if lab_root_id:
+        for key, name in LAB_SUBFOLDER_NAMES.items():
+            stored = stored_folders.get(key) or {}
+            try:
+                folder = _valid_folder(uid, str(stored.get("id") or ""))
+                if folder is None:
+                    folder = get_or_create_folder(uid, name, parent_id=lab_root_id)
+                folders[key] = folder
+            except Exception as exc:
+                logger.warning(
+                    "Failed to ensure nested lab folder key=%s batch_id=%s; using Labs fallback: %s",
+                    key,
+                    batch_id,
+                    exc,
+                )
 
     update = {
         "drive_root_folder_id": root["id"],

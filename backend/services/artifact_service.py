@@ -755,9 +755,17 @@ def export_lab_draft_to_google_docs(
             "lecturer_doc_url": saved_metadata.get("lecturer_doc_url", ""),
             "lecturer_doc_id": saved_metadata.get("lecturer_doc_id", ""),
             "lecturer_drive_file_name": saved_metadata.get("lecturer_drive_file_name", ""),
+            "lecturer_drive_folder_id": saved_metadata.get("lecturer_drive_folder_id")
+            or artifact.get("drive_folder_id", ""),
+            "lecturer_drive_folder_url": saved_metadata.get("lecturer_drive_folder_url")
+            or artifact.get("drive_folder_url", ""),
             "student_doc_url": saved_metadata.get("student_doc_url", ""),
             "student_doc_id": saved_metadata.get("student_doc_id", ""),
             "student_drive_file_name": saved_metadata.get("student_drive_file_name", ""),
+            "student_drive_folder_id": saved_metadata.get("student_drive_folder_id")
+            or artifact.get("drive_folder_id", ""),
+            "student_drive_folder_url": saved_metadata.get("student_drive_folder_url")
+            or artifact.get("drive_folder_url", ""),
         }
     try:
         validate_export_coverage("lab", payload)
@@ -782,9 +790,16 @@ def export_lab_draft_to_google_docs(
         batch_name=str(batch.get("batch_name") or artifact.get("batch_name") or ""),
         course_name=str(batch.get("course_name") or artifact.get("course_name") or ""),
     )
-    lab_folder = (folders.get("drive_folders") or {}).get("lab") or {}
+    drive_folders = folders.get("drive_folders") or {}
+    lab_folder = drive_folders.get("lab") or {}
     folder_id = str(lab_folder.get("id") or "")
     folder_url = str(lab_folder.get("url") or "")
+    lecturer_folder = drive_folders.get("lab_lecturer") or lab_folder
+    student_folder = drive_folders.get("lab_student") or lab_folder
+    lecturer_folder_id = str(lecturer_folder.get("id") or folder_id)
+    lecturer_folder_url = str(lecturer_folder.get("url") or folder_url)
+    student_folder_id = str(student_folder.get("id") or folder_id)
+    student_folder_url = str(student_folder.get("url") or folder_url)
     lecturer_name = build_artifact_file_name(
         version=next_version,
         week=week,
@@ -807,6 +822,8 @@ def export_lab_draft_to_google_docs(
             lab_payload=payload,
             lecturer_email=str(batch.get("lecturer_email") or artifact.get("created_by_email") or ""),
             target_folder_id=folder_id,
+            lecturer_target_folder_id=lecturer_folder_id,
+            student_target_folder_id=student_folder_id,
             lecturer_drive_file_name=lecturer_name,
             student_drive_file_name=student_name,
         )
@@ -833,9 +850,13 @@ def export_lab_draft_to_google_docs(
         "student_doc_url": doc_result.get("student_doc_url", ""),
         "student_doc_id": doc_result.get("student_doc_id", ""),
         "student_drive_file_name": doc_result.get("student_drive_file_name", student_name),
+        "student_drive_folder_id": doc_result.get("student_drive_folder_id", student_folder_id),
+        "student_drive_folder_url": student_folder_url,
         "lecturer_doc_url": doc_result.get("lecturer_doc_url", ""),
         "lecturer_doc_id": doc_result.get("lecturer_doc_id", ""),
         "lecturer_drive_file_name": doc_result.get("lecturer_drive_file_name", lecturer_name),
+        "lecturer_drive_folder_id": doc_result.get("lecturer_drive_folder_id", lecturer_folder_id),
+        "lecturer_drive_folder_url": lecturer_folder_url,
     }
     updates = {
         "status": "confirmed",
@@ -844,8 +865,8 @@ def export_lab_draft_to_google_docs(
         "doc_url": doc_result.get("lecturer_doc_url", ""),
         "doc_id": doc_result.get("lecturer_doc_id", ""),
         "drive_file_name": doc_result.get("lecturer_drive_file_name", lecturer_name),
-        "drive_folder_id": doc_result.get("drive_folder_id", folder_id),
-        "drive_folder_url": folder_url,
+        "drive_folder_id": metadata["lecturer_drive_folder_id"] or folder_id,
+        "drive_folder_url": metadata["lecturer_drive_folder_url"] or folder_url,
         "metadata": metadata,
         "export_status": "exported",
         "content_hash": content_hash,
@@ -876,9 +897,17 @@ def export_lab_draft_to_google_docs(
         "lecturer_doc_url": saved_metadata.get("lecturer_doc_url", ""),
         "lecturer_doc_id": saved_metadata.get("lecturer_doc_id", ""),
         "lecturer_drive_file_name": saved_metadata.get("lecturer_drive_file_name", ""),
+        "lecturer_drive_folder_id": saved_metadata.get("lecturer_drive_folder_id")
+        or saved.get("drive_folder_id", ""),
+        "lecturer_drive_folder_url": saved_metadata.get("lecturer_drive_folder_url")
+        or saved.get("drive_folder_url", ""),
         "student_doc_url": saved_metadata.get("student_doc_url", ""),
         "student_doc_id": saved_metadata.get("student_doc_id", ""),
         "student_drive_file_name": saved_metadata.get("student_drive_file_name", ""),
+        "student_drive_folder_id": saved_metadata.get("student_drive_folder_id")
+        or saved.get("drive_folder_id", ""),
+        "student_drive_folder_url": saved_metadata.get("student_drive_folder_url")
+        or saved.get("drive_folder_url", ""),
     }
 
 

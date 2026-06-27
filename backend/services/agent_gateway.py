@@ -738,6 +738,18 @@ def _pending_artifact_message_metadata(pending: dict[str, Any] | None) -> dict[s
     }
 
 
+def _attach_assistant_intro(
+    metadata: dict[str, Any],
+    presenter_text: str,
+    preview_markdown: str,
+) -> None:
+    """Keep presenter prose when the message body is replaced by a preview."""
+    intro = str(presenter_text or "").strip()
+    preview = str(preview_markdown or "").strip()
+    if intro and preview and intro != preview:
+        metadata["assistant_intro"] = intro
+
+
 # ---------------------------------------------------------------------------
 # Background task
 # ---------------------------------------------------------------------------
@@ -951,8 +963,19 @@ async def _run_agent_background(
                 )
                 if pending:
                     metadata = _pending_artifact_message_metadata(pending)
+                    approved_outline_run_id = str(
+                        session_state.get("approved_outline_run_id") or ""
+                    )
+                    if approved_outline_run_id:
+                        metadata.update(
+                            {
+                                "workflow_stage": "full",
+                                "approved_outline_run_id": approved_outline_run_id,
+                            }
+                        )
                     preview_markdown = str(pending.get("preview_markdown") or "").strip()
                     if preview_markdown:
+                        _attach_assistant_intro(metadata, final_text, preview_markdown)
                         assistant_message_text = preview_markdown
             else:
                 logger.info("generated draft save skipped run_id=%s reason=save_draft_false", run_id)
@@ -960,6 +983,7 @@ async def _run_agent_background(
                 metadata = _draft_message_metadata(draft)
                 preview_markdown = str(draft.get("preview_markdown") or "").strip()
                 if preview_markdown:
+                    _attach_assistant_intro(metadata, final_text, preview_markdown)
                     assistant_message_text = preview_markdown
                 mark_agent_run_draft_saved(
                     batch_id=batch_id,

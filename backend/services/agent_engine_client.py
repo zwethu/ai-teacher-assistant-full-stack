@@ -227,12 +227,18 @@ async def _sdk_stream(
         "user_id": lecturer_id,
         "session_id": session_id,
         "message": user_message,
+        # ADK defaults to StreamingMode.NONE even when Agent Engine is queried
+        # through streamQuery. SSE makes the schema-free root presenter emit
+        # native partial events; nested PNAI runners explicitly remain atomic.
+        "run_config": {"streaming_mode": "sse"},
     }
     logger.info(
-        "Agent Engine async_stream_query start resource=%s user_id=%s session_id=%s",
+        "Agent Engine async_stream_query start resource=%s user_id=%s session_id=%s "
+        "streaming_mode=sse public_author=%s",
         resource_name,
         lecturer_id,
         session_id,
+        _PUBLIC_RESPONSE_AUTHOR,
     )
     try:
         stream = agent.async_stream_query(**stream_kwargs)  # type: ignore[attr-defined]
@@ -260,40 +266,78 @@ async def _sdk_stream(
     try:
         event_count = 0
         final_chunk_count = 0
+        root_partial_count = 0
+        aggregate_skip_count = 0
         saw_native_partial = False
         last_event_summary = ""
         async for event in stream:
             event_count += 1
             last_event_summary = _event_summary(event)
             event_kind = _event_kind(event)
+            author = _event_author(event)
+            is_partial = _event_is_partial(event)
+            is_root_presenter = author == _PUBLIC_RESPONSE_AUTHOR
+            chunk = _event_text(event) if is_root_presenter else ""
             logger.debug(
                 "Agent Engine stream event resource=%s user_id=%s session_id=%s "
-                "event_kind=%s fields=%s",
+                "event_index=%d author=%s partial=%s event_kind=%s "
+                "root_presenter=%s chunk_length=%d fields=%s",
                 resource_name,
                 lecturer_id,
                 session_id,
+                event_count - 1,
+                author,
+                is_partial,
                 event_kind,
+                is_root_presenter,
+                len(chunk),
                 _event_fields(event),
             )
             error = _event_error(event)
             if error:
                 raise RuntimeError(f"Agent Engine returned an error event: {error}")
-            if _event_author(event) != _PUBLIC_RESPONSE_AUTHOR:
+            if not is_root_presenter:
                 continue
-            chunk = _event_text(event)
             if chunk:
-                is_partial = _event_is_partial(event)
                 if not is_partial and saw_native_partial:
+                    aggregate_skip_count += 1
                     logger.debug(
-                        "Ignoring aggregate root response after native partials event_id=%s",
+                        "Agent Engine root chunk skipped event_id=%s reason=aggregate_after_partials "
+                        "chunk_length=%d aggregate_skip_index=%d",
                         _event_id(event),
+                        len(chunk),
+                        aggregate_skip_count - 1,
                     )
                     continue
+                if is_partial:
+                    root_partial_count += 1
                 saw_native_partial = saw_native_partial or is_partial
+                emitted_index = final_chunk_count
                 final_chunk_count += 1
+                logger.debug(
+                    "Agent Engine root chunk emitted event_id=%s partial=%s "
+                    "chunk_index=%d chunk_length=%d",
+                    _event_id(event),
+                    is_partial,
+                    emitted_index,
+                    len(chunk),
+                )
                 if _DEBUG_STREAM_TEXT:
                     logger.debug("Agent Engine final text chunk: %r", chunk)
                 yield chunk
+        logger.info(
+            "Agent Engine native stream summary resource=%s user_id=%s session_id=%s "
+            "events=%d root_partials=%d emitted_chunks=%d aggregate_skips=%d "
+            "native_multi_chunk=%s",
+            resource_name,
+            lecturer_id,
+            session_id,
+            event_count,
+            root_partial_count,
+            final_chunk_count,
+            aggregate_skip_count,
+            root_partial_count > 1,
+        )
         if event_count and not final_chunk_count:
             raise RuntimeError(
                 "Agent Engine stream produced events but no assistant text. "

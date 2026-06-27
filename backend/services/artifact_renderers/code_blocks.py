@@ -7,15 +7,26 @@ import re
 from typing import Any
 
 
-def normalize_code_block(value: dict[str, Any] | str, default_language: str = "text") -> dict[str, str]:
+def normalize_code_block(
+    value: dict[str, Any] | str,
+    default_language: str = "text",
+) -> dict[str, str] | None:
     if isinstance(value, dict):
         title = str(value.get("title") or value.get("name") or "").strip()
         language = str(value.get("language") or value.get("type") or "").strip().lower()
-        code = str(value.get("code") or value.get("content") or value.get("text") or "").strip()
+        code = str(
+            value.get("code")
+            or value.get("content")
+            or value.get("text")
+            or value.get("value")
+            or ""
+        ).strip()
     else:
         title = ""
         language = ""
         code = str(value).strip()
+    if not code:
+        return None
     fence = re.fullmatch(r"```([\w.+-]*)\s*\n([\s\S]*?)\n?```", code)
     if fence:
         language = language or fence.group(1)
@@ -48,6 +59,8 @@ def infer_code_language(code: str) -> str:
 
 def render_code_block(value: dict[str, Any] | str, default_language: str = "text") -> list[str]:
     block = normalize_code_block(value, default_language)
+    if block is None:
+        return []
     lines: list[str] = []
     if block["title"]:
         lines.extend([f"**{block['title']}**", ""])

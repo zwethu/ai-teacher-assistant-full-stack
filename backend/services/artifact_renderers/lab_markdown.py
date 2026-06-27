@@ -124,11 +124,25 @@ def _append_code_blocks(
     *,
     quote: bool = False,
 ) -> None:
-    if not values:
-        return
-    lines.extend(["", f"## {title}"])
+    rendered: list[str] = []
     for value in values:
         if quote:
-            lines.append(f"> {value}")
+            text = _snippet_text(value)
+            if text:
+                rendered.extend(f"> {line}" for line in text.splitlines())
             continue
-        lines.extend(render_code_block(value))
+        rendered.extend(render_code_block(value))
+    if rendered:
+        lines.extend(["", f"## {title}", *rendered])
+
+
+def _snippet_text(value: dict[str, Any] | str) -> str:
+    if isinstance(value, dict):
+        return str(
+            value.get("code")
+            or value.get("content")
+            or value.get("text")
+            or value.get("value")
+            or ""
+        ).strip()
+    return str(value or "").strip()

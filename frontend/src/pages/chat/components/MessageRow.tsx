@@ -37,12 +37,14 @@ export function MessageRow({
   batchId,
   onApproveOutline,
   approvalDisabled = false,
+  approvalCompleted = false,
 }: {
   msg?: ChatMessage | null
   run?: RunUiState
   batchId?: string
   onApproveOutline?: (message: ChatMessage) => void
   approvalDisabled?: boolean
+  approvalCompleted?: boolean
 }) {
   if (!msg) return null
 
@@ -52,6 +54,9 @@ export function MessageRow({
   const isFailed = msg.status === 'failed' || run?.status === 'failed'
   const shouldUseArtifactCard = isGeneratedArtifactPreviewMessage(msg, isPending)
   const shouldUseOutlineCard = isOutlineApprovalMessage(msg, isPending)
+  const assistantIntro = typeof msg.metadata?.assistant_intro === 'string'
+    ? msg.metadata.assistant_intro.trim()
+    : ''
 
   return (
     <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : ''}`}>
@@ -92,10 +97,18 @@ export function MessageRow({
                   <OutlineApprovalCard
                     msg={msg}
                     disabled={approvalDisabled}
+                    completed={approvalCompleted}
                     onApprove={() => onApproveOutline?.(msg)}
                   />
                 ) : shouldUseArtifactCard ? (
-                  <ArtifactPreviewCard content={msg.content} metadata={msg.metadata || {}} />
+                  <>
+                    {assistantIntro && (
+                      <div className="mb-3">
+                        <ResponseMarkdown content={assistantIntro} streaming={false} />
+                      </div>
+                    )}
+                    <ArtifactPreviewCard content={msg.content} metadata={msg.metadata || {}} />
+                  </>
                 ) : (
                   <ResponseMarkdown content={msg.content} streaming={isPending} />
                 )
@@ -117,13 +130,16 @@ function isOutlineApprovalMessage(msg: ChatMessage, isPending: boolean) {
 }
 
 function OutlineApprovalCard({
-  msg, disabled, onApprove,
+  msg, disabled, completed, onApprove,
 }: {
   msg: ChatMessage
   disabled: boolean
+  completed: boolean
   onApprove: () => void
 }) {
   const metadata = msg.metadata || {}
+  const approvalStatus = String(metadata.outline_approval_status || '')
+  const locked = completed || approvalStatus === 'approved'
   const type = String(metadata.outline_artifact_type || metadata.artifact_type || '')
   const label = type === 'lab' ? 'Lab Outline' : type === 'quiz' ? 'Assessment Configuration' : 'Lesson Plan Outline'
   const Icon = type === 'lab' ? FlaskConical : type === 'quiz' ? FileQuestion : BookOpen
@@ -143,11 +159,17 @@ function OutlineApprovalCard({
         <p className="text-xs leading-5 text-slate-500">Reply with changes to revise the outline before generation.</p>
         <button
           type="button"
-          disabled={disabled}
+          disabled={disabled || locked}
           onClick={onApprove}
           className="inline-flex flex-shrink-0 items-center justify-center rounded-md bg-emerald-600 px-3.5 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          Approve and generate full preview
+          {completed
+            ? 'Full preview generated'
+            : approvalStatus === 'approved'
+              ? 'Outline approved'
+              : disabled
+                ? 'Generating full preview...'
+                : 'Approve and generate full preview'}
         </button>
       </div>
     </div>
@@ -363,6 +385,7 @@ function MarkdownBlock({ content }: { content: string }) {
         th: ({ ...props }) => <th className="bg-emerald-50 px-3 py-2.5 text-left font-semibold text-emerald-950" {...props} />,
         td: ({ ...props }) => <td className="border-t border-slate-100 px-3 py-2.5 align-top leading-6" {...props} />,
         code: ({ className, children, ...props }) => {
+          if (!String(children).trim()) return null
           const isBlock = /language-/.test(className || '') || String(children).includes('\n')
           return isBlock ? (
             <code className={`${className || 'language-text'} block font-mono text-[13px] leading-6`} {...props}>

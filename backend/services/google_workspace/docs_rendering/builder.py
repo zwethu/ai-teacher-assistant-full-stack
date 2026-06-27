@@ -145,13 +145,20 @@ class DocBuilder:
                 ]
                 blocks.append(TableBlock(headers=["Material", "Purpose"], rows=rows))
             if activity.prompt_templates:
-                blocks.append(TextBlock(BlockType.HEADING2, "Prompt Templates"))
-                for prompt in activity.prompt_templates:
-                    blocks.append(TextBlock(BlockType.BODY, f"> {prompt}"))
+                prompts = [str(prompt).strip() for prompt in activity.prompt_templates if str(prompt).strip()]
+                if prompts:
+                    blocks.append(TextBlock(BlockType.HEADING2, "Prompt Templates"))
+                    for prompt in prompts:
+                        blocks.append(TextBlock(BlockType.BODY, f"> {prompt}"))
             if activity.code_blocks:
-                blocks.append(TextBlock(BlockType.HEADING2, "Code / Configuration Blocks"))
-                for block in activity.code_blocks:
-                    normalized = normalize_code_block(block)
+                normalized_blocks = [
+                    normalized
+                    for block in activity.code_blocks
+                    if (normalized := normalize_code_block(block)) is not None
+                ]
+                if normalized_blocks:
+                    blocks.append(TextBlock(BlockType.HEADING2, "Code / Configuration Blocks"))
+                for normalized in normalized_blocks:
                     if normalized["title"]:
                         blocks.append(TextBlock(BlockType.META, normalized["title"], bold=True))
                     blocks.append(TextBlock(BlockType.CODE, normalized["code"]))
@@ -245,4 +252,5 @@ class DocBuilder:
 
     @staticmethod
     def _format_code_block(block: dict | str) -> str:
-        return normalize_code_block(block)["code"]
+        normalized = normalize_code_block(block)
+        return normalized["code"] if normalized else ""

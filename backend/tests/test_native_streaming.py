@@ -23,6 +23,19 @@ class NativeStreamingTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(pending_lab["artifact_preview_card"])
         self.assertEqual(pending_lab["artifact_title"], "Lab 1")
 
+    def test_assistant_intro_is_kept_only_when_distinct_from_preview(self) -> None:
+        metadata = {}
+        agent_gateway._attach_assistant_intro(metadata, "Generation complete.", "# Preview")
+        self.assertEqual(metadata["assistant_intro"], "Generation complete.")
+
+        duplicate = {}
+        agent_gateway._attach_assistant_intro(duplicate, "# Preview", "  # Preview  ")
+        self.assertNotIn("assistant_intro", duplicate)
+
+        empty = {}
+        agent_gateway._attach_assistant_intro(empty, "", "# Preview")
+        self.assertNotIn("assistant_intro", empty)
+
     async def test_gateway_preserves_one_delta_per_upstream_chunk(self) -> None:
         chunks = ["  Native ", "response.\n"]
 

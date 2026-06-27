@@ -20,7 +20,11 @@ from pydantic import BaseModel, Field
 
 from services.agent_gateway import start_chat_run
 from services.agent_sessions import claim_approvable_outline_run
-from services.chat_service import get_chat, get_or_create_workflow_chat
+from services.chat_service import (
+    get_chat,
+    get_or_create_workflow_chat,
+    update_assistant_message_metadata_for_run,
+)
 from utils.firebase_auth import CurrentUser, get_current_user
 
 logger = logging.getLogger(__name__)
@@ -183,6 +187,18 @@ async def invoke_agent(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        try:
+            update_assistant_message_metadata_for_run(
+                batch_id=body.batch_id,
+                chat_id=chat_id,
+                run_id=body.approved_outline_run_id,
+                metadata={"outline_approval_status": "approved"},
+            )
+        except Exception:
+            logger.exception(
+                "Failed to persist outline approval message metadata run_id=%s",
+                body.approved_outline_run_id,
+            )
 
     result = await start_chat_run(
         user_message=body.message,

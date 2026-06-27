@@ -329,6 +329,7 @@ class LabDocBuilder:
         include_recovery: bool,
     ) -> None:
         prompt_templates = getattr(step, "prompt_templates", []) or []
+        prompt_templates = [str(prompt).strip() for prompt in prompt_templates if str(prompt).strip()]
         if prompt_templates:
             blocks.append(TextBlock(BlockType.HEADING2, "Prompt Templates"))
             for prompt in prompt_templates:
@@ -338,10 +339,14 @@ class LabDocBuilder:
             ("Code Blocks", getattr(step, "code_blocks", []) or []),
             ("Configuration Templates", getattr(step, "config_templates", []) or []),
         ):
-            if values:
+            normalized_values = [
+                normalized
+                for value in values
+                if (normalized := normalize_code_block(value)) is not None
+            ]
+            if normalized_values:
                 blocks.append(TextBlock(BlockType.HEADING2, heading))
-                for value in values:
-                    normalized = normalize_code_block(value)
+                for normalized in normalized_values:
                     if normalized["title"]:
                         blocks.append(TextBlock(BlockType.META, normalized["title"], bold=True))
                     blocks.append(TextBlock(BlockType.CODE, normalized["code"]))
@@ -361,7 +366,8 @@ class LabDocBuilder:
 
     @staticmethod
     def _format_code_block(block: dict | str) -> str:
-        return normalize_code_block(block)["code"]
+        normalized = normalize_code_block(block)
+        return normalized["code"] if normalized else ""
 
     @staticmethod
     def _rubric_item_dict(item: dict | object) -> dict:

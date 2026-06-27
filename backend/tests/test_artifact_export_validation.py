@@ -3,7 +3,10 @@ import unittest
 from services.artifact_export_validation import validate_rendered_blocks_coverage
 from services.google_workspace.docs_rendering.builder import BlockType, TextBlock
 from services.artifact_renderers.code_blocks import normalize_code_block, render_code_block
+from services.artifact_renderers.lab_markdown import _append_code_blocks as append_lab_code_blocks
+from services.google_workspace.docs_rendering.lab_builder import LabDocBuilder
 from services.google_workspace.docs_rendering.renderer import render_phases
+from types import SimpleNamespace
 
 
 class ArtifactExportValidationTests(unittest.TestCase):
@@ -51,6 +54,38 @@ class ArtifactExportValidationTests(unittest.TestCase):
         self.assertNotIn("```", normalized["code"])
         markdown = "\n".join(render_code_block(value))
         self.assertIn("```powerfx", markdown)
+
+    def test_empty_code_blocks_do_not_render_sections_or_docs_blocks(self):
+        for value in ({}, "", "   ", {"title": "No code"}):
+            self.assertIsNone(normalize_code_block(value))
+            self.assertEqual(render_code_block(value), [])
+
+        lines: list[str] = []
+        append_lab_code_blocks(lines, "Code Blocks", [{}, "   "])
+        self.assertEqual(lines, [])
+
+        blocks = []
+        LabDocBuilder._append_rich_step_blocks(
+            blocks,
+            SimpleNamespace(
+                prompt_templates=[""],
+                code_blocks=[{}],
+                config_templates=[{"title": "Empty"}],
+                common_errors=[],
+                recovery_actions=[],
+            ),
+            include_recovery=False,
+        )
+        self.assertEqual(blocks, [])
+
+    def test_valid_dict_code_block_still_renders(self):
+        value = {"title": "Save formula", "language": "powerfx", "code": "SubmitForm(Form1)"}
+        normalized = normalize_code_block(value)
+        self.assertIsNotNone(normalized)
+        self.assertEqual(normalized["language"], "powerfx")
+        markdown = "\n".join(render_code_block(value))
+        self.assertIn("Save formula", markdown)
+        self.assertIn("SubmitForm(Form1)", markdown)
 
     def test_docs_code_block_is_monospace_without_literal_fences(self):
         content, styles = render_phases([TextBlock(BlockType.CODE, "SubmitForm(EditForm1)")])

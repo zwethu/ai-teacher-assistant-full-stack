@@ -190,6 +190,17 @@ export function ChatMessagesPanel({
   onApproveOutline,
 }: MessagesPanelProps) {
   const safeMessages = messages.filter(Boolean)
+  const completedOutlineRunIds = new Set(
+    safeMessages
+      .filter((message) =>
+        message.role === 'assistant' &&
+        !message.pending &&
+        message.metadata?.workflow_stage === 'full' &&
+        message.metadata?.pending_exportable === true,
+      )
+      .map((message) => String(message.metadata?.approved_outline_run_id || ''))
+      .filter(Boolean),
+  )
 
   return (
     <main className="flex-1 overflow-y-auto">
@@ -210,6 +221,7 @@ export function ChatMessagesPanel({
                 batchId={batchId}
                 onApproveOutline={onApproveOutline}
                 approvalDisabled={sending}
+                approvalCompleted={Boolean(msg.run_id && completedOutlineRunIds.has(msg.run_id))}
               />
             ))}
             {sending && !safeMessages.some((msg) => msg.pending) && <ThinkingIndicator />}

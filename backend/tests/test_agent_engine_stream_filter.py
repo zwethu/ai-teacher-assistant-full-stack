@@ -1,5 +1,7 @@
 import unittest
+from unittest.mock import patch
 
+from services import agent_engine_client
 from services.agent_engine_client import (
     _event_author,
     _event_is_partial,
@@ -50,6 +52,73 @@ class AgentEngineStreamFilterTest(unittest.TestCase):
             _recover_final_chunks_from_stream_exception(exc),
             ["Native ", "response"],
         )
+
+
+class AgentEngineNativeSseTest(unittest.IsolatedAsyncioTestCase):
+    async def test_sdk_stream_requests_sse_and_preserves_root_partials(self) -> None:
+        events = [
+            {"author": "lesson_plan_full_generator", "partial": True,
+             "content": {"parts": [{"text": "hidden json"}]}},
+            {"author": "pnai_root_agent", "partial": True,
+             "content": {"parts": [{"text": "Native "}]}},
+            {"author": "pnai_root_agent", "partial": True,
+             "content": {"parts": [{"text": "response"}]}},
+            {"author": "pnai_root_agent", "partial": False,
+             "content": {"parts": [{"text": "Native response"}]}},
+        ]
+
+        class FakeAgent:
+            def __init__(self):
+                self.kwargs = None
+
+            async def async_stream_query(self, **kwargs):
+                self.kwargs = kwargs
+                for event in events:
+                    yield event
+
+        fake_agent = FakeAgent()
+        with (
+            patch.object(agent_engine_client, "_get_agent", return_value=fake_agent),
+            patch.object(agent_engine_client, "ensure_session_with_state"),
+        ):
+            chunks = [
+                chunk
+                async for chunk in agent_engine_client._sdk_stream(
+                    user_message="hello",
+                    session_id="session1",
+                    lecturer_id="user1",
+                    session_state={},
+                    resource_name="projects/p/locations/l/reasoningEngines/r",
+                )
+            ]
+
+        self.assertEqual(chunks, ["Native ", "response"])
+        self.assertEqual(fake_agent.kwargs["run_config"], {"streaming_mode": "sse"})
+
+    async def test_sdk_stream_keeps_single_root_aggregate(self) -> None:
+        class FakeAgent:
+            async def async_stream_query(self, **_kwargs):
+                yield {
+                    "author": "pnai_root_agent",
+                    "partial": False,
+                    "content": {"parts": [{"text": "Atomic response"}]},
+                }
+
+        with (
+            patch.object(agent_engine_client, "_get_agent", return_value=FakeAgent()),
+            patch.object(agent_engine_client, "ensure_session_with_state"),
+        ):
+            chunks = [
+                chunk
+                async for chunk in agent_engine_client._sdk_stream(
+                    user_message="hello",
+                    session_id="session1",
+                    lecturer_id="user1",
+                    session_state={},
+                    resource_name="projects/p/locations/l/reasoningEngines/r",
+                )
+            ]
+        self.assertEqual(chunks, ["Atomic response"])
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ from typing import Literal
 
 from services.google_workspace.docs_rendering.schemas import LabFull, LabModality
 from services.google_workspace.docs_rendering.builder import BlockType, TableBlock, TextBlock
+from services.artifact_renderers.code_blocks import normalize_code_block
 
 Block = TextBlock | TableBlock
 
@@ -340,7 +341,10 @@ class LabDocBuilder:
             if values:
                 blocks.append(TextBlock(BlockType.HEADING2, heading))
                 for value in values:
-                    blocks.append(TextBlock(BlockType.BODY, cls._format_code_block(value)))
+                    normalized = normalize_code_block(value)
+                    if normalized["title"]:
+                        blocks.append(TextBlock(BlockType.META, normalized["title"], bold=True))
+                    blocks.append(TextBlock(BlockType.CODE, normalized["code"]))
 
         if include_recovery and (getattr(step, "common_errors", []) or getattr(step, "recovery_actions", [])):
             errors = getattr(step, "common_errors", []) or []
@@ -357,13 +361,7 @@ class LabDocBuilder:
 
     @staticmethod
     def _format_code_block(block: dict | str) -> str:
-        if isinstance(block, str):
-            return f"```\n{block}\n```"
-        language = str(block.get("language") or block.get("type") or "").strip()
-        title = str(block.get("title") or "").strip()
-        code = str(block.get("code") or block.get("content") or block.get("text") or "").strip()
-        prefix = f"{title}\n" if title else ""
-        return f"{prefix}```{language}\n{code}\n```"
+        return normalize_code_block(block)["code"]
 
     @staticmethod
     def _rubric_item_dict(item: dict | object) -> dict:

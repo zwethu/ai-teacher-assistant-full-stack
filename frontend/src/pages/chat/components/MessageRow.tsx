@@ -1,15 +1,17 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   BookOpen,
   Bot,
   ChevronDown,
-  ChevronRight,
   ExternalLink,
   FileText,
   FileQuestion,
   FlaskConical,
   Loader2,
+  Maximize2,
   User,
+  X,
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import rehypeSanitize from 'rehype-sanitize'
@@ -177,7 +179,8 @@ function ArtifactPreviewCard({
   content: string
   metadata: Record<string, unknown>
 }) {
-  const [expanded, setExpanded] = useState(false)
+  const [open, setOpen] = useState(false)
+  const headingId = useId()
   const artifactType = String(metadata.artifact_type || metadata.pending_artifact_type || '')
   const isLab = artifactType === 'lab'
   const isQuiz = artifactType === 'quiz'
@@ -196,42 +199,74 @@ function ArtifactPreviewCard({
   const summary = extractPreviewSummary(content)
   const Icon = isLab ? FlaskConical : isQuiz ? FileQuestion : BookOpen
 
+  useEffect(() => {
+    if (!open) return
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [open])
+
   return (
-    <div className="overflow-hidden rounded-xl border border-emerald-200 bg-white/70 shadow-sm transition-colors hover:bg-white/80">
-      <button
-        type="button"
-        onClick={() => setExpanded((value) => !value)}
-        aria-expanded={expanded}
-        className="w-full px-4 py-4 text-left"
-      >
-        <div className="flex items-start gap-3">
-          <div className="mt-0.5 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
-            <Icon className="h-5 w-5" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <span className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
-                {label}
-              </span>
-              {weekLabel && <span className="text-xs text-slate-500">{weekLabel}</span>}
+    <>
+      <div className="overflow-hidden rounded-xl border border-emerald-200 bg-white/70 shadow-sm transition-colors hover:bg-white/80">
+        <button type="button" onClick={() => setOpen(true)} aria-haspopup="dialog" className="w-full px-4 py-4 text-left">
+          <div className="flex items-start gap-3">
+            <div className="mt-0.5 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
+              <Icon className="h-5 w-5" />
             </div>
-            <h3 className="mt-1 text-base font-semibold leading-6 text-slate-900">{title}</h3>
-            {summary && <p className="mt-1.5 line-clamp-3 text-sm leading-5 text-slate-600">{summary}</p>}
-            <div className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-emerald-700">
-              <ChevronRight
-                className={`h-4 w-4 transition-transform ${expanded ? 'rotate-90' : ''}`}
-              />
-              {expanded ? 'Hide full preview' : 'View full preview'}
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="text-xs font-semibold uppercase tracking-wide text-emerald-700">{label}</span>
+                {weekLabel && <span className="text-xs text-slate-500">{weekLabel}</span>}
+              </div>
+              <h3 className="mt-1 text-base font-semibold leading-6 text-slate-900">{title}</h3>
+              {summary && <p className="mt-1.5 line-clamp-3 text-sm leading-5 text-slate-600">{summary}</p>}
+              <div className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-emerald-700">
+                <Maximize2 className="h-4 w-4" />
+                Open full preview
+              </div>
             </div>
           </div>
-        </div>
-      </button>
-      {expanded && (
-        <div className="max-h-[70vh] overflow-y-auto border-t border-emerald-100 bg-white/80 px-4 py-3">
-          <ResponseMarkdown content={content} streaming={false} />
-        </div>
+        </button>
+      </div>
+      {open && createPortal(
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/55 p-2 backdrop-blur-sm sm:p-6"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setOpen(false)
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={headingId}
+            className="flex h-[96vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-white/60 bg-white shadow-2xl sm:h-auto sm:max-h-[90vh]"
+          >
+            <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-emerald-100 bg-white/95 px-4 py-3 backdrop-blur sm:px-6">
+              <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700"><Icon className="h-5 w-5" /></div>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-wide text-emerald-700">
+                  <span>{label}</span>{weekLabel && <span className="text-slate-500">{weekLabel}</span>}
+                </div>
+                <h2 id={headingId} className="truncate text-lg font-semibold text-slate-900">{title}</h2>
+              </div>
+              <button type="button" onClick={() => setOpen(false)} aria-label="Close preview" className="rounded-full p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900"><X className="h-5 w-5" /></button>
+            </header>
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-8 sm:py-7">
+              <div className="mx-auto max-w-5xl"><ResponseMarkdown content={content} streaming={false} /></div>
+            </div>
+          </section>
+        </div>,
+        document.body,
       )}
-    </div>
+    </>
   )
 }
 
@@ -304,16 +339,16 @@ function MarkdownBlock({ content }: { content: string }) {
       remarkPlugins={[remarkGfm]}
       rehypePlugins={[rehypeSanitize]}
       components={{
-        h1: ({ ...props }) => <h1 className="mt-3 mb-2 text-xl font-semibold text-slate-900" {...props} />,
-        h2: ({ ...props }) => <h2 className="mt-3 mb-2 text-lg font-semibold text-slate-900" {...props} />,
-        h3: ({ ...props }) => <h3 className="mt-3 mb-2 text-base font-semibold text-slate-900" {...props} />,
-        p: ({ ...props }) => <p className="my-2" {...props} />,
-        ul: ({ ...props }) => <ul className="my-2 list-disc pl-5 space-y-1" {...props} />,
-        ol: ({ ...props }) => <ol className="my-2 list-decimal pl-5 space-y-1" {...props} />,
+        h1: ({ ...props }) => <h1 className="mb-4 mt-2 border-b border-slate-200 pb-2 text-2xl font-bold text-slate-950" {...props} />,
+        h2: ({ ...props }) => <h2 className="mb-2 mt-7 text-xl font-semibold text-slate-900" {...props} />,
+        h3: ({ ...props }) => <h3 className="mb-2 mt-5 text-base font-semibold text-emerald-900" {...props} />,
+        p: ({ ...props }) => <p className="my-3 leading-7" {...props} />,
+        ul: ({ ...props }) => <ul className="my-3 list-disc space-y-1.5 pl-6" {...props} />,
+        ol: ({ ...props }) => <ol className="my-3 list-decimal space-y-1.5 pl-6" {...props} />,
         li: ({ ...props }) => <li className="pl-1" {...props} />,
         a: ({ ...props }) => (
           <a
-            className="font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-800"
+            className="break-words font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-800"
             target="_blank"
             rel="noreferrer"
             {...props}
@@ -321,15 +356,15 @@ function MarkdownBlock({ content }: { content: string }) {
         ),
         table: ({ ...props }) => (
           <div className="my-3 max-w-full overflow-x-auto rounded-lg border border-slate-200">
-            <table className="min-w-full divide-y divide-slate-200 text-sm" {...props} />
+            <table className="min-w-full border-collapse divide-y divide-slate-200 text-sm" {...props} />
           </div>
         ),
-        th: ({ ...props }) => <th className="bg-slate-50 px-3 py-2 text-left font-semibold text-slate-800" {...props} />,
-        td: ({ ...props }) => <td className="border-t border-slate-100 px-3 py-2 align-top" {...props} />,
+        th: ({ ...props }) => <th className="bg-emerald-50 px-3 py-2.5 text-left font-semibold text-emerald-950" {...props} />,
+        td: ({ ...props }) => <td className="border-t border-slate-100 px-3 py-2.5 align-top leading-6" {...props} />,
         code: ({ className, children, ...props }) => {
-          const isBlock = /language-/.test(className || '')
+          const isBlock = /language-/.test(className || '') || String(children).includes('\n')
           return isBlock ? (
-            <code className={className} {...props}>
+            <code className={`${className || 'language-text'} block font-mono text-[13px] leading-6`} {...props}>
               {children}
             </code>
           ) : (
@@ -339,10 +374,10 @@ function MarkdownBlock({ content }: { content: string }) {
           )
         },
         pre: ({ ...props }) => (
-          <pre className="my-3 max-w-full overflow-x-auto rounded-lg bg-slate-950 px-4 py-3 text-sm leading-6 text-slate-100" {...props} />
+          <pre className="my-4 max-w-full overflow-x-auto whitespace-pre rounded-xl border border-slate-800 bg-slate-950 px-4 py-4 font-mono text-slate-100 shadow-sm" {...props} />
         ),
         blockquote: ({ ...props }) => (
-          <blockquote className="my-3 border-l-4 border-emerald-300 pl-4 text-slate-600" {...props} />
+          <blockquote className="my-4 rounded-r-lg border-l-4 border-emerald-400 bg-emerald-50/80 px-4 py-2 text-emerald-950" {...props} />
         ),
       }}
     >

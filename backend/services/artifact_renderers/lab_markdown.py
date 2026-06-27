@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from services.google_workspace.docs_rendering.schemas import LabFull
+from services.artifact_renderers.code_blocks import render_code_block
 
 RENDERER_VERSION = "lab_markdown.v1"
 
@@ -37,6 +38,15 @@ def render_lab_markdown(payload: dict[str, Any]) -> str:
     _append_list(lines, "Required Packages", env.required_packages)
     _append_list(lines, "Materials", lab.materials)
     _append_list(lines, "Safety Notes", lab.safety_notes)
+    _append_list(lines, "Access Constraints", env.access_constraints)
+
+    safety = lab.safety_profile
+    lines.extend(["", "## Safety / Acceptable Use", f"**Risk level:** {safety.risk_level}"])
+    _append_list(lines, "Hazards", safety.hazards)
+    _append_list(lines, "PPE", safety.ppe)
+    _append_list(lines, "Prohibited Actions", safety.prohibited_actions)
+    if lab.lecturer_setup:
+        lines.extend(["", "## Lecturer Setup", lab.lecturer_setup])
 
     if lab.lesson_plan_alignment:
         lines.extend(["", "## Lesson Plan Alignment", lab.lesson_plan_alignment])
@@ -85,15 +95,17 @@ def render_lab_markdown(payload: dict[str, Any]) -> str:
     _append_list(lines, "Callouts", lab.callouts)
     _append_list(lines, "Reflection Questions", lab.post_lab_questions)
 
+    if lab.troubleshooting:
+        lines.extend(["", "## Troubleshooting", "", "| Issue | Cause | Recovery |", "|---|---|---|"])
+        for item in lab.troubleshooting:
+            if isinstance(item, dict):
+                lines.append(f"| {item.get('issue', '')} | {item.get('cause', '')} | {item.get('fix') or item.get('recovery', '')} |")
+
     if lab.rubric:
         lines.extend(["", "## Rubric"])
+        lines.extend(["", "| Criterion | Excellent | Satisfactory | Needs Work | Points |", "|---|---|---|---|---:|"])
         for item in lab.rubric:
-            lines.append(
-                f"- **{item.criterion}**"
-                + (f" ({item.points} pts)" if item.points is not None else "")
-                + f": Excellent — {item.excellent}; Satisfactory — {item.satisfactory}; "
-                f"Needs work — {item.needs_work}"
-            )
+            lines.append(f"| {item.criterion} | {item.excellent} | {item.satisfactory} | {item.needs_work} | {item.points or ''} |")
 
     return "\n".join(line for line in lines if line is not None).strip()
 
@@ -119,13 +131,4 @@ def _append_code_blocks(
         if quote:
             lines.append(f"> {value}")
             continue
-        if isinstance(value, str):
-            lines.extend(["```", value, "```"])
-        else:
-            language = str(value.get("language") or value.get("type") or "")
-            code = str(value.get("code") or value.get("content") or value.get("text") or "")
-            title_value = str(value.get("title") or "")
-            if title_value:
-                lines.append(f"**{title_value}**")
-            lines.extend([f"```{language}", code, "```"])
-
+        lines.extend(render_code_block(value))

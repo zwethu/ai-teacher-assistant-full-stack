@@ -29,6 +29,7 @@ def _text_style(
     bold: bool = False,
     italic: bool = False,
     color: tuple[float, float, float] | None = None,
+    background: tuple[float, float, float] | None = None,
 ) -> dict[str, Any]:
     fields: list[str] = []
     style: dict[str, Any] = {}
@@ -47,6 +48,9 @@ def _text_style(
     if color:
         style["foregroundColor"] = _optional_color(color)
         fields.append("foregroundColor")
+    if background:
+        style["backgroundColor"] = _optional_color(background)
+        fields.append("backgroundColor")
     if not fields:
         return {}
     return {"textStyle": style, "fields": ",".join(fields)}
@@ -86,6 +90,8 @@ def _block_font(block: TextBlock) -> tuple[str, float, bool, tuple[float, float,
         return theme.FONT_BODY, theme.SIZE_META, False, block.color or theme.COLOR_META
     if bt == BlockType.BULLET:
         return theme.FONT_BODY, theme.SIZE_BULLET, block.bold, block.color or theme.COLOR_BODY
+    if bt == BlockType.CODE:
+        return "Courier New", 9.5, False, block.color or (0.12, 0.15, 0.2)
     return theme.FONT_BODY, theme.SIZE_BODY, block.bold, block.color or theme.COLOR_BODY
 
 
@@ -103,6 +109,8 @@ def _block_spacing(block: TextBlock) -> tuple[float, float]:
         return theme.SPACE_BULLET_ABOVE, theme.SPACE_BULLET_BELOW
     if bt == BlockType.DIVIDER:
         return theme.SPACE_DIVIDER_ABOVE, theme.SPACE_DIVIDER_BELOW
+    if bt == BlockType.CODE:
+        return 6, 8
     return theme.SPACE_BODY_ABOVE, theme.SPACE_BODY_BELOW
 
 
@@ -312,6 +320,7 @@ def render_phases(
                 bold=bold or block.bold,
                 italic=block.italic,
                 color=color,
+                background=(0.94, 0.95, 0.96) if block.block_type == BlockType.CODE else None,
             )
             if text_spec:
                 style_requests.append(

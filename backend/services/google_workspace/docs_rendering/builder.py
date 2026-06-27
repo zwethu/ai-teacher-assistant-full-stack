@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from services.google_workspace.docs_rendering.schemas import LessonPlanFull
+from services.artifact_renderers.code_blocks import normalize_code_block
 
 
 class BlockType(str, Enum):
@@ -21,6 +22,7 @@ class BlockType(str, Enum):
     BULLET = "bullet"
     TABLE = "table"
     DIVIDER = "divider"
+    CODE = "code"
 
 
 @dataclass
@@ -149,7 +151,10 @@ class DocBuilder:
             if activity.code_blocks:
                 blocks.append(TextBlock(BlockType.HEADING2, "Code / Configuration Blocks"))
                 for block in activity.code_blocks:
-                    blocks.append(TextBlock(BlockType.BODY, self._format_code_block(block)))
+                    normalized = normalize_code_block(block)
+                    if normalized["title"]:
+                        blocks.append(TextBlock(BlockType.META, normalized["title"], bold=True))
+                    blocks.append(TextBlock(BlockType.CODE, normalized["code"]))
             if activity.assessment_checks:
                 blocks.append(TextBlock(BlockType.HEADING2, "Assessment Checks"))
                 for check in activity.assessment_checks:
@@ -240,10 +245,4 @@ class DocBuilder:
 
     @staticmethod
     def _format_code_block(block: dict | str) -> str:
-        if isinstance(block, str):
-            return f"```\n{block}\n```"
-        language = str(block.get("language") or block.get("type") or "").strip()
-        title = str(block.get("title") or "").strip()
-        code = str(block.get("code") or block.get("content") or block.get("text") or "").strip()
-        prefix = f"{title}\n" if title else ""
-        return f"{prefix}```{language}\n{code}\n```"
+        return normalize_code_block(block)["code"]

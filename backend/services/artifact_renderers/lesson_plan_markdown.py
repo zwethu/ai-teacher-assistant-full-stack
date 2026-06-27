@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from services.google_workspace.docs_rendering.schemas import LessonPlanFull
+from services.artifact_renderers.code_blocks import render_code_block
 
 RENDERER_VERSION = "lesson_plan_markdown.v1"
 
@@ -33,12 +34,9 @@ def render_lesson_plan_markdown(payload: dict[str, Any]) -> str:
 
     if plan.detailed_timeline:
         lines.extend(["", "## Lesson Timeline"])
+        lines.extend(["", "| Time | Activity | Instructor Notes |", "|---|---|---|"])
         for segment in plan.detailed_timeline:
-            lines.append(
-                f"- **{segment.start_minute}-{segment.end_minute} min:** "
-                f"{segment.activity}"
-                + (f" — {segment.instructor_notes}" if segment.instructor_notes else "")
-            )
+            lines.append(f"| {segment.start_minute}-{segment.end_minute} min | {segment.activity} | {segment.instructor_notes or ''} |")
 
     lines.extend(["", "## Lesson Activities"])
     for activity in plan.activities:
@@ -54,6 +52,7 @@ def render_lesson_plan_markdown(payload: dict[str, Any]) -> str:
         _append_list(lines, "Teacher Actions", activity.teacher_actions)
         _append_list(lines, "Student Actions", activity.student_actions)
         _append_list(lines, "Instructions", activity.instructions)
+        _append_list(lines, "Materials", activity.materials_needed)
         _append_list(lines, "Assessment Checks", activity.assessment_checks)
         _append_code_blocks(lines, "Prompt Templates", activity.prompt_templates, quote=True)
         _append_code_blocks(lines, "Code / Configuration Blocks", activity.code_blocks)
@@ -113,13 +112,4 @@ def _append_code_blocks(
         if quote:
             lines.append(f"> {value}")
             continue
-        if isinstance(value, str):
-            lines.extend(["```", value, "```"])
-        else:
-            language = str(value.get("language") or value.get("type") or "")
-            code = str(value.get("code") or value.get("content") or value.get("text") or "")
-            title_value = str(value.get("title") or "")
-            if title_value:
-                lines.append(f"**{title_value}**")
-            lines.extend([f"```{language}", code, "```"])
-
+        lines.extend(render_code_block(value))

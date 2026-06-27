@@ -77,7 +77,6 @@ export function MessageRow({
                 <ThinkingPanel
                   events={run.events}
                   runStatus={run.status}
-                  responseStarted={run.responseStarted}
                 />
               </div>
             )}
@@ -129,25 +128,27 @@ function OutlineApprovalCard({
   const label = type === 'lab' ? 'Lab Outline' : type === 'quiz' ? 'Assessment Configuration' : 'Lesson Plan Outline'
   const Icon = type === 'lab' ? FlaskConical : type === 'quiz' ? FileQuestion : BookOpen
   return (
-    <div className="rounded-xl border border-sky-200 bg-white/80 shadow-sm">
-      <div className="flex items-center gap-3 border-b border-sky-100 px-4 py-3">
-        <Icon className="h-5 w-5 text-sky-700" />
-        <div>
-          <div className="text-xs font-semibold uppercase tracking-wide text-sky-700">{label}</div>
-          <div className="font-semibold text-slate-900">{String(metadata.outline_title || metadata.artifact_title || '')}</div>
+    <div className="overflow-hidden rounded-lg border border-emerald-200/80 bg-white/75 shadow-sm backdrop-blur-sm">
+      <div className="flex items-center gap-3 border-b border-emerald-100 bg-emerald-50/40 px-4 py-3.5">
+        <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
+          <Icon className="h-5 w-5" />
+        </div>
+        <div className="min-w-0">
+          <div className="text-xs font-semibold uppercase tracking-wide text-emerald-700">{label}</div>
+          <div className="truncate font-semibold text-slate-900">{String(metadata.outline_title || metadata.artifact_title || '')}</div>
         </div>
       </div>
-      <div className="px-4 py-3"><ResponseMarkdown content={msg.content} streaming={false} /></div>
-      <div className="border-t border-sky-100 px-4 py-3">
+      <div className="px-5 py-4"><ResponseMarkdown content={msg.content} streaming={false} /></div>
+      <div className="flex flex-col gap-2 border-t border-slate-200/80 bg-slate-50/50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-xs leading-5 text-slate-500">Reply with changes to revise the outline before generation.</p>
         <button
           type="button"
           disabled={disabled}
           onClick={onApprove}
-          className="rounded-md bg-sky-700 px-3 py-2 text-sm font-medium text-white hover:bg-sky-800 disabled:opacity-50"
+          className="inline-flex flex-shrink-0 items-center justify-center rounded-md bg-emerald-600 px-3.5 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Approve and generate full preview
         </button>
-        <p className="mt-2 text-xs text-slate-500">Reply with changes if you want me to revise the outline before full generation.</p>
       </div>
     </div>
   )

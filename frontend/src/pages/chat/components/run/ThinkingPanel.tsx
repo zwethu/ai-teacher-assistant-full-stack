@@ -1,11 +1,10 @@
 import { ChevronDown } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { AgentRunEvent, AgentRunStatus } from '../../../../services/agentRunStream'
 
 type Props = {
   events: AgentRunEvent[]
   runStatus: AgentRunStatus
-  responseStarted?: boolean
 }
 
 function eventMode(event: AgentRunEvent): string {
@@ -22,7 +21,7 @@ function eventSummary(event: AgentRunEvent): string {
   return event.summary || event.title || eventRawText(event) || 'Working...'
 }
 
-export function ThinkingPanel({ events, runStatus, responseStarted = false }: Props) {
+export function ThinkingPanel({ events, runStatus }: Props) {
   const thinkingEvents = useMemo(
     () =>
       events
@@ -51,16 +50,7 @@ export function ThinkingPanel({ events, runStatus, responseStarted = false }: Pr
     return eventSummary(thinkingEvents[thinkingEvents.length - 1])
   }, [hasEvents, showPlaceholder, thinkingEvents, runStatus])
 
-  const defaultOpen = runStatus === 'running'
-  const [open, setOpen] = useState(defaultOpen)
-
-  useEffect(() => {
-    if (responseStarted || runStatus === 'done' || runStatus === 'failed') {
-      setOpen(false)
-    } else if (runStatus === 'running') {
-      setOpen(true)
-    }
-  }, [responseStarted, runStatus])
+  const [open, setOpen] = useState(false)
 
   if (!hasEvents && !showPlaceholder) return null
 

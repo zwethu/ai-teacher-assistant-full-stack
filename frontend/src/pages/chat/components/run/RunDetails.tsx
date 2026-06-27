@@ -16,16 +16,15 @@ export function RunDetails({ run, isFinal }: Props) {
     return normalizeRunRows(run.steps, run.events).length
   }, [run])
 
-  const defaultOpen = status === 'running'
-  const [open, setOpen] = useState(defaultOpen)
+  const [open, setOpen] = useState(status === 'running')
 
   useEffect(() => {
-    if (run?.responseStarted || isFinal || status === 'done' || status === 'failed') {
+    if (isFinal || status === 'done' || status === 'failed') {
       setOpen(false)
     } else if (status === 'running') {
       setOpen(true)
     }
-  }, [isFinal, run?.responseStarted, status])
+  }, [isFinal, status])
 
   if (!run) return null
 

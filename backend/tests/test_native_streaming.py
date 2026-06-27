@@ -6,6 +6,23 @@ from utils import rtdb_client
 
 
 class NativeStreamingTest(unittest.IsolatedAsyncioTestCase):
+    def test_preview_card_metadata_is_limited_to_lesson_plans_and_labs(self) -> None:
+        lesson = agent_gateway._draft_message_metadata(
+            {"id": "a1", "artifact_type": "lesson_plan", "title": "Week 1"}
+        )
+        quiz = agent_gateway._draft_message_metadata(
+            {"id": "a2", "artifact_type": "quiz", "title": "Quiz 1"}
+        )
+        pending_lab = agent_gateway._pending_artifact_message_metadata(
+            {"pending_artifact_id": "p1", "artifact_type": "lab", "title": "Lab 1"}
+        )
+
+        self.assertTrue(lesson["artifact_preview_card"])
+        self.assertEqual(lesson["artifact_title"], "Week 1")
+        self.assertFalse(quiz["artifact_preview_card"])
+        self.assertTrue(pending_lab["artifact_preview_card"])
+        self.assertEqual(pending_lab["artifact_title"], "Lab 1")
+
     async def test_gateway_preserves_one_delta_per_upstream_chunk(self) -> None:
         chunks = ["  Native ", "response.\n"]
 

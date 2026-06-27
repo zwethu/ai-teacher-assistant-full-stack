@@ -1,5 +1,15 @@
 import { useEffect, useState } from 'react'
-import { Bot, ChevronDown, ExternalLink, FileText, Loader2, User } from 'lucide-react'
+import {
+  BookOpen,
+  Bot,
+  ChevronDown,
+  ChevronRight,
+  ExternalLink,
+  FileText,
+  FlaskConical,
+  Loader2,
+  User,
+} from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import rehypeSanitize from 'rehype-sanitize'
 import remarkGfm from 'remark-gfm'
@@ -31,8 +41,9 @@ export function MessageRow({
 
   const isUser = msg.role === 'user'
   const isFinal = !msg.pending && msg.status !== 'pending'
-  const isPending = msg.pending || msg.status === 'pending'
+  const isPending = Boolean(msg.pending || msg.status === 'pending')
   const isFailed = msg.status === 'failed' || run?.status === 'failed'
+  const shouldUseArtifactCard = isGeneratedArtifactPreviewMessage(msg, isPending)
 
   return (
     <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : ''}`}>
@@ -70,7 +81,11 @@ export function MessageRow({
               ) : isPending && !msg.content ? (
                 <ThinkingIndicator />
               ) : msg.content ? (
-                <ResponseMarkdown content={msg.content} streaming={isPending} />
+                shouldUseArtifactCard ? (
+                  <ArtifactPreviewCard content={msg.content} metadata={msg.metadata || {}} />
+                ) : (
+                  <ResponseMarkdown content={msg.content} streaming={isPending} />
+                )
               ) : null}
             </div>
             {!isUser && batchId && <ArtifactExportButton batchId={batchId} msg={msg} />}
@@ -79,6 +94,115 @@ export function MessageRow({
       </div>
     </div>
   )
+}
+
+function isGeneratedArtifactPreviewMessage(msg: ChatMessage, isPending: boolean) {
+  if (msg.role !== 'assistant' || isPending || msg.status === 'failed') return false
+
+  const content = msg.content?.trim()
+  if (!content) return false
+
+  const metadata = msg.metadata || {}
+  const artifactType = String(metadata.artifact_type || metadata.pending_artifact_type || '')
+  const isArtifactType = artifactType === 'lesson_plan' || artifactType === 'lab'
+  const explicitCard = metadata.artifact_preview_card === true
+  const isExportablePreview =
+    metadata.pending_exportable === true ||
+    metadata.exportable === true ||
+    Boolean(metadata.pending_artifact_id) ||
+    Boolean(metadata.draft_artifact_id)
+
+  return isArtifactType && (explicitCard || isExportablePreview)
+}
+
+function ArtifactPreviewCard({
+  content,
+  metadata,
+}: {
+  content: string
+  metadata: Record<string, unknown>
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const artifactType = String(metadata.artifact_type || metadata.pending_artifact_type || '')
+  const isLab = artifactType === 'lab'
+  const label = isLab ? 'Lab Preview' : 'Lesson Plan Preview'
+  const fallbackTitle = isLab
+    ? 'Generated lab preview'
+    : 'Generated lesson plan preview'
+  const title =
+    metadataText(metadata.artifact_title) || extractFirstMarkdownHeading(content) || fallbackTitle
+  const week = metadata.week || metadata.pending_artifact_week
+  const weekLabel = week !== undefined && week !== null && String(week).trim()
+    ? `Week ${String(week)}`
+    : ''
+  const summary = extractPreviewSummary(content)
+  const Icon = isLab ? FlaskConical : BookOpen
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-emerald-200 bg-white/70 shadow-sm transition-colors hover:bg-white/80">
+      <button
+        type="button"
+        onClick={() => setExpanded((value) => !value)}
+        aria-expanded={expanded}
+        className="w-full px-4 py-4 text-left"
+      >
+        <div className="flex items-start gap-3">
+          <div className="mt-0.5 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
+            <Icon className="h-5 w-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
+                {label}
+              </span>
+              {weekLabel && <span className="text-xs text-slate-500">{weekLabel}</span>}
+            </div>
+            <h3 className="mt-1 text-base font-semibold leading-6 text-slate-900">{title}</h3>
+            {summary && <p className="mt-1.5 line-clamp-3 text-sm leading-5 text-slate-600">{summary}</p>}
+            <div className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-emerald-700">
+              <ChevronRight
+                className={`h-4 w-4 transition-transform ${expanded ? 'rotate-90' : ''}`}
+              />
+              {expanded ? 'Hide full preview' : 'View full preview'}
+            </div>
+          </div>
+        </div>
+      </button>
+      {expanded && (
+        <div className="max-h-[70vh] overflow-y-auto border-t border-emerald-100 bg-white/80 px-4 py-3">
+          <ResponseMarkdown content={content} streaming={false} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function metadataText(value: unknown) {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function extractFirstMarkdownHeading(content: string) {
+  const match = content.match(/^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/m)
+  return match ? stripInlineMarkdown(match[1]) : ''
+}
+
+function extractPreviewSummary(content: string) {
+  const paragraphs = content
+    .split(/\n\s*\n/)
+    .map((block) => block.trim())
+    .filter((block) => block && !/^\s{0,3}#{1,6}\s/.test(block))
+  const source = paragraphs[0] || content
+  const plain = stripInlineMarkdown(source).replace(/\s+/g, ' ').trim()
+  return plain.length > 220 ? `${plain.slice(0, 217).trimEnd()}…` : plain
+}
+
+function stripInlineMarkdown(value: string) {
+  return value
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/[`*_~>#|]/g, '')
+    .replace(/^\s*[-+]\s+/gm, '')
+    .trim()
 }
 
 function ResponseMarkdown({ content, streaming }: { content: string; streaming: boolean }) {

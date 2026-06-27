@@ -586,9 +586,12 @@ def maybe_store_pending_artifact_from_session(
 def _draft_message_metadata(draft: dict[str, Any] | None) -> dict[str, Any]:
     if not draft:
         return {}
+    artifact_type = str(draft.get("artifact_type") or draft.get("type") or "")
     return {
         "draft_artifact_id": str(draft.get("id") or draft.get("artifact_id") or ""),
-        "artifact_type": str(draft.get("artifact_type") or draft.get("type") or ""),
+        "artifact_type": artifact_type,
+        "artifact_title": str(draft.get("title") or ""),
+        "artifact_preview_card": artifact_type in {"lesson_plan", "lab"},
         "week": draft.get("week"),
         "content_hash": draft.get("content_hash"),
         "preview_renderer_version": draft.get("preview_renderer_version"),
@@ -607,6 +610,8 @@ def _pending_artifact_message_metadata(pending: dict[str, Any] | None) -> dict[s
         "pending_exportable": True,
         "pending_export_target": "google_docs",
         "artifact_type": str(pending.get("artifact_type") or ""),
+        "artifact_title": str(pending.get("title") or ""),
+        "artifact_preview_card": True,
         "week": pending.get("week"),
     }
 

@@ -48,6 +48,7 @@ from services.agent_sessions import (
     mark_agent_run_draft_saved,
     mark_agent_run_failed,
     mark_agent_run_pending_artifact,
+    mark_agent_run_outline_ready,
 )
 from services.artifact_service import (
     content_hash,
@@ -95,6 +96,10 @@ async def start_chat_run(
     week: int | None = None,
     save_draft: bool = False,
     pending_artifact: bool = False,
+    workflow_stage: str = "",
+    approval_action: str = "",
+    approved_outline_run_id: str = "",
+    approved_outline: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Persist the user message, create a run, start the agent in the background.
 
@@ -173,6 +178,9 @@ async def start_chat_run(
         week=week,
         save_draft=save_draft,
         pending_artifact=pending_artifact,
+        workflow_stage=workflow_stage,
+        approval_action=approval_action,
+        approved_outline_run_id=approved_outline_run_id,
         artifact_sync_preflight=artifact_sync_preflight,
     )
 
@@ -190,6 +198,10 @@ async def start_chat_run(
         week=week,
         save_draft=save_draft,
         pending_artifact=pending_artifact,
+        workflow_stage=workflow_stage,
+        approval_action=approval_action,
+        approved_outline_run_id=approved_outline_run_id,
+        approved_outline=approved_outline,
         artifact_sync_preflight=artifact_sync_preflight,
     )
 
@@ -237,6 +249,10 @@ def _build_session_state(
     week: int | None = None,
     save_draft: bool = False,
     pending_artifact: bool = False,
+    workflow_stage: str = "",
+    approval_action: str = "",
+    approved_outline_run_id: str = "",
+    approved_outline: dict[str, Any] | None = None,
     artifact_sync_preflight: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the trusted session state payload sent to the agent.
@@ -245,7 +261,7 @@ def _build_session_state(
     comes from Firestore, not the request body, so the agent always sees
     authoritative workspace context.
     """
-    return {
+    state = {
         # Run telemetry keys
         "run_id": run_id,
         "session_id": agent_session_id,
@@ -266,6 +282,9 @@ def _build_session_state(
         "requested_week": week,
         "save_draft": save_draft,
         "pending_artifact": pending_artifact,
+        "workflow_stage": workflow_stage,
+        "approval_action": approval_action,
+        "approved_outline_run_id": approved_outline_run_id,
         "artifact_sync_status": (artifact_sync_preflight or {}).get("status", ""),
         "artifact_sync_summary": (artifact_sync_preflight or {}).get("summary", ""),
         "artifact_manifest": build_agent_artifact_manifest(
@@ -273,6 +292,15 @@ def _build_session_state(
             lecturer_id=lecturer_id,
         ),
     }
+    if approved_outline:
+        artifact_type = str(approved_outline.get("outline_artifact_type") or "")
+        key = {"lesson_plan": "lesson_plan_outline", "lab": "lab_outline", "quiz": "quiz_outline"}.get(artifact_type)
+        if key and isinstance(approved_outline.get("outline_payload"), dict):
+            state[key] = approved_outline["outline_payload"]
+        context = approved_outline.get("outline_context")
+        if isinstance(context, dict):
+            state.update(context)
+    return state
 
 
 def safe_run_error_message(exc: Exception) -> str:
@@ -367,6 +395,96 @@ def extract_quiz_full_from_state(state: dict[str, Any]) -> dict[str, Any] | None
     if not isinstance(questions, list) or not questions:
         return None
     return raw
+
+
+def extract_outline_from_state(
+    state: dict[str, Any], workflow_type: str
+) -> tuple[str, dict[str, Any]] | None:
+    normalized = workflow_type.strip().lower()
+    artifact_type = (
+        "lesson_plan" if normalized.startswith("lesson_plan")
+        else "lab" if normalized.startswith("lab")
+        else "quiz" if normalized.startswith(("assessment", "quiz"))
+        else ""
+    )
+    key = {"lesson_plan": "lesson_plan_outline", "lab": "lab_outline", "quiz": "quiz_outline"}.get(artifact_type)
+    payload = _state_payload(state, key) if key else None
+    if not payload or not str(payload.get("title") or "").strip():
+        return None
+    try:
+        if int(payload.get("week")) < 1:
+            return None
+    except (TypeError, ValueError):
+        return None
+    return artifact_type, payload
+
+
+def render_outline_markdown(artifact_type: str, payload: dict[str, Any]) -> str:
+    title = str(payload.get("title") or "Generated outline")
+    lines = [f"# {title}", "", f"**Week:** {payload.get('week')}", ""]
+    if artifact_type == "lesson_plan":
+        lines.extend([
+            f"**Subject:** {payload.get('subject', '')}",
+            f"**Duration:** {payload.get('lecture_duration', '')} minutes",
+            f"**Difficulty:** {payload.get('difficulty', '')}",
+            f"**Structure:** {payload.get('lesson_plan_type', '')}",
+            f"**Pedagogy:** {payload.get('teaching_approach', '')}",
+        ])
+        _append_outline_list(lines, "Learning Objectives", payload.get("objectives"), "objective")
+        _append_outline_list(lines, "Topics", payload.get("topics_covered"))
+        _append_outline_list(lines, "Activity Plan", payload.get("activity_summary"))
+        lines.extend(["", "## Assessment", str(payload.get("assessment_summary") or "")])
+    elif artifact_type == "lab":
+        lines.extend([
+            f"**Topic:** {payload.get('topic', '')}",
+            f"**Modality:** {payload.get('modality', '')}",
+            f"**Duration:** {payload.get('duration_minutes', '')} minutes",
+            "",
+            str(payload.get("lab_scenario") or ""),
+        ])
+        _append_outline_list(lines, "Learning Objectives", payload.get("learning_objectives"))
+        _append_outline_list(lines, "Student Tasks", payload.get("student_tasks_summary"))
+        _append_outline_list(lines, "Deliverables", payload.get("deliverables"))
+        lines.extend(["", "## Safety", str(payload.get("safety_summary") or "")])
+    else:
+        breakdown = payload.get("question_type_breakdown") or {}
+        lines.extend([
+            f"**Mode:** {payload.get('quiz_mode', '')}",
+            f"**Difficulty:** {payload.get('difficulty', '')}",
+            f"**Questions:** {payload.get('total_questions', '')}",
+            f"**Question breakdown:** {breakdown}",
+            f"**Total points:** {payload.get('total_points', '')}",
+            f"**Time limit:** {payload.get('time_limit_minutes', '')} minutes",
+        ])
+        _append_outline_list(lines, "Topics Covered", payload.get("topics_covered"))
+    return "\n".join(lines).strip()
+
+
+def _append_outline_list(
+    lines: list[str], title: str, values: Any, value_key: str = ""
+) -> None:
+    if not isinstance(values, list) or not values:
+        return
+    lines.extend(["", f"## {title}"])
+    for value in values:
+        if value_key and isinstance(value, dict):
+            text = value.get(value_key)
+        else:
+            text = value
+        lines.append(f"- {text}")
+
+
+_OUTLINE_CONTEXT_KEYS = (
+    "research_summary", "research_summary_json", "lab_research_summary",
+    "active_artifact_type", "active_week", "active_topic", "active_generation_id",
+    "active_generation_mode", "active_duration_minutes", "active_lab_modality",
+    "last_assessment_lesson_context", "assessment_lesson_doc_status",
+    "last_lab_lesson_context", "lab_lesson_doc_status",
+)
+
+
+def outline_context_snapshot(state: dict[str, Any]) -> dict[str, Any]:
+    return {key: state[key] for key in _OUTLINE_CONTEXT_KEYS if key in state}
 
 
 def _state_payload(state: dict[str, Any], key: str) -> dict[str, Any] | None:
@@ -515,6 +633,10 @@ def maybe_store_pending_artifact_from_session(
         "lesson_plan.generate": ("lesson_plan", extract_lesson_plan_full_from_state),
         "lab": ("lab", extract_lab_full_from_state),
         "lab.generate": ("lab", extract_lab_full_from_state),
+        "assessment": ("quiz", extract_quiz_full_from_state),
+        "assessment.generate": ("quiz", extract_quiz_full_from_state),
+        "quiz": ("quiz", extract_quiz_full_from_state),
+        "quiz.generate": ("quiz", extract_quiz_full_from_state),
     }
     selected = candidates.get(normalized_workflow)
     if not selected:
@@ -556,7 +678,7 @@ def maybe_store_pending_artifact_from_session(
         "artifact_type": artifact_type,
         "workflow_type": artifact_type,
         "week": payload_week,
-        "title": str(payload.get("title") or ("Lesson Plan" if artifact_type == "lesson_plan" else "Lab")),
+        "title": str(payload.get("title") or {"lesson_plan": "Lesson Plan", "lab": "Lab", "quiz": "Assessment"}[artifact_type]),
         "content_json": payload,
         "content_hash": content_hash(payload),
         "preview_markdown": preview_markdown,
@@ -608,7 +730,7 @@ def _pending_artifact_message_metadata(pending: dict[str, Any] | None) -> dict[s
         "pending_artifact_week": pending.get("week"),
         "pending_artifact_content_hash": str(pending.get("content_hash") or ""),
         "pending_exportable": True,
-        "pending_export_target": "google_docs",
+        "pending_export_target": "google_forms" if pending.get("artifact_type") == "quiz" else "google_docs",
         "artifact_type": str(pending.get("artifact_type") or ""),
         "artifact_title": str(pending.get("title") or ""),
         "artifact_preview_card": True,
@@ -706,7 +828,64 @@ async def _run_agent_background(
         assistant_message_text = final_text
         try:
             draft = None
-            if bool(session_state.get("save_draft")):
+            if str(session_state.get("workflow_stage") or "") == "outline":
+                emit_backend_event(
+                    "outline_extract.started", status="started", title="Reading generated outline"
+                )
+                session_state_after = await get_agent_session_state(
+                    resource_name=get_agent_engine_resource_name(),
+                    user_id=lecturer_id,
+                    session_id=agent_session_id,
+                )
+                outline = extract_outline_from_state(
+                    session_state_after, str(session_state.get("workflow_type") or "")
+                )
+                if outline:
+                    artifact_type, outline_payload = outline
+                    expected_week = _coerce_week(session_state.get("requested_week"))
+                    actual_week = _coerce_week(outline_payload.get("week"))
+                    if expected_week is not None and actual_week != expected_week:
+                        raise RuntimeError("Generated outline week does not match requested week")
+                    mark_agent_run_outline_ready(
+                        batch_id=batch_id,
+                        chat_id=chat_id,
+                        run_id=run_id,
+                        artifact_type=artifact_type,
+                        outline_payload=outline_payload,
+                        outline_context=outline_context_snapshot(session_state_after),
+                    )
+                    assistant_message_text = render_outline_markdown(artifact_type, outline_payload)
+                    metadata = {
+                        "workflow_stage": "outline",
+                        "workflow_type": str(session_state.get("workflow_type") or ""),
+                        "outline_approvable": True,
+                        "outline_artifact_type": artifact_type,
+                        "artifact_type": artifact_type,
+                        "outline_title": str(outline_payload.get("title") or ""),
+                        "artifact_title": str(outline_payload.get("title") or ""),
+                        "week": actual_week,
+                        "source_run_id": run_id,
+                        "approval_action": "approve_outline",
+                        "pending_exportable": False,
+                        "exportable": False,
+                    }
+                    emit_backend_event(
+                        "outline_extract.done", status="done", title="Outline ready for review"
+                    )
+                    emit_backend_event(
+                        "outline_approval.waiting",
+                        status="waiting",
+                        title="Waiting for lecturer approval",
+                    )
+                else:
+                    emit_backend_event(
+                        "outline_extract.failed",
+                        status="failed",
+                        title="No outline available yet",
+                        kind="error",
+                        detail={"reason": "clarification_or_generation_incomplete"},
+                    )
+            elif bool(session_state.get("save_draft")):
                 emit_backend_event(
                     "draft_save.started", status="started", title="Saving generated draft"
                 )

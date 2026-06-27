@@ -19,6 +19,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from services.agent_gateway import start_chat_run
+from services.agent_sessions import claim_approvable_outline_run
 from services.chat_service import get_chat, get_or_create_workflow_chat
 from utils.firebase_auth import CurrentUser, get_current_user
 
@@ -43,6 +44,9 @@ class AgentInvokeRequest(BaseModel):
     week: int | None = None
     save_draft: bool = False
     pending_artifact: bool = False
+    workflow_stage: str | None = None
+    approval_action: str | None = None
+    approved_outline_run_id: str | None = None
     connectors: ConnectorState = Field(default_factory=ConnectorState)
 
 
@@ -68,11 +72,25 @@ _SAVE_DRAFT_WORKFLOWS = {
     "quiz.generate",
 }
 _WEEK_REQUIRED_WORKFLOWS = _SAVE_DRAFT_WORKFLOWS
-_PENDING_ARTIFACT_WORKFLOWS = {"lesson_plan", "lab"}
+_PENDING_ARTIFACT_WORKFLOWS = _SAVE_DRAFT_WORKFLOWS
 
 
 def _validate_invoke_request(body: AgentInvokeRequest) -> None:
     workflow_type = (body.workflow_type or "").strip()
+    workflow_stage = body.workflow_stage or ""
+    approval_action = body.approval_action or ""
+    if workflow_stage not in {"", "outline", "full"}:
+        raise HTTPException(status_code=400, detail="workflow_stage must be '', 'outline', or 'full'")
+    if approval_action not in {"", "approve_outline"}:
+        raise HTTPException(status_code=400, detail="approval_action must be '' or 'approve_outline'")
+    if workflow_stage == "outline" and body.save_draft:
+        raise HTTPException(status_code=400, detail="outline stage cannot save a draft")
+    if workflow_stage == "full" and body.pending_artifact:
+        if approval_action != "approve_outline" or not body.approved_outline_run_id:
+            raise HTTPException(
+                status_code=400,
+                detail="full pending-artifact generation requires an approved outline run",
+            )
     if body.save_draft and body.pending_artifact:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -103,7 +121,7 @@ def _validate_invoke_request(body: AgentInvokeRequest) -> None:
         if workflow_type not in _PENDING_ARTIFACT_WORKFLOWS:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="pending_artifact supports only lesson_plan or lab workflow_type",
+                detail="pending_artifact requires a supported artifact workflow_type",
             )
         if body.week is not None and body.week < 1:
             raise HTTPException(
@@ -152,6 +170,20 @@ async def invoke_agent(
             detail="chat_id or workflow_type is required",
         )
 
+    approved_outline: dict | None = None
+    if (body.workflow_stage or "") == "full" and body.pending_artifact:
+        requested_family = "quiz" if (body.workflow_type or "").startswith(("assessment", "quiz")) else (body.workflow_type or "").split(".")[0]
+        try:
+            approved_outline = claim_approvable_outline_run(
+                batch_id=body.batch_id, chat_id=chat_id,
+                run_id=body.approved_outline_run_id, lecturer_id=lecturer_id,
+                artifact_type=requested_family,
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     result = await start_chat_run(
         user_message=body.message,
         batch_id=body.batch_id,
@@ -164,6 +196,10 @@ async def invoke_agent(
         week=body.week,
         save_draft=body.save_draft,
         pending_artifact=body.pending_artifact,
+        workflow_stage=body.workflow_stage or "",
+        approval_action=body.approval_action or "",
+        approved_outline_run_id=body.approved_outline_run_id or "",
+        approved_outline=approved_outline,
     )
 
     return AgentInvokeResponse(

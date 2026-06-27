@@ -16,6 +16,7 @@ from services.artifact_service import (
     content_hash,
     export_lab_draft_to_google_docs,
     export_lesson_plan_draft_to_google_docs,
+    export_quiz_draft_to_google_forms,
     save_pending_artifact_as_draft,
 )
 from services.batch_service import get_batch
@@ -374,3 +375,104 @@ async def generate_docs_from_pending_artifact_endpoint(
         "pending_artifact_id": str(pending.get("pending_artifact_id") or ""),
         "artifact_type": artifact_type,
     }
+
+
+@router.post("/{chat_id}/runs/{run_id}/pending-artifact/export-google-form", response_model=dict)
+async def export_pending_quiz_to_google_form_endpoint(
+    batch_id: str,
+    chat_id: str,
+    run_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    lecturer_id = current_user["uid"]
+    try:
+        claim = claim_pending_artifact_export(
+            batch_id=batch_id, chat_id=chat_id, run_id=run_id, lecturer_id=lecturer_id
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=404, detail="Chat not found") from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    pending = claim["pending_artifact"]
+    if claim["state"] == "already_exported":
+        return pending.get("export_result") or {}
+    if claim["state"] == "in_progress":
+        raise HTTPException(status_code=409, detail="Pending artifact export already in progress")
+    lock_id = str(claim.get("export_lock_id") or "")
+
+    def fail(error: str) -> None:
+        mark_agent_run_pending_artifact_export_failed(
+            batch_id=batch_id, chat_id=chat_id, run_id=run_id,
+            error=error, export_lock_id=lock_id,
+        )
+        write_run_event(
+            run_id, event_type="export.failed", kind="error", status="failed",
+            title="Google Forms export failed", phase="export",
+            detail={"error": error[:500]}, batch_id=batch_id, chat_id=chat_id,
+        )
+
+    write_run_event(
+        run_id, event_type="export.started", status="started",
+        title="Exporting assessment to Google Forms", phase="export",
+        batch_id=batch_id, chat_id=chat_id,
+    )
+    content = pending.get("content_json")
+    try:
+        if pending.get("artifact_type") != "quiz" or pending.get("status") != "exporting":
+            raise RuntimeError("Pending artifact is not an exportable quiz")
+        if not isinstance(content, dict) or not content:
+            raise RuntimeError("Pending artifact content is missing")
+        actual_hash = content_hash(content)
+        if pending.get("content_hash") and pending.get("content_hash") != actual_hash:
+            raise RuntimeError("Pending artifact content hash mismatch")
+        assert_google_oauth_valid(lecturer_id, ["forms.body", "drive.file"])
+        write_run_event(
+            run_id, event_type="export.oauth_checked", status="done",
+            title="Google Forms access verified", phase="export",
+            batch_id=batch_id, chat_id=chat_id,
+        )
+        draft = save_pending_artifact_as_draft(
+            batch_id=batch_id, lecturer_id=lecturer_id, pending_artifact=pending,
+            lecturer_email=current_user.get("email", ""),
+        )
+        artifact_id = str(draft.get("id") or draft.get("artifact_id") or "")
+        write_run_event(
+            run_id, event_type="export.google_forms_create.started", status="started",
+            title="Creating Google Form", phase="export", batch_id=batch_id, chat_id=chat_id,
+        )
+        result = export_quiz_draft_to_google_forms(batch_id, artifact_id, lecturer_id)
+        write_run_event(
+            run_id, event_type="export.google_forms_create.done", status="done",
+            title="Google Form created", phase="export", batch_id=batch_id, chat_id=chat_id,
+        )
+    except (GoogleOAuthRequiredError, GoogleOAuthInvalidError) as exc:
+        fail(str(exc))
+        raise HTTPException(status_code=403, detail=GOOGLE_OAUTH_REQUIRED_DETAIL) from exc
+    except Exception as exc:
+        fail(str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    exported = {**pending, "status": "exported", "artifact_id": artifact_id, "export_result": result}
+    mark_agent_run_pending_artifact_exported(
+        batch_id=batch_id, chat_id=chat_id, run_id=run_id, pending_artifact=exported
+    )
+    write_run_event(
+        run_id, event_type="export.artifact_record_update.done", status="done",
+        title="Assessment artifact updated", phase="export", batch_id=batch_id, chat_id=chat_id,
+    )
+    metadata = {
+        "draft_artifact_id": artifact_id, "artifact_id": artifact_id,
+        "artifact_type": "quiz", "pending_exportable": False,
+        "pending_artifact_type": "quiz", "form_url": result.get("form_url", ""),
+        "form_id": result.get("form_id", ""), "version": result.get("version"),
+        "drive_file_name": result.get("drive_file_name", ""),
+    }
+    update_assistant_message_metadata_for_run(
+        batch_id=batch_id, chat_id=chat_id, run_id=run_id,
+        metadata={k: v for k, v in metadata.items() if v not in ("", None)},
+    )
+    write_run_event(
+        run_id, event_type="export.done", status="done", title="Google Forms export completed",
+        phase="export", batch_id=batch_id, chat_id=chat_id,
+    )
+    return {**result, "artifact_id": artifact_id, "artifact_type": "quiz"}

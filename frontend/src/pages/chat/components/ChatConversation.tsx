@@ -1,12 +1,12 @@
 import { useState, type RefObject } from 'react'
 import type { KeyboardEvent } from 'react'
 import type { ChatMessage } from '../../../entity/Chat'
-import { BookOpen, FlaskConical, Loader2, Send, Sparkles, X } from 'lucide-react'
+import { BookOpen, FileQuestion, FlaskConical, Loader2, Send, Sparkles, X } from 'lucide-react'
 import { MessageRow, ThinkingIndicator } from './MessageRow'
 import { ConnectorToggles, type ConnectorsState } from './ConnectorToggles'
 import type { RunUiState } from '../runTypes'
 
-export type GenerateMode = 'lesson_plan' | 'lab'
+export type GenerateMode = 'lesson_plan' | 'lab' | 'assessment'
 
 type Props = {
   input: string
@@ -49,12 +49,18 @@ export function ChatInput({
     requestAnimationFrame(() => textareaRef.current?.focus())
   }
 
-  const modeLabel = activeGenerateMode === 'lab' ? 'Lab Preview' : 'Lesson Plan Preview'
+  const modeLabel = activeGenerateMode === 'lab'
+    ? 'Lab Preview'
+    : activeGenerateMode === 'assessment'
+      ? 'Assessment Preview'
+      : 'Lesson Plan Preview'
   const placeholder =
     activeGenerateMode === 'lesson_plan'
       ? 'Describe the lesson plan preview you want, e.g. Week 1 intro to Power BI...'
       : activeGenerateMode === 'lab'
         ? 'Describe the lab preview you want, e.g. Week 3 Firebase guestbook lab...'
+        : activeGenerateMode === 'assessment'
+          ? 'Describe the assessment preview you want, e.g. Week 3 mixed quiz, 10 questions...'
         : 'Message your teaching assistant...'
 
   return (
@@ -93,6 +99,14 @@ export function ChatInput({
                   <FlaskConical className="h-4 w-4 text-emerald-600" />
                   Lab Preview
                 </button>
+                <button
+                  type="button"
+                  onClick={() => selectGenerateMode('assessment')}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-emerald-50"
+                >
+                  <FileQuestion className="h-4 w-4 text-emerald-600" />
+                  Assessment Preview
+                </button>
               </div>
             )}
           </div>
@@ -106,6 +120,8 @@ export function ChatInput({
           <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50/90 px-3 py-1.5 text-sm font-medium text-emerald-800 shadow-sm">
             {activeGenerateMode === 'lab' ? (
               <FlaskConical className="h-4 w-4" />
+            ) : activeGenerateMode === 'assessment' ? (
+              <FileQuestion className="h-4 w-4" />
             ) : (
               <BookOpen className="h-4 w-4" />
             )}
@@ -159,6 +175,7 @@ type MessagesPanelProps = {
   runStates: Record<string, RunUiState>
   messagesEndRef: RefObject<HTMLDivElement | null>
   welcomeContent: React.ReactNode
+  onApproveOutline: (message: ChatMessage) => void
 }
 
 export function ChatMessagesPanel({
@@ -170,6 +187,7 @@ export function ChatMessagesPanel({
   runStates,
   messagesEndRef,
   welcomeContent,
+  onApproveOutline,
 }: MessagesPanelProps) {
   const safeMessages = messages.filter(Boolean)
 
@@ -190,6 +208,8 @@ export function ChatMessagesPanel({
                 msg={msg}
                 run={msg.run_id ? runStates[msg.run_id] : undefined}
                 batchId={batchId}
+                onApproveOutline={onApproveOutline}
+                approvalDisabled={sending}
               />
             ))}
             {sending && !safeMessages.some((msg) => msg.pending) && <ThinkingIndicator />}

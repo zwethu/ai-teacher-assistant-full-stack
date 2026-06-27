@@ -38,6 +38,10 @@ from services.artifact_renderers.lesson_plan_markdown import (
     RENDERER_VERSION as LESSON_PLAN_MARKDOWN_RENDERER_VERSION,
     render_lesson_plan_markdown,
 )
+from services.artifact_renderers.quiz_markdown import (
+    RENDERER_VERSION as QUIZ_MARKDOWN_RENDERER_VERSION,
+    render_quiz_markdown,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +83,8 @@ def _render_preview_markdown(artifact_type: str, payload: dict[str, Any], fallba
         return render_lesson_plan_markdown(payload), LESSON_PLAN_MARKDOWN_RENDERER_VERSION
     if artifact_type == "lab":
         return render_lab_markdown(payload), LAB_MARKDOWN_RENDERER_VERSION
+    if artifact_type == "quiz":
+        return render_quiz_markdown(payload), QUIZ_MARKDOWN_RENDERER_VERSION
     return fallback, "agent_final_text.v1"
 
 
@@ -447,7 +453,7 @@ def save_pending_artifact_as_draft(
     """Create/update a real draft artifact from immutable pending-artifact JSON."""
     artifact_type = str(pending_artifact.get("artifact_type") or "").strip()
     payload = pending_artifact.get("content_json")
-    if artifact_type not in {"lesson_plan", "lab"}:
+    if artifact_type not in {"lesson_plan", "lab", "quiz"}:
         raise RuntimeError("Pending artifact type is not exportable")
     if not isinstance(payload, dict) or not payload:
         raise RuntimeError("Pending artifact content is missing")
@@ -470,10 +476,9 @@ def save_pending_artifact_as_draft(
             lesson_plan_payload=payload,
             **common,
         )
-    return save_lab_draft_from_session(
-        lab_payload=payload,
-        **common,
-    )
+    if artifact_type == "lab":
+        return save_lab_draft_from_session(lab_payload=payload, **common)
+    return save_quiz_draft_from_session(quiz_payload=payload, **common)
 
 
 def save_quiz_draft_from_session(

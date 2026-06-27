@@ -23,6 +23,7 @@ export default function Chat() {
         messagesEndRef={state.messagesEndRef}
         textareaRef={state.textareaRef}
         handleSend={state.handleSend}
+        handleApproveOutline={state.handleApproveOutline}
         activeGenerateMode={state.activeGenerateMode}
         setActiveGenerateMode={state.setActiveGenerateMode}
         handleInputKeyDown={state.handleInputKeyDown}

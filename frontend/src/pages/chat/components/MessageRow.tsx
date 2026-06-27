@@ -6,6 +6,7 @@ import {
   ChevronRight,
   ExternalLink,
   FileText,
+  FileQuestion,
   FlaskConical,
   Loader2,
   User,
@@ -15,7 +16,7 @@ import rehypeSanitize from 'rehype-sanitize'
 import remarkGfm from 'remark-gfm'
 import type { ChatMessage } from '../../../entity/Chat'
 import { startGoogleOAuth } from '../../../services/authService'
-import { generateDocsFromPendingArtifact } from '../../../services/chatService'
+import { exportPendingQuizToGoogleForms, generateDocsFromPendingArtifact } from '../../../services/chatService'
 import {
   exportArtifactDraftToGoogleDocs,
   exportQuizDraftToGoogleForms,
@@ -32,10 +33,14 @@ export function MessageRow({
   msg,
   run,
   batchId,
+  onApproveOutline,
+  approvalDisabled = false,
 }: {
   msg?: ChatMessage | null
   run?: RunUiState
   batchId?: string
+  onApproveOutline?: (message: ChatMessage) => void
+  approvalDisabled?: boolean
 }) {
   if (!msg) return null
 
@@ -44,6 +49,7 @@ export function MessageRow({
   const isPending = Boolean(msg.pending || msg.status === 'pending')
   const isFailed = msg.status === 'failed' || run?.status === 'failed'
   const shouldUseArtifactCard = isGeneratedArtifactPreviewMessage(msg, isPending)
+  const shouldUseOutlineCard = isOutlineApprovalMessage(msg, isPending)
 
   return (
     <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : ''}`}>
@@ -81,7 +87,13 @@ export function MessageRow({
               ) : isPending && !msg.content ? (
                 <ThinkingIndicator />
               ) : msg.content ? (
-                shouldUseArtifactCard ? (
+                shouldUseOutlineCard ? (
+                  <OutlineApprovalCard
+                    msg={msg}
+                    disabled={approvalDisabled}
+                    onApprove={() => onApproveOutline?.(msg)}
+                  />
+                ) : shouldUseArtifactCard ? (
                   <ArtifactPreviewCard content={msg.content} metadata={msg.metadata || {}} />
                 ) : (
                   <ResponseMarkdown content={msg.content} streaming={isPending} />
@@ -96,6 +108,49 @@ export function MessageRow({
   )
 }
 
+function isOutlineApprovalMessage(msg: ChatMessage, isPending: boolean) {
+  const metadata = msg.metadata || {}
+  return msg.role === 'assistant' && !isPending && msg.status !== 'failed' &&
+    metadata.workflow_stage === 'outline' && metadata.outline_approvable === true &&
+    ['lesson_plan', 'lab', 'quiz'].includes(String(metadata.outline_artifact_type || metadata.artifact_type || ''))
+}
+
+function OutlineApprovalCard({
+  msg, disabled, onApprove,
+}: {
+  msg: ChatMessage
+  disabled: boolean
+  onApprove: () => void
+}) {
+  const metadata = msg.metadata || {}
+  const type = String(metadata.outline_artifact_type || metadata.artifact_type || '')
+  const label = type === 'lab' ? 'Lab Outline' : type === 'quiz' ? 'Assessment Configuration' : 'Lesson Plan Outline'
+  const Icon = type === 'lab' ? FlaskConical : type === 'quiz' ? FileQuestion : BookOpen
+  return (
+    <div className="rounded-xl border border-sky-200 bg-white/80 shadow-sm">
+      <div className="flex items-center gap-3 border-b border-sky-100 px-4 py-3">
+        <Icon className="h-5 w-5 text-sky-700" />
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-wide text-sky-700">{label}</div>
+          <div className="font-semibold text-slate-900">{String(metadata.outline_title || metadata.artifact_title || '')}</div>
+        </div>
+      </div>
+      <div className="px-4 py-3"><ResponseMarkdown content={msg.content} streaming={false} /></div>
+      <div className="border-t border-sky-100 px-4 py-3">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onApprove}
+          className="rounded-md bg-sky-700 px-3 py-2 text-sm font-medium text-white hover:bg-sky-800 disabled:opacity-50"
+        >
+          Approve and generate full preview
+        </button>
+        <p className="mt-2 text-xs text-slate-500">Reply with changes if you want me to revise the outline before full generation.</p>
+      </div>
+    </div>
+  )
+}
+
 function isGeneratedArtifactPreviewMessage(msg: ChatMessage, isPending: boolean) {
   if (msg.role !== 'assistant' || isPending || msg.status === 'failed') return false
 
@@ -104,7 +159,7 @@ function isGeneratedArtifactPreviewMessage(msg: ChatMessage, isPending: boolean)
 
   const metadata = msg.metadata || {}
   const artifactType = String(metadata.artifact_type || metadata.pending_artifact_type || '')
-  const isArtifactType = artifactType === 'lesson_plan' || artifactType === 'lab'
+  const isArtifactType = artifactType === 'lesson_plan' || artifactType === 'lab' || artifactType === 'quiz'
   const explicitCard = metadata.artifact_preview_card === true
   const isExportablePreview =
     metadata.pending_exportable === true ||
@@ -125,10 +180,13 @@ function ArtifactPreviewCard({
   const [expanded, setExpanded] = useState(false)
   const artifactType = String(metadata.artifact_type || metadata.pending_artifact_type || '')
   const isLab = artifactType === 'lab'
-  const label = isLab ? 'Lab Preview' : 'Lesson Plan Preview'
+  const isQuiz = artifactType === 'quiz'
+  const label = isLab ? 'Lab Preview' : isQuiz ? 'Assessment Preview' : 'Lesson Plan Preview'
   const fallbackTitle = isLab
     ? 'Generated lab preview'
-    : 'Generated lesson plan preview'
+    : isQuiz
+      ? 'Generated assessment preview'
+      : 'Generated lesson plan preview'
   const title =
     metadataText(metadata.artifact_title) || extractFirstMarkdownHeading(content) || fallbackTitle
   const week = metadata.week || metadata.pending_artifact_week
@@ -136,7 +194,7 @@ function ArtifactPreviewCard({
     ? `Week ${String(week)}`
     : ''
   const summary = extractPreviewSummary(content)
-  const Icon = isLab ? FlaskConical : BookOpen
+  const Icon = isLab ? FlaskConical : isQuiz ? FileQuestion : BookOpen
 
   return (
     <div className="overflow-hidden rounded-xl border border-emerald-200 bg-white/70 shadow-sm transition-colors hover:bg-white/80">
@@ -369,7 +427,7 @@ function ArtifactExportButton({
     pendingExportable &&
       runId &&
       msg.chat_id &&
-      (pendingArtifactType === 'lesson_plan' || pendingArtifactType === 'lab'),
+      (pendingArtifactType === 'lesson_plan' || pendingArtifactType === 'lab' || pendingArtifactType === 'quiz'),
   )
 
   if (
@@ -385,7 +443,9 @@ function ArtifactExportButton({
     setExporting(true)
     try {
       const exported = canExportPending
-        ? await generateDocsFromPendingArtifact(batchId, msg.chat_id, runId)
+        ? pendingArtifactType === 'quiz'
+          ? await exportPendingQuizToGoogleForms(batchId, msg.chat_id, runId)
+          : await generateDocsFromPendingArtifact(batchId, msg.chat_id, runId)
         : artifactType === 'quiz'
           ? await exportQuizDraftToGoogleForms(batchId, artifactId)
           : await exportArtifactDraftToGoogleDocs(batchId, artifactId)
@@ -432,7 +492,9 @@ function ArtifactExportButton({
 
   const exportLabel =
     canExportPending
-      ? artifactType === 'lab'
+      ? artifactType === 'quiz'
+        ? 'Export to Google Forms'
+        : artifactType === 'lab'
         ? 'Generate Lab Docs'
         : 'Generate Google Doc'
       : artifactType === 'lab'

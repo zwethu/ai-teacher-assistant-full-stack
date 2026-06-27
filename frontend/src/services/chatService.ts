@@ -72,3 +72,14 @@ export async function generateDocsFromPendingArtifact(
   )
   return res.data
 }
+
+export async function exportPendingQuizToGoogleForms(
+  batchId: string,
+  chatId: string,
+  runId: string,
+): Promise<LessonPlanExportResult & { artifact_type?: string }> {
+  const res = await api.post<LessonPlanExportResult & { artifact_type?: string }>(
+    `/batches/${batchId}/chats/${chatId}/runs/${runId}/pending-artifact/export-google-form`,
+  )
+  return res.data
+}

@@ -22,7 +22,7 @@ import {
   sendMessage,
   updateChatTitle,
 } from '../../../services/chatService'
-import { generateLab, generateLessonPlan } from '../../../services/agentService'
+import { generateAssessment, generateLab, generateLessonPlan } from '../../../services/agentService'
 import {
   subscribeAgentRun,
   type AgentRunDelta,
@@ -496,21 +496,60 @@ export function useChatPage() {
         const payload = {
           batch_id: batchId,
           chat_id: chatId,
-          workflow_type: generateMode,
+          workflow_type: `${generateMode}.generate`,
+          workflow_stage: 'outline' as const,
           week: undefined,
           pending_artifact: true,
           save_draft: false,
           message: content,
           connectors,
         }
-        const result =
-          generateMode === 'lab'
-            ? await generateLab('', payload)
+        const result = generateMode === 'lab'
+          ? await generateLab('', payload)
+          : generateMode === 'assessment'
+            ? await generateAssessment('', payload)
             : await generateLessonPlan('', payload)
         return result as StartRunResult
       },
       updateTitleIfNew: true,
       workflowMode: generateMode,
+    })
+  }
+
+  async function handleApproveOutline(message: ChatMessage) {
+    if (!selectedBatch || !activeChat || sending || !message.run_id) return
+    const metadata = message.metadata || {}
+    const artifactType = String(metadata.outline_artifact_type || metadata.artifact_type || '')
+    const mode: GenerateMode = artifactType === 'quiz' ? 'assessment' : artifactType as GenerateMode
+    if (!['lesson_plan', 'lab', 'assessment'].includes(mode)) return
+    const label = mode === 'assessment' ? 'assessment' : mode.replace('_', ' ')
+    const text = `Approve this outline and generate the full ${label} preview.`
+    await startRunInChat({
+      batchId: selectedBatch.id,
+      chat: activeChat,
+      message: text,
+      invoke: async () => {
+        const payload = {
+          batch_id: selectedBatch.id,
+          chat_id: activeChat.chat_id,
+          workflow_type: `${mode}.generate`,
+          workflow_stage: 'full' as const,
+          approval_action: 'approve_outline' as const,
+          approved_outline_run_id: message.run_id,
+          week: typeof metadata.week === 'number' ? metadata.week : undefined,
+          pending_artifact: true,
+          save_draft: false,
+          message: text,
+          connectors,
+        }
+        const result = mode === 'lab'
+          ? await generateLab('', payload)
+          : mode === 'assessment'
+            ? await generateAssessment('', payload)
+            : await generateLessonPlan('', payload)
+        return result as StartRunResult
+      },
+      workflowMode: mode,
     })
   }
 
@@ -1022,6 +1061,7 @@ export function useChatPage() {
     renameInputRef,
     handleNewChat,
     handleSend,
+    handleApproveOutline,
     handleInputKeyDown,
     handleTextareaInput,
     startRename,

@@ -69,6 +69,9 @@ def create_agent_run_record(
     week: int | None = None,
     save_draft: bool = False,
     pending_artifact: bool = False,
+    workflow_stage: str = "",
+    approval_action: str = "",
+    approved_outline_run_id: str = "",
     artifact_sync_preflight: dict[str, Any] | None = None,
 ) -> None:
     connectors = {
@@ -91,6 +94,9 @@ def create_agent_run_record(
             "week": week,
             "save_draft": save_draft,
             "pending_artifact": pending_artifact,
+            "workflow_stage": workflow_stage,
+            "approval_action": approval_action,
+            "approved_outline_run_id": approved_outline_run_id,
             "artifact_sync_preflight": artifact_sync_preflight or {},
             "created_at": SERVER_TIMESTAMP,
             "updated_at": SERVER_TIMESTAMP,
@@ -209,6 +215,89 @@ def mark_agent_run_pending_artifact(
             "updated_at": SERVER_TIMESTAMP,
         }
     )
+
+
+def mark_agent_run_outline_ready(
+    *,
+    batch_id: str,
+    chat_id: str,
+    run_id: str,
+    artifact_type: str,
+    outline_payload: dict[str, Any],
+    outline_context: dict[str, Any],
+) -> None:
+    """Persist an approvable outline snapshot and make it the chat's latest."""
+    _run_ref(batch_id, chat_id, run_id).update(
+        {
+            "outline_status": "ready",
+            "outline_artifact_type": artifact_type,
+            "outline_payload": outline_payload,
+            "outline_context": outline_context,
+            "outline_content_hash": _content_hash(outline_payload),
+            "updated_at": SERVER_TIMESTAMP,
+        }
+    )
+    _chat_ref(batch_id, chat_id).update(
+        {"latest_outline_run_id": run_id, "updated_at": SERVER_TIMESTAMP}
+    )
+
+
+def get_approvable_outline_run(
+    *, batch_id: str, chat_id: str, run_id: str, lecturer_id: str
+) -> dict[str, Any] | None:
+    """Return an outline snapshot only when owned and still the latest revision."""
+    chat_snap = _chat_ref(batch_id, chat_id).get()
+    if not chat_snap.exists:
+        return None
+    chat = chat_snap.to_dict() or {}
+    if chat.get("lecturer_id") != lecturer_id:
+        return None
+    run_snap = _run_ref(batch_id, chat_id, run_id).get()
+    if not run_snap.exists:
+        return None
+    data = run_snap.to_dict() or {}
+    data["is_latest_outline"] = str(chat.get("latest_outline_run_id") or "") == run_id
+    return data
+
+
+def claim_approvable_outline_run(
+    *, batch_id: str, chat_id: str, run_id: str, lecturer_id: str, artifact_type: str
+) -> dict[str, Any]:
+    """Atomically consume the latest outline so duplicate approvals cannot race."""
+    db = get_firestore()
+    chat_ref = _chat_ref(batch_id, chat_id)
+    run_ref = _run_ref(batch_id, chat_id, run_id)
+    transaction = db.transaction()
+
+    @firestore.transactional
+    def _claim(txn):
+        chat_snap = chat_ref.get(transaction=txn)
+        run_snap = run_ref.get(transaction=txn)
+        if not chat_snap.exists or not run_snap.exists:
+            raise LookupError("Approved outline run not found")
+        chat = chat_snap.to_dict() or {}
+        data = run_snap.to_dict() or {}
+        if chat.get("lecturer_id") != lecturer_id:
+            raise LookupError("Approved outline run not found")
+        if str(chat.get("latest_outline_run_id") or "") != run_id:
+            raise RuntimeError("A newer outline revision is available")
+        if data.get("outline_status") != "ready":
+            raise RuntimeError("Outline is not ready for approval")
+        if data.get("outline_artifact_type") != artifact_type:
+            raise RuntimeError("Outline artifact type does not match workflow")
+        txn.update(run_ref, {"outline_status": "approved", "updated_at": SERVER_TIMESTAMP})
+        txn.update(chat_ref, {"latest_outline_run_id": "", "updated_at": SERVER_TIMESTAMP})
+        return data
+
+    return _claim(transaction)
+
+
+def _content_hash(payload: dict[str, Any]) -> str:
+    import hashlib
+    import json
+
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def mark_agent_run_pending_artifact_exported(
@@ -383,6 +472,11 @@ def _run_to_dict(data: dict[str, Any]) -> dict[str, Any]:
         "week": data.get("week"),
         "save_draft": bool(data.get("save_draft", False)),
         "pending_artifact": bool(data.get("pending_artifact", False)),
+        "workflow_stage": str(data.get("workflow_stage") or ""),
+        "approval_action": str(data.get("approval_action") or ""),
+        "approved_outline_run_id": str(data.get("approved_outline_run_id") or ""),
+        "outline_status": str(data.get("outline_status") or ""),
+        "outline_artifact_type": str(data.get("outline_artifact_type") or ""),
         "pending_artifact_id": str(data.get("pending_artifact_id") or ""),
         "pending_artifact_status": str(data.get("pending_artifact_status") or ""),
         "artifact_sync_preflight": data.get("artifact_sync_preflight") or {},

@@ -12,6 +12,9 @@ export type AgentInvokePayload = {
   week?: number
   save_draft?: boolean
   pending_artifact?: boolean
+  workflow_stage?: '' | 'outline' | 'full'
+  approval_action?: '' | 'approve_outline'
+  approved_outline_run_id?: string
   connectors?: AgentConnectors
 }
 

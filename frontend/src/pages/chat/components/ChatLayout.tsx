@@ -21,6 +21,7 @@ type Props = Pick<
   | 'messagesEndRef'
   | 'textareaRef'
   | 'handleSend'
+  | 'handleApproveOutline'
   | 'activeGenerateMode'
   | 'setActiveGenerateMode'
   | 'handleInputKeyDown'
@@ -48,6 +49,7 @@ export function ChatLayout(props: Props) {
     messagesEndRef,
     textareaRef,
     handleSend,
+    handleApproveOutline,
     activeGenerateMode,
     setActiveGenerateMode,
     handleInputKeyDown,
@@ -109,6 +111,7 @@ export function ChatLayout(props: Props) {
             runStates={runStates}
             showWelcome={showWelcome}
             sending={sending}
+            onApproveOutline={handleApproveOutline}
             messagesEndRef={messagesEndRef}
             welcomeContent={
               <ChatWelcomeScreen

@@ -260,6 +260,46 @@ def get_approvable_outline_run(
     return data
 
 
+def invalidate_latest_outline_for_followup(
+    *, batch_id: str, chat_id: str, lecturer_id: str
+) -> str:
+    """Mark the latest ready outline stale when the lecturer continues chatting."""
+    db = get_firestore()
+    chat_ref = _chat_ref(batch_id, chat_id)
+    transaction = db.transaction()
+
+    @firestore.transactional
+    def _invalidate(txn):
+        chat_snap = chat_ref.get(transaction=txn)
+        if not chat_snap.exists:
+            return ""
+        chat = chat_snap.to_dict() or {}
+        if chat.get("lecturer_id") != lecturer_id:
+            return ""
+        run_id = str(chat.get("latest_outline_run_id") or "")
+        if not run_id:
+            return ""
+        run_ref = _run_ref(batch_id, chat_id, run_id)
+        run_snap = run_ref.get(transaction=txn)
+        if not run_snap.exists:
+            txn.update(chat_ref, {"latest_outline_run_id": "", "updated_at": SERVER_TIMESTAMP})
+            return ""
+        run = run_snap.to_dict() or {}
+        if run.get("outline_status") != "ready":
+            return ""
+        txn.update(
+            run_ref,
+            {"outline_status": "superseded", "updated_at": SERVER_TIMESTAMP},
+        )
+        txn.update(
+            chat_ref,
+            {"latest_outline_run_id": "", "updated_at": SERVER_TIMESTAMP},
+        )
+        return run_id
+
+    return _invalidate(transaction)
+
+
 def claim_approvable_outline_run(
     *, batch_id: str, chat_id: str, run_id: str, lecturer_id: str, artifact_type: str
 ) -> dict[str, Any]:

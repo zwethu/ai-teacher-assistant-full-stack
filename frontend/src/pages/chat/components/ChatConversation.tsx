@@ -201,6 +201,21 @@ export function ChatMessagesPanel({
       .map((message) => String(message.metadata?.approved_outline_run_id || ''))
       .filter(Boolean),
   )
+  const supersededOutlineRunIds = new Set(
+    safeMessages.flatMap((message, index) => {
+      if (
+        message.role !== 'assistant' ||
+        message.metadata?.workflow_stage !== 'outline' ||
+        !message.run_id
+      ) {
+        return []
+      }
+      const hasLaterFollowup = safeMessages.slice(index + 1).some(
+        (later) => later.role === 'user' && !isGeneratedOutlineApprovalText(later.content),
+      )
+      return hasLaterFollowup ? [message.run_id] : []
+    }),
+  )
 
   return (
     <main className="flex-1 overflow-y-auto">
@@ -222,6 +237,7 @@ export function ChatMessagesPanel({
                 onApproveOutline={onApproveOutline}
                 approvalDisabled={sending}
                 approvalCompleted={Boolean(msg.run_id && completedOutlineRunIds.has(msg.run_id))}
+                approvalSuperseded={Boolean(msg.run_id && supersededOutlineRunIds.has(msg.run_id))}
               />
             ))}
             {sending && !safeMessages.some((msg) => msg.pending) && <ThinkingIndicator />}
@@ -231,4 +247,8 @@ export function ChatMessagesPanel({
       </div>
     </main>
   )
+}
+
+function isGeneratedOutlineApprovalText(content: string) {
+  return content.trim().toLowerCase().startsWith('approve this outline and generate the full ')
 }

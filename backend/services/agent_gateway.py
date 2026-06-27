@@ -61,6 +61,7 @@ from services.batch_service import get_batch
 from services.chat_service import add_message
 from utils.rtdb_client import (
     create_run_meta,
+    finalize_open_run_steps,
     set_run_status,
     write_final_message,
     write_run_error,
@@ -866,7 +867,8 @@ async def _run_agent_background(
                         outline_payload=outline_payload,
                         outline_context=outline_context_snapshot(session_state_after),
                     )
-                    assistant_message_text = render_outline_markdown(artifact_type, outline_payload)
+                    outline_markdown = render_outline_markdown(artifact_type, outline_payload)
+                    assistant_message_text = outline_markdown
                     metadata = {
                         "workflow_stage": "outline",
                         "workflow_type": str(session_state.get("workflow_type") or ""),
@@ -881,6 +883,7 @@ async def _run_agent_background(
                         "pending_exportable": False,
                         "exportable": False,
                     }
+                    _attach_assistant_intro(metadata, final_text, outline_markdown)
                     emit_backend_event(
                         "outline_extract.done", status="done", title="Outline ready for review"
                     )
@@ -1029,6 +1032,13 @@ async def _run_agent_background(
                     mark_exc,
                 )
 
+        # Card-producing workflows replace the persisted message body with
+        # deterministic preview Markdown. Preserve the streamed root presenter
+        # response once, here, so outline/full and future preview-card workflows
+        # cannot diverge by artifact type.
+        if metadata.get("artifact_preview_card") or metadata.get("workflow_stage") == "outline":
+            _attach_assistant_intro(metadata, final_text, assistant_message_text)
+
         # Persist assistant message to Firestore
         try:
             final_msg = add_message(
@@ -1067,6 +1077,7 @@ async def _run_agent_background(
             )
         except Exception as exc:
             logger.warning("Firestore mark done failed run_id=%s: %s", run_id, exc)
+        finalize_open_run_steps(run_id, "done")
         set_run_status(run_id, "done")
         logger.info("gateway background done run_id=%s chars=%d", run_id, len(final_text))
 
@@ -1111,4 +1122,5 @@ async def _run_agent_background(
             logger.warning("Firestore failure message write failed run_id=%s: %s", run_id, message_exc)
         write_run_error(run_id, safe_error)
         write_final_message(run_id, final_error)
+        finalize_open_run_steps(run_id, "failed")
         set_run_status(run_id, "failed")

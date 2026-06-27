@@ -9,6 +9,7 @@ from services.agent_gateway import start_chat_run
 from services.agent_sessions import (
     claim_pending_artifact_export,
     get_agent_run,
+    invalidate_latest_outline_for_followup,
     mark_agent_run_pending_artifact_export_failed,
     mark_agent_run_pending_artifact_exported,
 )
@@ -189,6 +190,25 @@ async def send_message_endpoint(
     chat = get_chat(batch_id, chat_id, lecturer_id)
     if chat is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
+
+    superseded_outline_run_id = invalidate_latest_outline_for_followup(
+        batch_id=batch_id,
+        chat_id=chat_id,
+        lecturer_id=lecturer_id,
+    )
+    if superseded_outline_run_id:
+        try:
+            update_assistant_message_metadata_for_run(
+                batch_id=batch_id,
+                chat_id=chat_id,
+                run_id=superseded_outline_run_id,
+                metadata={"outline_approval_status": "superseded"},
+            )
+        except Exception:
+            logger.exception(
+                "Failed to persist superseded outline message metadata run_id=%s",
+                superseded_outline_run_id,
+            )
 
     return await start_chat_run(
         user_message=body.content,

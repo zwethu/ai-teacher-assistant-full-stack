@@ -38,6 +38,7 @@ export function MessageRow({
   onApproveOutline,
   approvalDisabled = false,
   approvalCompleted = false,
+  approvalSuperseded = false,
 }: {
   msg?: ChatMessage | null
   run?: RunUiState
@@ -45,6 +46,7 @@ export function MessageRow({
   onApproveOutline?: (message: ChatMessage) => void
   approvalDisabled?: boolean
   approvalCompleted?: boolean
+  approvalSuperseded?: boolean
 }) {
   if (!msg) return null
 
@@ -94,19 +96,19 @@ export function MessageRow({
                 <ThinkingIndicator />
               ) : msg.content ? (
                 shouldUseOutlineCard ? (
-                  <OutlineApprovalCard
-                    msg={msg}
-                    disabled={approvalDisabled}
-                    completed={approvalCompleted}
-                    onApprove={() => onApproveOutline?.(msg)}
-                  />
+                  <>
+                    <AssistantIntro content={assistantIntro} />
+                    <OutlineApprovalCard
+                      msg={msg}
+                      disabled={approvalDisabled}
+                      completed={approvalCompleted}
+                      superseded={approvalSuperseded}
+                      onApprove={() => onApproveOutline?.(msg)}
+                    />
+                  </>
                 ) : shouldUseArtifactCard ? (
                   <>
-                    {assistantIntro && (
-                      <div className="mb-3">
-                        <ResponseMarkdown content={assistantIntro} streaming={false} />
-                      </div>
-                    )}
+                    <AssistantIntro content={assistantIntro} />
                     <ArtifactPreviewCard content={msg.content} metadata={msg.metadata || {}} />
                   </>
                 ) : (
@@ -122,6 +124,15 @@ export function MessageRow({
   )
 }
 
+function AssistantIntro({ content }: { content: string }) {
+  if (!content.trim()) return null
+  return (
+    <div className="mb-3">
+      <ResponseMarkdown content={content} streaming={false} />
+    </div>
+  )
+}
+
 function isOutlineApprovalMessage(msg: ChatMessage, isPending: boolean) {
   const metadata = msg.metadata || {}
   return msg.role === 'assistant' && !isPending && msg.status !== 'failed' &&
@@ -130,16 +141,18 @@ function isOutlineApprovalMessage(msg: ChatMessage, isPending: boolean) {
 }
 
 function OutlineApprovalCard({
-  msg, disabled, completed, onApprove,
+  msg, disabled, completed, superseded, onApprove,
 }: {
   msg: ChatMessage
   disabled: boolean
   completed: boolean
+  superseded: boolean
   onApprove: () => void
 }) {
   const metadata = msg.metadata || {}
   const approvalStatus = String(metadata.outline_approval_status || '')
-  const locked = completed || approvalStatus === 'approved'
+  const isSuperseded = superseded || approvalStatus === 'superseded'
+  const locked = completed || isSuperseded || approvalStatus === 'approved'
   const type = String(metadata.outline_artifact_type || metadata.artifact_type || '')
   const label = type === 'lab' ? 'Lab Outline' : type === 'quiz' ? 'Assessment Configuration' : 'Lesson Plan Outline'
   const Icon = type === 'lab' ? FlaskConical : type === 'quiz' ? FileQuestion : BookOpen
@@ -165,6 +178,8 @@ function OutlineApprovalCard({
         >
           {completed
             ? 'Full preview generated'
+            : isSuperseded
+              ? 'Outline revision requested'
             : approvalStatus === 'approved'
               ? 'Outline approved'
               : disabled
@@ -192,7 +207,7 @@ function isGeneratedArtifactPreviewMessage(msg: ChatMessage, isPending: boolean)
     Boolean(metadata.pending_artifact_id) ||
     Boolean(metadata.draft_artifact_id)
 
-  return isArtifactType && (explicitCard || isExportablePreview)
+  return explicitCard || (isArtifactType && isExportablePreview)
 }
 
 function ArtifactPreviewCard({

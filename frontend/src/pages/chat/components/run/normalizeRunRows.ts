@@ -74,6 +74,7 @@ function mergeRow(existing: NormalizedRunRow, next: NormalizedRunRow): Normalize
 export function normalizeRunRows(
   steps: Record<string, AgentRunStep>,
   events: AgentRunEvent[],
+  runStatus: string = 'running',
 ): NormalizedRunRow[] {
   const rows = new Map<string, NormalizedRunRow>()
 
@@ -110,5 +111,13 @@ export function normalizeRunRows(
     rows.set(id, existing ? mergeRow(existing, next) : next)
   }
 
-  return [...rows.values()].sort((a, b) => (a.updated_at || 0) - (b.updated_at || 0))
+  const terminalStatus = runStatus === 'done' ? 'done' : runStatus === 'failed' ? 'failed' : ''
+  return [...rows.values()]
+    .map((row) => {
+      if (!terminalStatus || !['running', 'started'].includes(normalizeStatus(row.status))) {
+        return row
+      }
+      return { ...row, status: terminalStatus }
+    })
+    .sort((a, b) => (a.updated_at || 0) - (b.updated_at || 0))
 }

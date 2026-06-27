@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from services import agent_gateway
 from utils import rtdb_client
@@ -76,6 +76,66 @@ class NativeStreamingTest(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(add_message.call_args.args[3], "".join(chunks))
 
+    async def test_all_full_artifact_cards_preserve_presenter_intro(self) -> None:
+        for artifact_type, workflow_type in (
+            ("lesson_plan", "lesson_plan.generate"),
+            ("lab", "lab.generate"),
+            ("quiz", "assessment.generate"),
+        ):
+            with self.subTest(artifact_type=artifact_type):
+                async def fake_stream(**_kwargs):
+                    yield "Generation is complete."
+
+                pending = {
+                    "pending_artifact_id": f"pending-{artifact_type}",
+                    "artifact_type": artifact_type,
+                    "title": f"{artifact_type} preview",
+                    "week": 4,
+                    "content_hash": "hash",
+                    "preview_markdown": f"# {artifact_type} preview",
+                }
+                with (
+                    patch.object(agent_gateway, "stream_agent_response", fake_stream),
+                    patch.object(agent_gateway, "get_agent_session_state", new=AsyncMock(return_value={})),
+                    patch.object(
+                        agent_gateway,
+                        "maybe_store_pending_artifact_from_session",
+                        return_value=pending,
+                    ),
+                    patch.object(agent_gateway, "write_stream_delta"),
+                    patch.object(agent_gateway, "write_stream_meta"),
+                    patch.object(agent_gateway, "write_run_event"),
+                    patch.object(
+                        agent_gateway,
+                        "add_message",
+                        return_value={"message_id": "m1"},
+                    ) as add_message,
+                    patch.object(agent_gateway, "write_final_message"),
+                    patch.object(agent_gateway, "mark_agent_run_done"),
+                    patch.object(agent_gateway, "set_run_status"),
+                ):
+                    await agent_gateway._run_agent_background(
+                        run_id=f"run-{artifact_type}",
+                        rtdb_run_path=f"agentRuns/run-{artifact_type}",
+                        batch_id="batch1",
+                        chat_id="chat1",
+                        agent_session_id="session1",
+                        lecturer_id="lecturer1",
+                        user_message="generate",
+                        session_state={
+                            "save_draft": False,
+                            "pending_artifact": True,
+                            "workflow_stage": "full",
+                            "workflow_type": workflow_type,
+                            "approved_outline_run_id": "outline-run",
+                        },
+                    )
+
+                metadata = add_message.call_args.kwargs["metadata"]
+                self.assertEqual(metadata["assistant_intro"], "Generation is complete.")
+                self.assertEqual(add_message.call_args.args[3], pending["preview_markdown"])
+                self.assertTrue(metadata["artifact_preview_card"])
+
     def test_stream_delta_metadata_is_optional_and_persisted(self) -> None:
         ref = MagicMock()
         with (
@@ -115,6 +175,36 @@ class NativeStreamingTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["schema_version"], "pnai.run_event.v1")
         self.assertEqual(payload["source"], "backend")
         self.assertEqual(payload["event_type"], "draft_save.started")
+
+    def test_finalize_open_run_steps_only_closes_non_terminal_steps(self) -> None:
+        ref = MagicMock()
+        ref.get.return_value = {
+            "research": {"status": "started", "title": "Searching"},
+            "tool": {"status": "done", "title": "Tool complete"},
+            "optional": {"status": "failed", "title": "Optional lookup failed"},
+        }
+        with (
+            patch.object(rtdb_client, "_ensure_init", return_value=True),
+            patch.object(rtdb_client, "_ref", return_value=ref),
+        ):
+            rtdb_client.finalize_open_run_steps("run1", "done")
+
+        updates = ref.update.call_args.args[0]
+        self.assertEqual(updates["research/status"], "done")
+        self.assertIn("research/updated_at", updates)
+        self.assertNotIn("tool/status", updates)
+        self.assertNotIn("optional/status", updates)
+
+    def test_finalize_open_run_steps_marks_open_steps_failed(self) -> None:
+        ref = MagicMock()
+        ref.get.return_value = {"research": {"status": "running"}}
+        with (
+            patch.object(rtdb_client, "_ensure_init", return_value=True),
+            patch.object(rtdb_client, "_ref", return_value=ref),
+        ):
+            rtdb_client.finalize_open_run_steps("run1", "failed")
+
+        self.assertEqual(ref.update.call_args.args[0]["research/status"], "failed")
 
 
 if __name__ == "__main__":

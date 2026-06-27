@@ -127,6 +127,50 @@ def set_run_status(run_id: str, status: str) -> None:
         logger.warning("RTDB set_run_status failed run_id=%s: %s", run_id, exc)
 
 
+def finalize_open_run_steps(run_id: str, run_status: str) -> None:
+    """Close stale started/running step projections when a run becomes terminal.
+
+    Agent-side progress telemetry is best effort, and some older helpers emit a
+    start record without a matching terminal record. The backend owns the run
+    lifecycle, so its terminal status is the authoritative fallback for those
+    open projections.
+    """
+    if run_status not in {"done", "failed"} or not _ensure_init():
+        return
+    try:
+        steps_ref = _ref(f"agentRuns/{run_id}/steps")
+        steps = steps_ref.get() or {}
+        if not isinstance(steps, dict):
+            return
+
+        terminal_status = "done" if run_status == "done" else "failed"
+        now = int(time.time())
+        updates: dict[str, Any] = {}
+        for step_id, step in steps.items():
+            if not isinstance(step, dict):
+                continue
+            status = str(step.get("status") or "").lower()
+            if status in {"started", "running", "pending", ""}:
+                updates[f"{step_id}/status"] = terminal_status
+                updates[f"{step_id}/updated_at"] = now
+
+        if updates:
+            steps_ref.update(updates)
+            logger.info(
+                "RTDB finalized open run steps run_id=%s run_status=%s count=%d",
+                run_id,
+                run_status,
+                len(updates) // 2,
+            )
+    except Exception as exc:
+        logger.warning(
+            "RTDB finalize_open_run_steps failed run_id=%s status=%s: %s",
+            run_id,
+            run_status,
+            exc,
+        )
+
+
 def write_final_message(
     run_id: str,
     content: str,

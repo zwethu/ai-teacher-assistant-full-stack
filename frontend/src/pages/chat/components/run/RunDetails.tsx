@@ -13,7 +13,7 @@ export function RunDetails({ run, isFinal }: Props) {
   const status = run?.status || 'running'
   const stepCount = useMemo(() => {
     if (!run) return 0
-    return normalizeRunRows(run.steps, run.events).length
+    return normalizeRunRows(run.steps, run.events, status).length
   }, [run])
 
   const [open, setOpen] = useState(status === 'running')
@@ -88,7 +88,7 @@ export function RunDetails({ run, isFinal }: Props) {
               </div>
             )}
 
-            <StepsPanel steps={run.steps} events={run.events} />
+            <StepsPanel steps={run.steps} events={run.events} runStatus={status} />
           </div>
         </div>
       </div>

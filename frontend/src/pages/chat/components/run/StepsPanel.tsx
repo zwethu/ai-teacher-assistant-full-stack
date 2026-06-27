@@ -6,10 +6,14 @@ import { StepTimelineRow } from './StepTimelineRow'
 type Props = {
   steps: Record<string, AgentRunStep>
   events: AgentRunEvent[]
+  runStatus: string
 }
 
-export function StepsPanel({ steps, events }: Props) {
-  const rows = useMemo(() => normalizeRunRows(steps, events), [steps, events])
+export function StepsPanel({ steps, events, runStatus }: Props) {
+  const rows = useMemo(
+    () => normalizeRunRows(steps, events, runStatus),
+    [steps, events, runStatus],
+  )
 
   if (rows.length === 0) return null
 

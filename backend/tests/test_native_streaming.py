@@ -19,7 +19,7 @@ class NativeStreamingTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(lesson["artifact_preview_card"])
         self.assertEqual(lesson["artifact_title"], "Week 1")
-        self.assertFalse(quiz["artifact_preview_card"])
+        self.assertTrue(quiz["artifact_preview_card"])
         self.assertTrue(pending_lab["artifact_preview_card"])
         self.assertEqual(pending_lab["artifact_title"], "Lab 1")
 

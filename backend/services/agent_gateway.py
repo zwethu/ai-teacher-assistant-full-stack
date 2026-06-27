@@ -713,7 +713,7 @@ def _draft_message_metadata(draft: dict[str, Any] | None) -> dict[str, Any]:
         "draft_artifact_id": str(draft.get("id") or draft.get("artifact_id") or ""),
         "artifact_type": artifact_type,
         "artifact_title": str(draft.get("title") or ""),
-        "artifact_preview_card": artifact_type in {"lesson_plan", "lab"},
+        "artifact_preview_card": artifact_type in {"lesson_plan", "lab", "quiz"},
         "week": draft.get("week"),
         "content_hash": draft.get("content_hash"),
         "preview_renderer_version": draft.get("preview_renderer_version"),

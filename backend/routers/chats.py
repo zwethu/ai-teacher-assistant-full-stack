@@ -34,6 +34,7 @@ from services.google_workspace.credentials import (
     assert_google_oauth_valid,
 )
 from utils.firebase_auth import CurrentUser, get_current_user
+from utils.rtdb_client import write_run_event
 
 logger = logging.getLogger(__name__)
 
@@ -237,47 +238,53 @@ async def generate_docs_from_pending_artifact_endpoint(
             detail="Pending artifact export already in progress.",
         )
 
+    def mark_export_failed(error: str) -> None:
+        mark_agent_run_pending_artifact_export_failed(
+            batch_id=batch_id,
+            chat_id=chat_id,
+            run_id=run_id,
+            error=error,
+            export_lock_id=export_lock_id,
+        )
+        write_run_event(
+            run_id,
+            event_type="export.failed",
+            kind="error",
+            status="failed",
+            title="Google Docs export failed",
+            phase="export",
+            detail={"error": error[:500]},
+            batch_id=batch_id,
+            chat_id=chat_id,
+        )
+
+    write_run_event(
+        run_id,
+        event_type="export.started",
+        status="started",
+        title="Exporting artifact to Google Docs",
+        phase="export",
+        batch_id=batch_id,
+        chat_id=chat_id,
+    )
+
     status_value = str(pending.get("status") or "")
     artifact_type = str(pending.get("artifact_type") or "")
     if artifact_type not in {"lesson_plan", "lab"}:
-        mark_agent_run_pending_artifact_export_failed(
-            batch_id=batch_id,
-            chat_id=chat_id,
-            run_id=run_id,
-            error="Pending artifact type is not supported",
-            export_lock_id=export_lock_id,
-        )
+        mark_export_failed("Pending artifact type is not supported")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pending artifact type is not supported")
     if status_value != "exporting":
-        mark_agent_run_pending_artifact_export_failed(
-            batch_id=batch_id,
-            chat_id=chat_id,
-            run_id=run_id,
-            error="Pending artifact is not exportable",
-            export_lock_id=export_lock_id,
-        )
+        mark_export_failed("Pending artifact is not exportable")
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Pending artifact is not exportable")
 
     content = pending.get("content_json")
     if not isinstance(content, dict) or not content:
-        mark_agent_run_pending_artifact_export_failed(
-            batch_id=batch_id,
-            chat_id=chat_id,
-            run_id=run_id,
-            error="Pending artifact content is missing",
-            export_lock_id=export_lock_id,
-        )
+        mark_export_failed("Pending artifact content is missing")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pending artifact content is missing")
     expected_hash = str(pending.get("content_hash") or "")
     actual_hash = content_hash(content)
     if expected_hash and expected_hash != actual_hash:
-        mark_agent_run_pending_artifact_export_failed(
-            batch_id=batch_id,
-            chat_id=chat_id,
-            run_id=run_id,
-            error="Pending artifact content hash mismatch",
-            export_lock_id=export_lock_id,
-        )
+        mark_export_failed("Pending artifact content hash mismatch")
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Pending artifact content hash mismatch")
 
     try:
@@ -296,35 +303,17 @@ async def generate_docs_from_pending_artifact_endpoint(
         else:
             result = export_lesson_plan_draft_to_google_docs(batch_id, artifact_id, lecturer_id)
     except (GoogleOAuthRequiredError, GoogleOAuthInvalidError) as exc:
-        mark_agent_run_pending_artifact_export_failed(
-            batch_id=batch_id,
-            chat_id=chat_id,
-            run_id=run_id,
-            error=str(exc),
-            export_lock_id=export_lock_id,
-        )
+        mark_export_failed(str(exc))
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=GOOGLE_OAUTH_REQUIRED_DETAIL,
         ) from exc
     except PermissionError as exc:
-        mark_agent_run_pending_artifact_export_failed(
-            batch_id=batch_id,
-            chat_id=chat_id,
-            run_id=run_id,
-            error=str(exc),
-            export_lock_id=export_lock_id,
-        )
+        mark_export_failed(str(exc))
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("pending artifact export failed run_id=%s", run_id)
-        mark_agent_run_pending_artifact_export_failed(
-            batch_id=batch_id,
-            chat_id=chat_id,
-            run_id=run_id,
-            error=str(exc),
-            export_lock_id=export_lock_id,
-        )
+        mark_export_failed(str(exc))
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     exported_pending = {
@@ -338,6 +327,16 @@ async def generate_docs_from_pending_artifact_endpoint(
         chat_id=chat_id,
         run_id=run_id,
         pending_artifact=exported_pending,
+    )
+    write_run_event(
+        run_id,
+        event_type="export.done",
+        status="done",
+        title="Google Docs export completed",
+        phase="export",
+        detail={"artifact_type": artifact_type, "artifact_id": artifact_id},
+        batch_id=batch_id,
+        chat_id=chat_id,
     )
 
     metadata = {

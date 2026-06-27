@@ -28,10 +28,8 @@ Frontend reads:
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
-import os
 import uuid
 from typing import Any
 
@@ -65,6 +63,7 @@ from utils.rtdb_client import (
     set_run_status,
     write_final_message,
     write_run_error,
+    write_run_event,
     write_stream_delta,
     write_stream_meta,
 )
@@ -612,50 +611,6 @@ def _pending_artifact_message_metadata(pending: dict[str, Any] | None) -> dict[s
     }
 
 
-def _env_int(name: str, default: int) -> int:
-    try:
-        return int(os.getenv(name, str(default)))
-    except (TypeError, ValueError):
-        return default
-
-
-def split_stream_chunk(text: str, *, max_chars: int = 180) -> list[str]:
-    """Split a large user-visible final-text chunk into exact-join deltas."""
-    if max_chars <= 0 or len(text) <= max_chars:
-        return [text] if text else []
-
-    boundaries = ("\n\n", "\n", ". ", "! ", "? ", "; ", ", ", " ")
-    parts: list[str] = []
-    cursor = 0
-    text_len = len(text)
-
-    while cursor < text_len:
-        hard_end = min(cursor + max_chars, text_len)
-        if hard_end >= text_len:
-            piece = text[cursor:text_len]
-            if piece:
-                parts.append(piece)
-            break
-
-        window = text[cursor:hard_end]
-        cut_offset = -1
-        for boundary in boundaries:
-            found = window.rfind(boundary)
-            if found > 0:
-                cut_offset = found + len(boundary)
-                break
-
-        if cut_offset <= 0:
-            cut_offset = hard_end - cursor
-
-        piece = text[cursor : cursor + cut_offset]
-        if piece:
-            parts.append(piece)
-        cursor += cut_offset
-
-    return parts
-
-
 # ---------------------------------------------------------------------------
 # Background task
 # ---------------------------------------------------------------------------
@@ -681,8 +636,27 @@ async def _run_agent_background(
     final_text_parts: list[str] = []
     chunk_index = 0
     streamed_length = 0
-    delta_max_chars = max(1, _env_int("PNAI_STREAM_DELTA_MAX_CHARS", 180))
-    delta_delay = max(0, _env_int("PNAI_STREAM_DELTA_DELAY_MS", 12)) / 1000
+
+    def emit_backend_event(
+        event_type: str,
+        *,
+        status: str,
+        title: str,
+        kind: str = "process",
+        detail: dict[str, Any] | None = None,
+    ) -> None:
+        write_run_event(
+            run_id,
+            event_type=event_type,
+            kind=kind,
+            status=status,
+            title=title,
+            phase=event_type.rsplit(".", 1)[0],
+            detail=detail,
+            session_id=agent_session_id,
+            batch_id=batch_id,
+            chat_id=chat_id,
+        )
 
     try:
         async for chunk in stream_agent_response(
@@ -694,37 +668,33 @@ async def _run_agent_background(
             if not chunk:
                 continue
             final_text_parts.append(chunk)
-            delta_parts = split_stream_chunk(chunk, max_chars=delta_max_chars)
-            if len(delta_parts) > 1:
-                logger.info(
-                    "stream chunk split run_id=%s original_chars=%d parts=%d",
-                    run_id,
-                    len(chunk),
-                    len(delta_parts),
-                )
-            for delta_index, delta_text in enumerate(delta_parts):
-                write_stream_delta(run_id, chunk_index, delta_text)
-                chunk_index += 1
-                streamed_length += len(delta_text)
-                write_stream_meta(
-                    run_id,
-                    done=False,
-                    chunk_count=chunk_index,
-                    final_length=streamed_length,
-                    response_started=True,
-                )
-                if delta_delay and len(delta_parts) > 1 and delta_index < len(delta_parts) - 1:
-                    await asyncio.sleep(delta_delay)
+            write_stream_delta(
+                run_id,
+                chunk_index,
+                chunk,
+                source="agent_engine",
+                mode="native",
+                upstream_event_kind="final_text",
+            )
+            chunk_index += 1
+            streamed_length += len(chunk)
+            write_stream_meta(
+                run_id,
+                done=False,
+                chunk_count=chunk_index,
+                final_length=streamed_length,
+                response_started=True,
+            )
 
-        final_text = "".join(final_text_parts).strip()
+        final_text = "".join(final_text_parts)
         write_stream_meta(
             run_id,
             done=True,
             chunk_count=chunk_index,
             final_length=len(final_text),
-            response_started=bool(final_text),
+            response_started=bool(final_text.strip()),
         )
-        if not final_text:
+        if not final_text.strip():
             raise RuntimeError("Agent Engine stream completed without any assistant text")
 
         metadata: dict[str, Any] = {}
@@ -732,6 +702,9 @@ async def _run_agent_background(
         try:
             draft = None
             if bool(session_state.get("save_draft")):
+                emit_backend_event(
+                    "draft_save.started", status="started", title="Saving generated draft"
+                )
                 session_state_after = await get_agent_session_state(
                     resource_name=get_agent_engine_resource_name(),
                     user_id=lecturer_id,
@@ -752,7 +725,19 @@ async def _run_agent_background(
                     workflow_type=str(session_state.get("workflow_type") or ""),
                     requested_week=_coerce_week(session_state.get("requested_week")),
                 )
+                emit_backend_event(
+                    "draft_save.done" if draft else "draft_save.failed",
+                    status="done" if draft else "failed",
+                    title="Generated draft saved" if draft else "Generated draft was not saved",
+                    kind="process" if draft else "error",
+                    detail={"saved": bool(draft)},
+                )
             elif bool(session_state.get("pending_artifact")):
+                emit_backend_event(
+                    "pending_artifact.started",
+                    status="started",
+                    title="Preparing artifact preview",
+                )
                 session_state_after = await get_agent_session_state(
                     resource_name=get_agent_engine_resource_name(),
                     user_id=lecturer_id,
@@ -772,6 +757,13 @@ async def _run_agent_background(
                     ),
                     workflow_type=str(session_state.get("workflow_type") or ""),
                     requested_week=_coerce_week(session_state.get("requested_week")),
+                )
+                emit_backend_event(
+                    "pending_artifact.done" if pending else "pending_artifact.failed",
+                    status="done" if pending else "failed",
+                    title="Artifact preview ready" if pending else "Artifact preview was not created",
+                    kind="process" if pending else "error",
+                    detail={"created": bool(pending)},
                 )
                 if pending:
                     metadata = _pending_artifact_message_metadata(pending)
@@ -800,6 +792,16 @@ async def _run_agent_background(
                     metadata.get("week"),
                 )
         except Exception as draft_exc:
+            operation = (
+                "draft_save" if bool(session_state.get("save_draft")) else "pending_artifact"
+            )
+            emit_backend_event(
+                f"{operation}.failed",
+                status="failed",
+                title="Artifact persistence failed",
+                kind="error",
+                detail={"error": str(draft_exc)[:500]},
+            )
             logger.warning(
                 "Generated content returned, but draft artifact save failed run_id=%s: %s",
                 run_id,
@@ -820,18 +822,32 @@ async def _run_agent_background(
                 )
 
         # Persist assistant message to Firestore
-        final_msg = add_message(
-            batch_id,
-            chat_id,
-            "assistant",
-            assistant_message_text,
-            lecturer_id,
-            run_id=run_id,
-            metadata=metadata,
-        )
-
-        # Write final message to RTDB for frontend live message display
-        write_final_message(run_id, assistant_message_text, metadata=metadata)
+        try:
+            final_msg = add_message(
+                batch_id,
+                chat_id,
+                "assistant",
+                assistant_message_text,
+                lecturer_id,
+                run_id=run_id,
+                metadata=metadata,
+            )
+            write_final_message(run_id, assistant_message_text, metadata=metadata)
+            emit_backend_event(
+                "final_message.persisted",
+                status="done",
+                title="Final message persisted",
+                kind="message",
+            )
+        except Exception as message_exc:
+            emit_backend_event(
+                "final_message.failed",
+                status="failed",
+                title="Final message persistence failed",
+                kind="error",
+                detail={"error": str(message_exc)[:500]},
+            )
+            raise
 
         # Mark run complete
         try:
@@ -859,6 +875,13 @@ async def _run_agent_background(
         except Exception as stream_exc:
             logger.warning("RTDB stream meta failure failed run_id=%s: %s", run_id, stream_exc)
         safe_error = safe_run_error_message(exc)
+        emit_backend_event(
+            "run.failed",
+            status="failed",
+            title="Agent run failed",
+            kind="error",
+            detail={"error": safe_error},
+        )
         final_error = (
             "The agent run failed before producing a final response. "
             f"Error: {safe_error}"

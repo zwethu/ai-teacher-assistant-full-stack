@@ -14,6 +14,9 @@ export type AgentRunStatus = 'running' | 'done' | 'failed'
 export type AgentRunEvent = {
   event_id: string
   run_id?: string
+  schema_version?: string
+  source?: string
+  event_type?: string
   kind:
     | 'process'
     | 'tool'
@@ -47,6 +50,9 @@ export type AgentRunStep = {
 export type AgentRunDelta = {
   index: number
   delta: string
+  source?: string
+  mode?: string
+  upstream_event_kind?: string
   created_at?: number
 }
 
@@ -281,6 +287,9 @@ function normalizeEvent(
   const event = {
     event_id: String(value.event_id || key || `${runId}-event`),
     run_id: String(value.run_id || runId),
+    schema_version: value.schema_version ? String(value.schema_version) : undefined,
+    source: value.source ? String(value.source) : undefined,
+    event_type: value.event_type ? String(value.event_type) : undefined,
     kind: String(value.kind || 'process'),
     status: value.status ? String(value.status) : undefined,
     title: value.title ? String(value.title) : undefined,
@@ -311,6 +320,11 @@ function normalizeDelta(key: string | null, raw: unknown): AgentRunDelta | null 
   return {
     index,
     delta,
+    source: value.source ? String(value.source) : undefined,
+    mode: value.mode ? String(value.mode) : undefined,
+    upstream_event_kind: value.upstream_event_kind
+      ? String(value.upstream_event_kind)
+      : undefined,
     created_at: toNumber(value.created_at),
   }
 }

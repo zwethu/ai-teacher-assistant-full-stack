@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+import uuid
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -136,7 +137,6 @@ def write_final_message(
     if not _ensure_init():
         return
     try:
-        import uuid
         msg_id = uuid.uuid4().hex[:16]
         message = {
             "message_id": msg_id,
@@ -151,7 +151,15 @@ def write_final_message(
         logger.warning("RTDB write_final_message failed run_id=%s: %s", run_id, exc)
 
 
-def write_stream_delta(run_id: str, index: int, delta: str) -> None:
+def write_stream_delta(
+    run_id: str,
+    index: int,
+    delta: str,
+    *,
+    source: str | None = None,
+    mode: str | None = None,
+    upstream_event_kind: str | None = None,
+) -> None:
     """Write one assistant text stream chunk to RTDB."""
     if not delta:
         return
@@ -159,13 +167,67 @@ def write_stream_delta(run_id: str, index: int, delta: str) -> None:
         return
     try:
         key = str(index)
-        _ref(f"agentRuns/{run_id}/stream_deltas/{key}").set({
+        payload: dict[str, Any] = {
             "index": index,
             "delta": delta,
             "created_at": int(time.time()),
-        })
+        }
+        if source:
+            payload["source"] = source
+        if mode:
+            payload["mode"] = mode
+        if upstream_event_kind:
+            payload["upstream_event_kind"] = upstream_event_kind
+        _ref(f"agentRuns/{run_id}/stream_deltas/{key}").set(payload)
     except Exception as exc:
         logger.warning("RTDB write_stream_delta failed run_id=%s index=%s: %s", run_id, index, exc)
+
+
+def write_run_event(
+    run_id: str,
+    *,
+    event_type: str,
+    kind: str = "process",
+    status: str = "done",
+    title: str = "",
+    phase: str = "",
+    summary: str = "",
+    detail: dict[str, Any] | None = None,
+    session_id: str = "",
+    batch_id: str = "",
+    chat_id: str = "",
+    parent_id: str = "",
+) -> str:
+    """Append one backend-owned event using the shared run-event schema."""
+    event_id = uuid.uuid4().hex[:16]
+    if not _ensure_init():
+        return event_id
+    event = {
+        "schema_version": "pnai.run_event.v1",
+        "source": "backend",
+        "event_type": event_type,
+        "event_id": event_id,
+        "run_id": run_id,
+        "session_id": session_id,
+        "batch_id": batch_id,
+        "chat_id": chat_id,
+        "kind": kind,
+        "phase": phase,
+        "parent_id": parent_id,
+        "agent": "",
+        "title": title or event_type,
+        "status": status,
+        "tool_name": "",
+        "tool_call_id": "",
+        "summary": summary,
+        "detail": detail or {},
+        "created_at": int(time.time()),
+    }
+    try:
+        _ref(f"agentRuns/{run_id}/events/{event_id}").set(event)
+    except Exception as exc:
+        logger.warning("RTDB write_run_event failed run_id=%s event_type=%s: %s", run_id, event_type, exc)
+    return event_id
 
 
 def write_stream_meta(

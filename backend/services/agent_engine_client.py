@@ -78,6 +78,7 @@ _INTERNAL_TEXT_PREFIXES = (
 )
 _INTERNAL_MARKERS = ("thought", "thinking", "reasoning", "internal", "model_thinking")
 _TOOL_FIELDS = ("function_call", "function_response", "tool_call", "tool_response")
+_PUBLIC_RESPONSE_AUTHOR = "pnai_root_agent"
 
 
 def get_agent_engine_resource_name() -> str:
@@ -259,6 +260,7 @@ async def _sdk_stream(
     try:
         event_count = 0
         final_chunk_count = 0
+        saw_native_partial = False
         last_event_summary = ""
         async for event in stream:
             event_count += 1
@@ -276,8 +278,18 @@ async def _sdk_stream(
             error = _event_error(event)
             if error:
                 raise RuntimeError(f"Agent Engine returned an error event: {error}")
+            if _event_author(event) != _PUBLIC_RESPONSE_AUTHOR:
+                continue
             chunk = _event_text(event)
             if chunk:
+                is_partial = _event_is_partial(event)
+                if not is_partial and saw_native_partial:
+                    logger.debug(
+                        "Ignoring aggregate root response after native partials event_id=%s",
+                        _event_id(event),
+                    )
+                    continue
+                saw_native_partial = saw_native_partial or is_partial
                 final_chunk_count += 1
                 if _DEBUG_STREAM_TEXT:
                     logger.debug("Agent Engine final text chunk: %r", chunk)
@@ -420,6 +432,18 @@ def _event_text(event: Any) -> str:
     return _content_text(getattr(event, "content", None))
 
 
+def _event_author(event: Any) -> str:
+    return str(_get_value(event, "author") or "")
+
+
+def _event_id(event: Any) -> str:
+    return str(_get_value(event, "id") or "")
+
+
+def _event_is_partial(event: Any) -> bool:
+    return _truthy(_get_value(event, "partial"))
+
+
 def _content_text(content: Any) -> str:
     if not content:
         return ""
@@ -450,10 +474,10 @@ def _event_kind(event: Any) -> str:
         return "error"
     if _has_internal_marker(event) or _event_level_thought(event):
         return "thinking"
-    if _event_has_final_text(event):
-        return "final_text"
     if _event_has_tool_or_function_part(event):
         return "tool"
+    if _event_has_final_text(event):
+        return "final_text"
     return "internal"
 
 
@@ -595,7 +619,8 @@ def _recover_final_chunks_from_stream_exception(exc: Exception) -> list[str]:
     if not raw:
         return []
 
-    chunks: list[str] = []
+    partial_chunks: list[str] = []
+    complete_chunks: list[str] = []
     decoder = json.JSONDecoder()
     index = 0
     while index < len(raw):
@@ -606,12 +631,18 @@ def _recover_final_chunks_from_stream_exception(exc: Exception) -> list[str]:
         try:
             event, next_index = decoder.raw_decode(raw, index)
         except json.JSONDecodeError:
-            return chunks
+            return partial_chunks or complete_chunks
+        if _event_author(event) != _PUBLIC_RESPONSE_AUTHOR:
+            index = next_index
+            continue
         text = _event_text(event)
         if text:
-            chunks.append(text)
+            if _event_is_partial(event):
+                partial_chunks.append(text)
+            else:
+                complete_chunks.append(text)
         index = next_index
-    return chunks
+    return partial_chunks or complete_chunks
 
 
 def _extract_raw_response_from_exception(exc: Exception) -> str:

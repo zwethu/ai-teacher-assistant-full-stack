@@ -6,6 +6,50 @@ from utils import rtdb_client
 
 
 class NativeStreamingTest(unittest.IsolatedAsyncioTestCase):
+    def test_web_search_metadata_is_bounded_and_sanitized(self) -> None:
+        state = {
+            "last_web_search": {
+                "status": "success",
+                "extraction_mode": "grounding_metadata",
+                "queries": [f"query {index}" for index in range(12)],
+                "sources": [
+                    {"index": 1, "title": "Official", "url": "https://example.edu/path#fragment", "supports": "Evidence"},
+                    {"index": 2, "title": "Unsafe", "url": "javascript:alert(1)"},
+                ],
+                "citations": [
+                    {"index": 1, "source_index": 1, "url": "https://wrong.example", "cited_text": "Claim"},
+                    {"index": 2, "source_index": 99, "url": "https://missing.example"},
+                ],
+            }
+        }
+        result = agent_gateway._web_search_message_metadata(
+            state, visible_text="Answer [1]", message_metadata={}
+        )
+        self.assertTrue(result["web_search_used"])
+        self.assertEqual(len(result["web_queries"]), 8)
+        self.assertEqual(result["web_sources"][0]["url"], "https://example.edu/path")
+        self.assertEqual(result["web_citations"][0]["url"], "https://example.edu/path")
+        self.assertEqual(len(result["web_sources"]), 1)
+
+    def test_web_search_metadata_skips_failed_and_unreferenced_cards(self) -> None:
+        source = {"index": 1, "title": "Official", "url": "https://example.edu/path"}
+        self.assertEqual(
+            agent_gateway._web_search_message_metadata(
+                {"last_web_search": {"status": "failed", "sources": [source]}},
+                visible_text="Answer",
+                message_metadata={},
+            ),
+            {},
+        )
+        self.assertEqual(
+            agent_gateway._web_search_message_metadata(
+                {"last_web_search": {"status": "success", "sources": [source]}},
+                visible_text="# Artifact preview",
+                message_metadata={"artifact_preview_card": True},
+            ),
+            {},
+        )
+
     def test_preview_card_metadata_is_limited_to_lesson_plans_and_labs(self) -> None:
         lesson = agent_gateway._draft_message_metadata(
             {"id": "a1", "artifact_type": "lesson_plan", "title": "Week 1"}

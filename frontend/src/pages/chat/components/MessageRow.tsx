@@ -30,6 +30,13 @@ import {
 } from '../../../services/artifactService'
 import type { RunUiState } from '../runTypes'
 import { splitSourcesSection } from '../utils/splitSourcesSection'
+import {
+  citationRemarkPlugin,
+  markdownUrls,
+  normalizeWebCitations,
+  normalizeWebSources,
+  type WebSourceMetadata,
+} from '../utils/webCitations'
 import { RunDetails } from './run/RunDetails'
 import { ThinkingPanel } from './run/ThinkingPanel'
 import { CourseBlueprintReviewModal } from './CourseBlueprintReviewModal'
@@ -121,7 +128,7 @@ export function MessageRow({
               ) : msg.content ? (
                 shouldUseOutlineCard ? (
                   <>
-                    <AssistantIntro content={assistantIntro} />
+                    <AssistantIntro content={assistantIntro} metadata={msg.metadata} />
                     <OutlineApprovalCard
                       msg={msg}
                       disabled={approvalDisabled}
@@ -132,11 +139,11 @@ export function MessageRow({
                   </>
                 ) : shouldUseArtifactCard ? (
                   <>
-                    <AssistantIntro content={assistantIntro} />
+                    <AssistantIntro content={assistantIntro} metadata={msg.metadata} />
                     <ArtifactPreviewCard content={msg.content} metadata={msg.metadata || {}} />
                   </>
                 ) : (
-                  <ResponseMarkdown content={msg.content} streaming={isPending} />
+                  <ResponseMarkdown content={msg.content} streaming={isPending} metadata={msg.metadata} />
                 )
               ) : null}
             </div>
@@ -170,11 +177,11 @@ export function isCourseBlueprintSourceEligible(
     !metadata.course_blueprint_saved_id
 }
 
-function AssistantIntro({ content }: { content: string }) {
+function AssistantIntro({ content, metadata }: { content: string; metadata?: Record<string, unknown> }) {
   if (!content.trim()) return null
   return (
     <div className="mb-3">
-      <ResponseMarkdown content={content} streaming={false} />
+      <ResponseMarkdown content={content} streaming={false} metadata={metadata} />
     </div>
   )
 }
@@ -382,9 +389,21 @@ function stripInlineMarkdown(value: string) {
     .trim()
 }
 
-function ResponseMarkdown({ content, streaming }: { content: string; streaming: boolean }) {
+export function ResponseMarkdown({
+  content,
+  streaming,
+  metadata,
+}: {
+  content: string
+  streaming: boolean
+  metadata?: Record<string, unknown>
+}) {
   const [sourcesOpen, setSourcesOpen] = useState(false)
   const { body, sources } = splitSourcesSection(content)
+  const webSources = normalizeWebSources(metadata)
+  const citations = normalizeWebCitations(metadata)
+  const existingUrls = markdownUrls(sources)
+  const uniqueWebSources = webSources.filter((source) => !existingUrls.has(source.url))
 
   return (
     <div className="animate-in fade-in duration-300">
@@ -394,8 +413,8 @@ function ResponseMarkdown({ content, streaming }: { content: string; streaming: 
           Generating...
         </div>
       )}
-      <MarkdownBlock content={body || content} />
-      {sources && (
+      <MarkdownBlock content={body || content} webSources={webSources} />
+      {(sources || uniqueWebSources.length > 0) && (
         <div className="mt-3">
           <button
             type="button"
@@ -408,7 +427,10 @@ function ResponseMarkdown({ content, streaming }: { content: string; streaming: 
           </button>
           {sourcesOpen && (
             <div className="mt-2 rounded-lg border border-slate-200 bg-white/70 px-3 py-2 text-sm">
-              <MarkdownBlock content={sources} />
+              {sources && <MarkdownBlock content={sources} />}
+              {uniqueWebSources.length > 0 && (
+                <WebSourcesList sources={uniqueWebSources} citations={citations} hasMarkdownSources={Boolean(sources)} />
+              )}
             </div>
           )}
         </div>
@@ -417,10 +439,43 @@ function ResponseMarkdown({ content, streaming }: { content: string; streaming: 
   )
 }
 
-function MarkdownBlock({ content }: { content: string }) {
+export function WebSourcesList({
+  sources,
+  citations,
+  hasMarkdownSources,
+}: {
+  sources: WebSourceMetadata[]
+  citations: ReturnType<typeof normalizeWebCitations>
+  hasMarkdownSources: boolean
+}) {
+  return (
+    <div className={hasMarkdownSources ? 'mt-3 border-t border-slate-200 pt-3' : ''}>
+      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Web Sources</div>
+      <ol className="space-y-2">
+        {sources.map((source) => {
+          const citedText = citations.find((citation) => citation.source_index === source.index)?.cited_text
+          return (
+            <li key={source.url} className="flex gap-2 text-xs leading-5">
+              <span className="font-semibold text-emerald-700">[{source.index}]</span>
+              <div className="min-w-0">
+                <a href={source.url} target="_blank" rel="noreferrer" className="font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-800">{source.title}</a>
+                <div className="truncate text-slate-500">{source.domain}</div>
+                {(source.supports || citedText) && <div className="text-slate-600">{source.supports || citedText}</div>}
+              </div>
+            </li>
+          )
+        })}
+      </ol>
+    </div>
+  )
+}
+
+function MarkdownBlock({ content, webSources = [] }: { content: string; webSources?: WebSourceMetadata[] }) {
+  const sourceByIndex = new Map(webSources.map((source) => [source.index, source]))
+  const sourceByUrl = new Map(webSources.map((source) => [source.url, source]))
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={[remarkGfm, citationRemarkPlugin(sourceByIndex)]}
       rehypePlugins={[rehypeSanitize]}
       components={{
         h1: ({ ...props }) => <h1 className="mb-4 mt-2 border-b border-slate-200 pb-2 text-2xl font-bold text-slate-950" {...props} />,
@@ -430,14 +485,21 @@ function MarkdownBlock({ content }: { content: string }) {
         ul: ({ ...props }) => <ul className="my-3 list-disc space-y-1.5 pl-6" {...props} />,
         ol: ({ ...props }) => <ol className="my-3 list-decimal space-y-1.5 pl-6" {...props} />,
         li: ({ ...props }) => <li className="pl-1" {...props} />,
-        a: ({ ...props }) => (
-          <a
-            className="break-words font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-800"
-            target="_blank"
-            rel="noreferrer"
-            {...props}
-          />
-        ),
+        a: ({ href, children, ...props }) => {
+          const source = href ? sourceByUrl.get(href) : undefined
+          const isCitation = Boolean(source && /^\[\d+\]$/.test(String(children)))
+          return (
+            <a
+              href={href}
+              className={isCitation
+                ? 'mx-0.5 inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 align-baseline text-xs font-semibold text-emerald-700 no-underline hover:bg-emerald-100'
+                : 'break-words font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-800'}
+              target="_blank"
+              rel="noreferrer"
+              {...props}
+            >{children}</a>
+          )
+        },
         table: ({ ...props }) => (
           <div className="my-3 max-w-full overflow-x-auto rounded-lg border border-slate-200">
             <table className="min-w-full border-collapse divide-y divide-slate-200 text-sm" {...props} />

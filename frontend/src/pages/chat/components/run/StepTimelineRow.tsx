@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, Wrench } from 'lucide-react'
+import { ChevronDown, ChevronRight, ExternalLink, Search, Wrench } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import type { NormalizedRunRow } from './normalizeRunRows'
 
@@ -9,6 +9,7 @@ type Props = {
 export function StepTimelineRow({ row }: Props) {
   const [open, setOpen] = useState(false)
   const link = artifactLink(row.detail)
+  const webSearchDetails = webSearchEventDetails(row)
   const hasDetails =
     Boolean(row.summary) ||
     Boolean(row.detail && Object.keys(row.detail).length > 0) ||
@@ -18,7 +19,7 @@ export function StepTimelineRow({ row }: Props) {
     <CollapsibleRow
       open={open}
       onToggle={() => setOpen((value) => !value)}
-      icon={row.kind === 'tool' ? <Wrench className="h-3.5 w-3.5 flex-shrink-0 text-slate-500" /> : <ChevronIcon open={open} />}
+      icon={webSearchDetails ? <Search className="h-3.5 w-3.5 flex-shrink-0 text-emerald-600" /> : row.kind === 'tool' ? <Wrench className="h-3.5 w-3.5 flex-shrink-0 text-slate-500" /> : <ChevronIcon open={open} />}
       title={row.title}
       status={row.status}
       failed={row.kind === 'error' || row.status === 'failed'}
@@ -26,9 +27,11 @@ export function StepTimelineRow({ row }: Props) {
       expanded={
         <>
           {row.summary && <div className="text-slate-600">{row.summary}</div>}
-          {row.detail && Object.keys(row.detail).length > 0 && (
-            <DetailBlock detail={row.detail} />
-          )}
+          {webSearchDetails || (row.detail && Object.keys(row.detail).length > 0) ? (
+            webSearchDetails ? <WebSearchDetail detail={row.detail || {}} /> : (
+            <DetailBlock detail={row.detail || {}} />
+            )
+          ) : null}
           {link && (
             <a
               href={link}
@@ -42,6 +45,32 @@ export function StepTimelineRow({ row }: Props) {
         </>
       }
     />
+  )
+}
+
+function webSearchEventDetails(row: NormalizedRunRow): boolean {
+  const source = row.source
+  return Boolean(source && 'event_type' in source && String(source.event_type || '').startsWith('web_search.'))
+}
+
+export function WebSearchDetail({ detail }: { detail: Record<string, unknown> }) {
+  const request = typeof detail.research_request === 'string' ? detail.research_request : ''
+  const queries = Array.isArray(detail.queries) ? detail.queries.filter((value): value is string => typeof value === 'string').slice(0, 8) : []
+  const sources = Array.isArray(detail.sources) ? detail.sources.filter((value): value is Record<string, unknown> => Boolean(value && typeof value === 'object')).slice(0, 10) : []
+  const sourceCount = Number(detail.source_count)
+  const citationCount = Number(detail.citation_count)
+  const mode = typeof detail.extraction_mode === 'string' ? detail.extraction_mode : ''
+  return (
+    <div className="space-y-2">
+      {request && <div><div className="font-semibold text-slate-700">Research request</div><div>{request}</div></div>}
+      {queries.length > 0 && <div><div className="mb-1 font-semibold text-slate-700">Queries</div><div className="flex flex-wrap gap-1">{queries.map((query) => <span key={query} className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5">{query}</span>)}</div></div>}
+      {sources.length > 0 && <div><div className="mb-1 font-semibold text-slate-700">Sources checked</div><div className="space-y-1">{sources.map((source, index) => {
+        const url = typeof source.url === 'string' && /^https?:\/\//.test(source.url) ? source.url : ''
+        const title = String(source.title || source.domain || `Source ${index + 1}`)
+        return url ? <a key={url} href={url} target="_blank" rel="noreferrer" className="flex items-center gap-1 font-medium text-emerald-700 underline underline-offset-2"><ExternalLink className="h-3 w-3" />{title}</a> : <div key={`${title}-${index}`}>{title}</div>
+      })}</div></div>}
+      {(Number.isFinite(sourceCount) || Number.isFinite(citationCount) || mode) && <div className="text-slate-500">{Number.isFinite(sourceCount) ? `${sourceCount} sources` : ''}{Number.isFinite(sourceCount) && Number.isFinite(citationCount) ? ' · ' : ''}{Number.isFinite(citationCount) ? `${citationCount} citations` : ''}{mode ? ` · ${mode.replaceAll('_', ' ')}` : ''}</div>}
+    </div>
   )
 }
 
@@ -105,7 +134,7 @@ function ChevronIcon({ open }: { open: boolean }) {
   )
 }
 
-function DetailBlock({ detail }: { detail: Record<string, unknown> }) {
+export function DetailBlock({ detail }: { detail: Record<string, unknown> }) {
   return (
     <pre className="max-h-40 overflow-auto rounded bg-slate-50 p-2 text-[11px] leading-4 text-slate-700">
       {JSON.stringify(detail, null, 2)}

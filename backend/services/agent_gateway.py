@@ -30,8 +30,10 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import BackgroundTasks, HTTPException, status
 
@@ -286,6 +288,12 @@ def _build_session_state(
         "term": batch.term,
         # Feature flags
         "enable_web_search": connectors.get("web_search", True),
+        # Per-run web evidence must never leak forward from the long-lived session.
+        "web_search_status": "not_run",
+        "last_web_search": {},
+        "last_web_research_request": "",
+        "last_web_grounding_structured": {},
+        "last_web_grounding_raw_preview": {},
         "workflow_type": workflow_type,
         "requested_week": week,
         "save_draft": save_draft,
@@ -821,6 +829,138 @@ def _attach_assistant_intro(
         metadata["assistant_intro"] = intro
 
 
+def _safe_web_url(value: Any) -> str:
+    raw = str(value or "").strip()[:500]
+    try:
+        parsed = urlsplit(raw)
+    except ValueError:
+        return ""
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+        return ""
+    if parsed.username or parsed.password:
+        return ""
+    try:
+        port = parsed.port
+    except ValueError:
+        return ""
+    host = parsed.hostname.lower()
+    netloc = host
+    if port and not (
+        (parsed.scheme.lower() == "http" and port == 80)
+        or (parsed.scheme.lower() == "https" and port == 443)
+    ):
+        netloc = f"{host}:{port}"
+    return urlunsplit((parsed.scheme.lower(), netloc, parsed.path, parsed.query, ""))[:500]
+
+
+def _web_search_message_metadata(
+    state: dict[str, Any],
+    *,
+    visible_text: str,
+    message_metadata: dict[str, Any],
+) -> dict[str, Any]:
+    raw = state.get("last_web_search")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+    if not isinstance(raw, dict) or raw.get("status") != "success":
+        return {}
+
+    sources: list[dict[str, Any]] = []
+    source_by_original_index: dict[int, dict[str, Any]] = {}
+    seen_urls: set[str] = set()
+    seen_indices: set[int] = set()
+    for item in (raw.get("sources") or [])[:20]:
+        if not isinstance(item, dict):
+            continue
+        url = _safe_web_url(item.get("url"))
+        if not url or url in seen_urls:
+            continue
+        try:
+            original_index = int(item.get("index") or len(sources) + 1)
+        except (TypeError, ValueError):
+            original_index = len(sources) + 1
+        if original_index < 1 or original_index in seen_indices:
+            original_index = next(
+                index for index in range(1, 1000) if index not in seen_indices
+            )
+        seen_urls.add(url)
+        seen_indices.add(original_index)
+        source = {
+            "index": original_index,
+            "title": str(item.get("title") or item.get("domain") or url)[:180],
+            "url": url,
+            "domain": (urlsplit(url).hostname or "")[:180],
+            "supports": str(item.get("supports") or "")[:300],
+        }
+        sources.append(source)
+        source_by_original_index[original_index] = source
+        if len(sources) >= 10:
+            break
+    if not sources:
+        return {}
+
+    citations: list[dict[str, Any]] = []
+    for item in (raw.get("citations") or [])[:40]:
+        if not isinstance(item, dict):
+            continue
+        try:
+            original_source_index = int(item.get("source_index"))
+        except (TypeError, ValueError):
+            continue
+        source = source_by_original_index.get(original_source_index)
+        if not source:
+            continue
+        citations.append({
+            "index": len(citations) + 1,
+            "source_index": source["index"],
+            "title": source["title"],
+            "url": source["url"],
+            "domain": source["domain"],
+            "cited_text": str(item.get("cited_text") or "")[:300],
+        })
+        if len(citations) >= 20:
+            break
+
+    is_card = bool(
+        message_metadata.get("artifact_preview_card")
+        or message_metadata.get("outline_approvable")
+        or message_metadata.get("pending_exportable")
+        or message_metadata.get("export_result")
+    )
+    if is_card:
+        text = "\n".join(
+            filter(
+                None,
+                [visible_text, str(message_metadata.get("assistant_intro") or "")],
+            )
+        )
+        referenced = any(
+            re.search(rf"\[{source['index']}\](?!\()", text) or source["url"] in text
+            for source in sources
+        )
+        if not referenced:
+            return {}
+
+    queries = [
+        str(value)[:300]
+        for value in (raw.get("queries") or [])
+        if str(value).strip()
+    ][:8]
+    mode = str(raw.get("extraction_mode") or "none")
+    if mode not in {"grounding_metadata", "model_text_fallback", "none"}:
+        mode = "none"
+    return {
+        "web_search_used": True,
+        "web_search_extraction_mode": mode,
+        "web_queries": queries,
+        "web_sources": sources,
+        "web_citations": citations,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Background task
 # ---------------------------------------------------------------------------
@@ -846,6 +986,22 @@ async def _run_agent_background(
     final_text_parts: list[str] = []
     chunk_index = 0
     streamed_length = 0
+    session_state_after_cache: dict[str, Any] | None = None
+
+    async def load_session_state_after() -> dict[str, Any]:
+        nonlocal session_state_after_cache
+        if session_state_after_cache is not None:
+            return session_state_after_cache
+        resource_name = get_agent_engine_resource_name()
+        if not resource_name:
+            session_state_after_cache = {}
+            return session_state_after_cache
+        session_state_after_cache = await get_agent_session_state(
+            resource_name=resource_name,
+            user_id=lecturer_id,
+            session_id=agent_session_id,
+        )
+        return session_state_after_cache
 
     def emit_backend_event(
         event_type: str,
@@ -915,11 +1071,7 @@ async def _run_agent_background(
                 emit_backend_event(
                     "outline_extract.started", status="started", title="Reading generated outline"
                 )
-                session_state_after = await get_agent_session_state(
-                    resource_name=get_agent_engine_resource_name(),
-                    user_id=lecturer_id,
-                    session_id=agent_session_id,
-                )
+                session_state_after = await load_session_state_after()
                 outline = extract_outline_from_state(
                     session_state_after, str(session_state.get("workflow_type") or "")
                 )
@@ -974,11 +1126,7 @@ async def _run_agent_background(
                 emit_backend_event(
                     "draft_save.started", status="started", title="Saving generated draft"
                 )
-                session_state_after = await get_agent_session_state(
-                    resource_name=get_agent_engine_resource_name(),
-                    user_id=lecturer_id,
-                    session_id=agent_session_id,
-                )
+                session_state_after = await load_session_state_after()
                 draft = maybe_save_generated_draft_from_session(
                     batch_id=batch_id,
                     lecturer_id=lecturer_id,
@@ -1007,11 +1155,7 @@ async def _run_agent_background(
                     status="started",
                     title="Preparing artifact preview",
                 )
-                session_state_after = await get_agent_session_state(
-                    resource_name=get_agent_engine_resource_name(),
-                    user_id=lecturer_id,
-                    session_id=agent_session_id,
-                )
+                session_state_after = await load_session_state_after()
                 pending = maybe_store_pending_artifact_from_session(
                     batch_id=batch_id,
                     lecturer_id=lecturer_id,
@@ -1116,13 +1260,8 @@ async def _run_agent_background(
             "", "consulting", "course_consultant", "course_consultant.read",
         }:
             try:
-                resource_name = get_agent_engine_resource_name()
-                if resource_name:
-                    session_state_after = await get_agent_session_state(
-                        resource_name=resource_name,
-                        user_id=lecturer_id,
-                        session_id=agent_session_id,
-                    )
+                session_state_after = await load_session_state_after()
+                if session_state_after:
                     metadata.update(
                         course_blueprint_suggestion_metadata(
                             session_state_after.get("course_blueprint_save_suggestion"),
@@ -1138,6 +1277,22 @@ async def _run_agent_background(
                     run_id,
                     suggestion_exc,
                 )
+
+        try:
+            session_state_after = await load_session_state_after()
+            metadata.update(
+                _web_search_message_metadata(
+                    session_state_after,
+                    visible_text=assistant_message_text,
+                    message_metadata=metadata,
+                )
+            )
+        except Exception as citation_exc:
+            logger.warning(
+                "Web citation metadata read failed run_id=%s: %s",
+                run_id,
+                citation_exc,
+            )
 
         # Persist assistant message to Firestore
         try:

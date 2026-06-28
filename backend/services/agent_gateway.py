@@ -49,6 +49,7 @@ from services.agent_sessions import (
     mark_agent_run_failed,
     mark_agent_run_pending_artifact,
     mark_agent_run_outline_ready,
+    persist_agent_run_timeline,
 )
 from services.artifact_service import (
     content_hash,
@@ -66,6 +67,7 @@ from services.course_blueprint_service import (
 from utils.rtdb_client import (
     create_run_meta,
     finalize_open_run_steps,
+    read_run_timeline_snapshot,
     set_run_status,
     write_final_message,
     write_run_error,
@@ -1174,6 +1176,15 @@ async def _run_agent_background(
             logger.warning("Firestore mark done failed run_id=%s: %s", run_id, exc)
         finalize_open_run_steps(run_id, "done")
         set_run_status(run_id, "done")
+        try:
+            persist_agent_run_timeline(
+                batch_id=batch_id,
+                chat_id=chat_id,
+                run_id=run_id,
+                timeline_snapshot=read_run_timeline_snapshot(run_id),
+            )
+        except Exception as timeline_exc:
+            logger.warning("Timeline persistence failed run_id=%s: %s", run_id, timeline_exc)
         logger.info("gateway background done run_id=%s chars=%d", run_id, len(final_text))
 
     except Exception as exc:
@@ -1219,3 +1230,12 @@ async def _run_agent_background(
         write_final_message(run_id, final_error)
         finalize_open_run_steps(run_id, "failed")
         set_run_status(run_id, "failed")
+        try:
+            persist_agent_run_timeline(
+                batch_id=batch_id,
+                chat_id=chat_id,
+                run_id=run_id,
+                timeline_snapshot=read_run_timeline_snapshot(run_id),
+            )
+        except Exception as timeline_exc:
+            logger.warning("Failed-run timeline persistence failed run_id=%s: %s", run_id, timeline_exc)

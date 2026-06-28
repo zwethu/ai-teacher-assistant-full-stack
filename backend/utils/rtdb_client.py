@@ -171,6 +171,62 @@ def finalize_open_run_steps(run_id: str, run_status: str) -> None:
         )
 
 
+def read_run_timeline_snapshot(run_id: str) -> dict[str, Any]:
+    """Read a bounded events/steps snapshot for durable Firestore rehydration."""
+    if not _ensure_init():
+        return {}
+    try:
+        raw = _ref(f"agentRuns/{run_id}").get() or {}
+        if not isinstance(raw, dict):
+            return {}
+        events_raw = raw.get("events") if isinstance(raw.get("events"), dict) else {}
+        steps_raw = raw.get("steps") if isinstance(raw.get("steps"), dict) else {}
+
+        def bounded(value: Any, depth: int = 0) -> Any:
+            if depth >= 4:
+                return str(value)[:500]
+            if isinstance(value, str):
+                return value[:2000]
+            if isinstance(value, (bool, int, float)) or value is None:
+                return value
+            if isinstance(value, list):
+                return [bounded(item, depth + 1) for item in value[:50]]
+            if isinstance(value, dict):
+                return {
+                    str(key)[:200]: bounded(item, depth + 1)
+                    for key, item in list(value.items())[:50]
+                }
+            return str(value)[:500]
+
+        event_items = []
+        for event_id, value in events_raw.items():
+            if not isinstance(value, dict):
+                continue
+            event_items.append({**bounded(value), "event_id": str(event_id)})
+        event_items.sort(key=lambda item: int(item.get("created_at") or 0))
+        event_items = event_items[-200:]
+
+        step_items: dict[str, Any] = {}
+        ordered_steps = sorted(
+            steps_raw.items(),
+            key=lambda pair: int((pair[1] or {}).get("updated_at") or 0)
+            if isinstance(pair[1], dict) else 0,
+        )[-100:]
+        for step_id, value in ordered_steps:
+            if isinstance(value, dict):
+                step_items[str(step_id)] = {**bounded(value), "step_id": str(step_id)}
+
+        return {
+            "events": event_items,
+            "steps": step_items,
+            "status": str(raw.get("status") or ""),
+            "captured_at": int(time.time()),
+        }
+    except Exception as exc:
+        logger.warning("RTDB timeline snapshot failed run_id=%s: %s", run_id, exc)
+        return {}
+
+
 def write_final_message(
     run_id: str,
     content: str,

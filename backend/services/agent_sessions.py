@@ -140,6 +140,17 @@ def mark_agent_run_done(
     )
 
 
+def persist_agent_run_timeline(
+    *, batch_id: str, chat_id: str, run_id: str, timeline_snapshot: dict[str, Any]
+) -> None:
+    """Persist a bounded RTDB timeline for historical message rehydration."""
+    if not timeline_snapshot:
+        return
+    _run_ref(batch_id, chat_id, run_id).update(
+        {"timeline_snapshot": timeline_snapshot, "updated_at": SERVER_TIMESTAMP}
+    )
+
+
 def mark_agent_run_failed(
     *,
     batch_id: str,
@@ -526,6 +537,7 @@ def _run_to_dict(data: dict[str, Any]) -> dict[str, Any]:
         "connectors": {
             "web_search": bool(connectors.get("web_search", True)),
         },
+        "timeline_snapshot": data.get("timeline_snapshot") or {},
         "created_at": (
             created.isoformat()
             if hasattr(created, "isoformat")

@@ -12,6 +12,7 @@ from services.agent_sessions import (
     invalidate_latest_outline_for_followup,
     mark_agent_run_pending_artifact_export_failed,
     mark_agent_run_pending_artifact_exported,
+    persist_agent_run_timeline,
 )
 from services.artifact_service import (
     content_hash,
@@ -36,7 +37,7 @@ from services.google_workspace.credentials import (
     assert_google_oauth_valid,
 )
 from utils.firebase_auth import CurrentUser, get_current_user
-from utils.rtdb_client import write_run_event
+from utils.rtdb_client import read_run_timeline_snapshot, write_run_event
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +161,14 @@ async def get_run_endpoint(
     )
     if run is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    if not run.get("timeline_snapshot") and run.get("status") in {"done", "failed"}:
+        snapshot = read_run_timeline_snapshot(run_id)
+        if snapshot:
+            persist_agent_run_timeline(
+                batch_id=batch_id, chat_id=chat_id, run_id=run_id,
+                timeline_snapshot=snapshot,
+            )
+            run["timeline_snapshot"] = snapshot
     return run
 
 

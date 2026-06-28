@@ -1,6 +1,19 @@
 import type { Chat, ChatMessage } from '../entity/Chat'
 import api from '../lib/api'
 import type { LessonPlanExportResult } from './artifactService'
+import type { AgentRunEvent, AgentRunStatus, AgentRunStep } from './agentRunStream'
+
+export type ChatRunRecord = {
+  run_id: string
+  status: AgentRunStatus
+  error?: string
+  timeline_snapshot?: {
+    events?: AgentRunEvent[]
+    steps?: Record<string, AgentRunStep>
+    status?: AgentRunStatus
+    captured_at?: number
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Chat CRUD
@@ -39,6 +52,15 @@ export async function updateChatTitle(
 
 export async function listMessages(batchId: string, chatId: string): Promise<ChatMessage[]> {
   const res = await api.get<ChatMessage[]>(`/batches/${batchId}/chats/${chatId}/messages`)
+  return res.data
+}
+
+export async function getChatRun(
+  batchId: string,
+  chatId: string,
+  runId: string,
+): Promise<ChatRunRecord> {
+  const res = await api.get<ChatRunRecord>(`/batches/${batchId}/chats/${chatId}/runs/${runId}`)
   return res.data
 }
 

@@ -17,10 +17,12 @@ import {
   createChat,
   deleteChat,
   getChat,
+  getChatRun,
   listChats,
   listMessages,
   sendMessage,
   updateChatTitle,
+  type ChatRunRecord,
 } from '../../../services/chatService'
 import { generateAssessment, generateLab, generateLessonPlan } from '../../../services/agentService'
 import {
@@ -135,6 +137,7 @@ export function useChatPage() {
   const runPollIntervalRef = useRef<Record<string, number>>({})
   const workflowModeRunIdsRef = useRef<Record<string, GenerateMode>>({})
   const scrollFrameRef = useRef<number | null>(null)
+  const hydratedRunSnapshotsRef = useRef<Set<string>>(new Set())
 
   const [routeHydration, setRouteHydration] = useState<RouteHydrationState>('idle')
   const [batches, setBatches] = useState<Batch[]>([])
@@ -316,6 +319,32 @@ export function useChatPage() {
     }))
   }
 
+  function hydrateDurableRunState(runId: string, record: ChatRunRecord) {
+    const snapshot = record.timeline_snapshot
+    setRunStates((prev) => {
+      const current = prev[runId] || {
+        status: record.status || 'done', events: [], steps: {}, liveConnected: true,
+      }
+      if (!snapshot) return { ...prev, [runId]: { ...current, status: record.status || current.status } }
+      const eventsById = new Map<string, AgentRunEvent>()
+      for (const event of [...(snapshot.events || []), ...current.events]) {
+        eventsById.set(event.event_id, event)
+      }
+      const events = [...eventsById.values()].sort(
+        (a, b) => Number(a.created_at || 0) - Number(b.created_at || 0),
+      )
+      return {
+        ...prev,
+        [runId]: {
+          ...current,
+          status: record.status || snapshot.status || current.status,
+          events,
+          steps: { ...(snapshot.steps || {}), ...current.steps },
+        },
+      }
+    })
+  }
+
   function ensurePendingAssistantMessage(runId: string, chatId: string) {
     const pendingId = `pending-${runId}`
     setMessages((prev) => {
@@ -438,6 +467,27 @@ export function useChatPage() {
       if (!runIds.includes(subscribedRunId)) {
         unsubscribeFromRun(subscribedRunId)
       }
+    }
+  }, [activeChat, selectedBatch, messages, messagesLoading])
+
+  // Rehydrate every historical message timeline from the durable Firestore run
+  // snapshot. The run endpoint backfills older records from RTDB once when possible.
+  useEffect(() => {
+    if (!activeChat || !selectedBatch || messagesLoading) return
+    const runIds = [...new Set(
+      messages
+        .filter((message) => message.role === 'assistant' && message.run_id)
+        .map((message) => String(message.run_id)),
+    )]
+    for (const runId of runIds) {
+      if (hydratedRunSnapshotsRef.current.has(runId)) continue
+      hydratedRunSnapshotsRef.current.add(runId)
+      void getChatRun(selectedBatch.id, activeChat.chat_id, runId)
+        .then((record) => hydrateDurableRunState(runId, record))
+        .catch((error) => {
+          hydratedRunSnapshotsRef.current.delete(runId)
+          console.error(error)
+        })
     }
   }, [activeChat, selectedBatch, messages, messagesLoading])
 

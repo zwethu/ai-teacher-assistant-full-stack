@@ -68,7 +68,10 @@ export function MessageRow({
   const assistantIntro = typeof msg.metadata?.assistant_intro === 'string'
     ? msg.metadata.assistant_intro.trim()
     : ''
-  const canSaveBlueprint = Boolean(batchId && courseName && isCourseBlueprintSourceEligible(msg, isPending, isFailed))
+  const canSaveBlueprint = Boolean(batchId && courseName && !savedBlueprint && isCourseBlueprintSourceEligible(msg, isPending, isFailed))
+  const showSuggestedBlueprintButton = canSaveBlueprint &&
+    msg.metadata?.course_blueprint_save_suggested === true &&
+    msg.metadata?.course_blueprint_suggestion_confidence === 'high'
 
   return (
     <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : ''}`}>
@@ -137,6 +140,12 @@ export function MessageRow({
                 )
               ) : null}
             </div>
+            {showSuggestedBlueprintButton && (
+              <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50/70 p-3">
+                <button type="button" onClick={() => setBlueprintOpen(true)} className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700"><Save className="h-4 w-4" />Save to Course Blueprint</button>
+                <p className="mt-2 text-xs leading-5 text-emerald-800">Suggested by the consultant because this response looks reusable as course planning memory.</p>
+              </div>
+            )}
             {blueprintOpen && batchId && (
               <CourseBlueprintReviewModal batchId={batchId} courseName={courseName} message={msg} onClose={() => setBlueprintOpen(false)} onSaved={(blueprint) => { setSavedBlueprint(blueprint); setBlueprintOpen(false) }} />
             )}

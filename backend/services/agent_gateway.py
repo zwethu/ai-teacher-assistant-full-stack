@@ -340,6 +340,53 @@ def safe_run_error_message(exc: Exception) -> str:
     return "Unexpected backend error."
 
 
+def course_blueprint_suggestion_metadata(
+    suggestion: Any,
+    *,
+    run_id: str,
+    workflow_type: str,
+    final_text: str,
+    message_metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Validate a current-run consultant UI hint and return bounded metadata."""
+    metadata = message_metadata or {}
+    normalized_workflow = str(workflow_type or "").strip().lower()
+    consulting_workflows = {"", "consulting", "course_consultant", "course_consultant.read"}
+    if normalized_workflow not in consulting_workflows:
+        return {}
+    if not str(final_text or "").strip() or not isinstance(suggestion, dict):
+        return {}
+    if suggestion.get("suggested") is not True:
+        return {}
+    if str(suggestion.get("confidence") or "").strip().lower() != "high":
+        return {}
+    if str(suggestion.get("run_id") or "").strip() != run_id:
+        return {}
+    if str(suggestion.get("source_agent") or "") != "course_consultant_agent":
+        return {}
+    blocked = (
+        metadata.get("outline_approvable") is True
+        or metadata.get("artifact_preview_card") is True
+        or metadata.get("pending_exportable") is True
+        or metadata.get("exportable") is True
+        or metadata.get("export_result") is True
+        or bool(metadata.get("doc_url") or metadata.get("form_url"))
+    )
+    if blocked:
+        return {}
+    return {
+        "course_blueprint_save_suggested": True,
+        "course_blueprint_suggestion_confidence": "high",
+        "course_blueprint_suggestion_title": str(
+            suggestion.get("suggested_title") or ""
+        ).strip()[:300],
+        "course_blueprint_suggestion_reason": str(
+            suggestion.get("reason") or ""
+        ).strip()[:500],
+        "course_blueprint_suggestion_run_id": run_id,
+    }
+
+
 def extract_lesson_plan_full_from_state(state: dict[str, Any]) -> dict[str, Any] | None:
     """Return a plausible LessonPlanFull payload from Agent Platform state."""
     active_type = str(state.get("active_artifact_type") or "").strip()
@@ -1056,6 +1103,36 @@ async def _run_agent_background(
         # cannot diverge by artifact type.
         if metadata.get("artifact_preview_card") or metadata.get("workflow_stage") == "outline":
             _attach_assistant_intro(metadata, final_text, assistant_message_text)
+
+        # Consultant agents may leave a session-only UI hint. It is intentionally
+        # read after generation and accepted only for this exact run; stale hints
+        # from the long-lived chat session are ignored.
+        if str(session_state.get("workflow_type") or "").strip().lower() in {
+            "", "consulting", "course_consultant", "course_consultant.read",
+        }:
+            try:
+                resource_name = get_agent_engine_resource_name()
+                if resource_name:
+                    session_state_after = await get_agent_session_state(
+                        resource_name=resource_name,
+                        user_id=lecturer_id,
+                        session_id=agent_session_id,
+                    )
+                    metadata.update(
+                        course_blueprint_suggestion_metadata(
+                            session_state_after.get("course_blueprint_save_suggestion"),
+                            run_id=run_id,
+                            workflow_type=str(session_state.get("workflow_type") or ""),
+                            final_text=assistant_message_text,
+                            message_metadata=metadata,
+                        )
+                    )
+            except Exception as suggestion_exc:
+                logger.warning(
+                    "Course Blueprint UI hint read failed run_id=%s: %s",
+                    run_id,
+                    suggestion_exc,
+                )
 
         # Persist assistant message to Firestore
         try:

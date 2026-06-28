@@ -1,12 +1,13 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from pydantic import ValidationError
 
 from entity.Batch import BatchModel
 from entity.CourseBlueprint import CourseBlueprintContent
 from services import course_blueprint_service
-from services.agent_gateway import _build_session_state
+from services import agent_gateway
+from services.agent_gateway import _build_session_state, course_blueprint_suggestion_metadata
 
 
 class CourseBlueprintValidationTests(unittest.TestCase):
@@ -75,6 +76,72 @@ class CourseBlueprintContextTests(unittest.TestCase):
         consulted = _build_session_state(**common, workflow_type="")
         self.assertEqual(consulted["course_blueprint_status"], "none")
         build_context.assert_not_called()
+
+
+class CourseBlueprintSuggestionMetadataTests(unittest.TestCase):
+    def test_matching_high_confidence_current_run_is_attached(self):
+        result = course_blueprint_suggestion_metadata(
+            {"suggested": True, "confidence": "high", "run_id": "r1",
+             "source_agent": "course_consultant_agent", "suggested_title": " Roadmap ",
+             "reason": "Reusable plan"},
+            run_id="r1", workflow_type="", final_text="A seven-week roadmap",
+        )
+        self.assertTrue(result["course_blueprint_save_suggested"])
+        self.assertEqual(result["course_blueprint_suggestion_title"], "Roadmap")
+
+    def test_stale_or_non_high_suggestions_are_ignored(self):
+        base = {"suggested": True, "confidence": "high", "run_id": "old",
+                "source_agent": "course_consultant_agent"}
+        self.assertEqual(course_blueprint_suggestion_metadata(
+            base, run_id="new", workflow_type="", final_text="Plan"), {})
+        self.assertEqual(course_blueprint_suggestion_metadata(
+            {**base, "run_id": "new", "confidence": "medium"},
+            run_id="new", workflow_type="", final_text="Plan"), {})
+
+    def test_generation_and_artifact_messages_are_ignored(self):
+        hint = {"suggested": True, "confidence": "high", "run_id": "r1",
+                "source_agent": "course_consultant_agent"}
+        self.assertEqual(course_blueprint_suggestion_metadata(
+            hint, run_id="r1", workflow_type="lesson_plan.generate", final_text="Plan"), {})
+        self.assertEqual(course_blueprint_suggestion_metadata(
+            hint, run_id="r1", workflow_type="", final_text="Plan",
+            message_metadata={"artifact_preview_card": True}), {})
+
+
+class CourseBlueprintSuggestionPersistenceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_current_run_hint_is_attached_without_saving_blueprint(self):
+        async def fake_stream(**_kwargs):
+            yield "Reusable seven-week roadmap"
+
+        hint = {
+            "suggested": True, "confidence": "high", "run_id": "run-hint",
+            "source_agent": "course_consultant_agent", "suggested_title": "Roadmap",
+            "reason": "Reusable course planning",
+        }
+        with (
+            patch.object(agent_gateway, "stream_agent_response", fake_stream),
+            patch.object(agent_gateway, "get_agent_engine_resource_name", return_value="projects/p/locations/l/reasoningEngines/e"),
+            patch.object(agent_gateway, "get_agent_session_state", new=AsyncMock(return_value={"course_blueprint_save_suggestion": hint})),
+            patch.object(agent_gateway, "write_stream_delta"),
+            patch.object(agent_gateway, "write_stream_meta"),
+            patch.object(agent_gateway, "write_run_event"),
+            patch.object(agent_gateway, "write_final_message"),
+            patch.object(agent_gateway, "mark_agent_run_done"),
+            patch.object(agent_gateway, "set_run_status"),
+            patch.object(agent_gateway, "add_message", return_value={"message_id": "m1"}) as add_message,
+            patch.object(course_blueprint_service, "save_blueprint_from_message") as save_blueprint,
+        ):
+            await agent_gateway._run_agent_background(
+                run_id="run-hint", rtdb_run_path="agentRuns/run-hint",
+                batch_id="b1", chat_id="c1", agent_session_id="s1",
+                lecturer_id="u1", user_message="Plan my course",
+                session_state={"workflow_type": "", "save_draft": False, "pending_artifact": False},
+            )
+
+        metadata = add_message.call_args.kwargs["metadata"]
+        self.assertTrue(metadata["course_blueprint_save_suggested"])
+        self.assertEqual(metadata["course_blueprint_suggestion_run_id"], "run-hint")
+        save_blueprint.assert_not_called()
 
 
 if __name__ == "__main__":

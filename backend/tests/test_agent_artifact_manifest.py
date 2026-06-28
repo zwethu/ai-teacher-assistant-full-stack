@@ -78,8 +78,9 @@ class AgentArtifactManifestTests(unittest.TestCase):
         current = next(item for item in manifest["items"] if item["artifact_id"] == "lp-current")
         self.assertTrue(current["content_available"])
 
+    @patch("services.agent_gateway.build_blueprint_status_context", return_value={})
     @patch("services.agent_gateway.build_agent_artifact_manifest")
-    def test_build_session_state_includes_artifact_manifest(self, mock_manifest):
+    def test_build_session_state_includes_artifact_manifest(self, mock_manifest, _blueprint):
         mock_manifest.return_value = {
             "status": "available",
             "summary_text": "Current artifacts: lesson_plan weeks 1.",

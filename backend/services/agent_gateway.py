@@ -62,6 +62,7 @@ from services.batch_service import get_batch
 from services.chat_service import add_message
 from services.course_blueprint_service import (
     build_blueprint_session_context,
+    build_blueprint_status_context,
     is_generation_workflow,
 )
 from utils.rtdb_client import (
@@ -313,6 +314,8 @@ def _build_session_state(
                 batch.batch_id, lecturer_id, requested_week=week
             )
         )
+    else:
+        state.update(build_blueprint_status_context(batch.batch_id, lecturer_id))
     if approved_outline:
         artifact_type = str(approved_outline.get("outline_artifact_type") or "")
         key = {"lesson_plan": "lesson_plan_outline", "lab": "lab_outline", "quiz": "quiz_outline"}.get(artifact_type)

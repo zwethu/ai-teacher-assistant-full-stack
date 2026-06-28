@@ -47,9 +47,35 @@ class CourseBlueprintContextTests(unittest.TestCase):
         self.assertEqual(context["course_blueprint_week_plan"]["week"], 2)
         self.assertNotIn("weekly_plan", context)
 
+    @patch("services.course_blueprint_service.get_current_blueprint")
+    def test_status_context_is_minimal_and_bounded(self, get_current):
+        get_current.return_value = {
+            "blueprint_id": "bp1", "version": 4, "summary": "S" * 1500,
+            "weekly_plan": [{"week": 4, "theme": "Hidden from normal chat"}],
+            "assessment_strategy": "Hidden strategy", "lab_strategy": "Hidden lab",
+            "teaching_preferences": {"mode": "hidden"},
+        }
+        context = course_blueprint_service.build_blueprint_status_context("b1", "u1")
+        self.assertEqual(context["course_blueprint_status"], "active")
+        self.assertEqual(context["active_course_blueprint_version"], 4)
+        self.assertEqual(len(context["course_blueprint_summary"]), 1000)
+        self.assertEqual(context["course_blueprint_week_plan"], {})
+        self.assertEqual(context["course_blueprint_assessment_strategy"], "")
+        self.assertEqual(context["course_blueprint_lab_strategy"], "")
+        self.assertEqual(context["course_blueprint_teaching_preferences"], {})
+
+    @patch("services.course_blueprint_service.get_current_blueprint", return_value=None)
+    def test_missing_status_context_uses_empty_defaults(self, _get_current):
+        context = course_blueprint_service.build_blueprint_status_context("b1", "u1")
+        self.assertEqual(context["course_blueprint_status"], "none")
+        self.assertEqual(context["active_course_blueprint_id"], "")
+
+    @patch("services.agent_gateway.build_blueprint_status_context")
     @patch("services.agent_gateway.build_blueprint_session_context")
     @patch("services.agent_gateway.build_agent_artifact_manifest", return_value={})
-    def test_gateway_injects_for_generation_only(self, _manifest, build_context):
+    def test_gateway_uses_full_generation_and_minimal_chat_context(
+        self, _manifest, build_context, build_status
+    ):
         build_context.return_value = {
             "active_course_blueprint_id": "bp1",
             "active_course_blueprint_version": 1,
@@ -72,10 +98,24 @@ class CourseBlueprintContextTests(unittest.TestCase):
         generated = _build_session_state(**common, workflow_type="lesson_plan")
         self.assertEqual(generated["active_course_blueprint_id"], "bp1")
         build_context.assert_called_once_with("b1", "u1", requested_week=3)
+        build_status.assert_not_called()
         build_context.reset_mock()
+        build_status.return_value = {
+            "active_course_blueprint_id": "bp1",
+            "active_course_blueprint_version": 1,
+            "course_blueprint_status": "active",
+            "course_blueprint_summary": "Plan",
+            "course_blueprint_week_plan": {},
+            "course_blueprint_assessment_strategy": "",
+            "course_blueprint_lab_strategy": "",
+            "course_blueprint_teaching_preferences": {},
+        }
         consulted = _build_session_state(**common, workflow_type="")
-        self.assertEqual(consulted["course_blueprint_status"], "none")
+        self.assertEqual(consulted["course_blueprint_status"], "active")
+        self.assertEqual(consulted["course_blueprint_week_plan"], {})
+        self.assertEqual(consulted["course_blueprint_assessment_strategy"], "")
         build_context.assert_not_called()
+        build_status.assert_called_once_with("b1", "u1")
 
 
 class CourseBlueprintSuggestionMetadataTests(unittest.TestCase):

@@ -295,12 +295,7 @@ def archive_current_blueprint(batch_id: str, lecturer_id: str) -> dict[str, Any]
 def build_blueprint_session_context(
     batch_id: str, lecturer_id: str, requested_week: int | None = None
 ) -> dict[str, Any]:
-    empty = {
-        "active_course_blueprint_id": "", "active_course_blueprint_version": 0,
-        "course_blueprint_status": "none", "course_blueprint_summary": "",
-        "course_blueprint_week_plan": {}, "course_blueprint_assessment_strategy": "",
-        "course_blueprint_lab_strategy": "", "course_blueprint_teaching_preferences": {},
-    }
+    empty = empty_blueprint_session_context()
     current = get_current_blueprint(batch_id, lecturer_id)
     if not current:
         return empty
@@ -319,6 +314,32 @@ def build_blueprint_session_context(
         "course_blueprint_assessment_strategy": str(current.get("assessment_strategy") or "")[:1200],
         "course_blueprint_lab_strategy": str(current.get("lab_strategy") or "")[:1200],
         "course_blueprint_teaching_preferences": dict(list((current.get("teaching_preferences") or {}).items())[:20]),
+    }
+
+
+def empty_blueprint_session_context() -> dict[str, Any]:
+    return {
+        "active_course_blueprint_id": "", "active_course_blueprint_version": 0,
+        "course_blueprint_status": "none", "course_blueprint_summary": "",
+        "course_blueprint_week_plan": {}, "course_blueprint_assessment_strategy": "",
+        "course_blueprint_lab_strategy": "", "course_blueprint_teaching_preferences": {},
+    }
+
+
+def build_blueprint_status_context(
+    batch_id: str, lecturer_id: str
+) -> dict[str, Any]:
+    """Return fresh minimal routing context for ordinary chat turns."""
+    empty = empty_blueprint_session_context()
+    current = get_current_blueprint(batch_id, lecturer_id)
+    if not current:
+        return empty
+    return {
+        **empty,
+        "active_course_blueprint_id": current["blueprint_id"],
+        "active_course_blueprint_version": int(current.get("version") or 0),
+        "course_blueprint_status": "active",
+        "course_blueprint_summary": str(current.get("summary") or "")[:1000],
     }
 
 

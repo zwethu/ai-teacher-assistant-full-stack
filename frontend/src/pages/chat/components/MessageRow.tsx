@@ -454,13 +454,16 @@ export function WebSourcesList({
       <ol className="space-y-2">
         {sources.map((source) => {
           const citedText = citations.find((citation) => citation.source_index === source.index)?.cited_text
+          const visibleDomain = source.display_domain || source.domain
+          const supportText = source.supports || citedText || ''
+          const isGroundedLink = source.link_type === 'google_grounding_redirect'
           return (
             <li key={source.url} className="flex gap-2 text-xs leading-5">
               <span className="font-semibold text-emerald-700">[{source.index}]</span>
               <div className="min-w-0">
                 <a href={source.url} target="_blank" rel="noreferrer" className="font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-800">{source.title}</a>
-                <div className="truncate text-slate-500">{source.domain}</div>
-                {(source.supports || citedText) && <div className="text-slate-600">{source.supports || citedText}</div>}
+                {visibleDomain && <div className="truncate text-slate-500">{visibleDomain}{isGroundedLink && <span className="ml-1 text-slate-400">· Google grounded link</span>}</div>}
+                {supportText && <div className="text-slate-600 line-clamp-2">{supportText}</div>}
               </div>
             </li>
           )

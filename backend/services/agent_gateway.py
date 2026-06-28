@@ -828,6 +828,35 @@ def _attach_assistant_intro(
     if intro and preview and intro != preview:
         metadata["assistant_intro"] = intro
 
+_GOOGLE_GROUNDING_REDIRECT_HOSTS: frozenset[str] = frozenset({
+    "vertexaisearch.cloud.google.com",
+    "vertexaisearch.googleapis.com",
+})
+
+_CLEAN_MD_HEADING_RE = re.compile(r"^#{1,6}\s*", re.MULTILINE)
+_CLEAN_MD_BOLD_RE = re.compile(r"\*\*(.+?)\*\*|__(.+?)__", re.DOTALL)
+_CLEAN_MD_ITALIC_RE = re.compile(r"\*(.+?)\*|_(.+?)_", re.DOTALL)
+_CLEAN_MD_BULLET_RE = re.compile(r"^\s*[-*+]\s+", re.MULTILINE)
+_CLEAN_MD_WEB_LABEL_RE = re.compile(r"\[web\]\s*", re.IGNORECASE)
+
+
+def _clean_support_text(text: str, max_chars: int = 300) -> str:
+    """Strip markdown decoration from support snippets before storing in message metadata."""
+    if not text:
+        return ""
+    cleaned = str(text)
+    cleaned = _CLEAN_MD_HEADING_RE.sub("", cleaned)
+    cleaned = _CLEAN_MD_BOLD_RE.sub(lambda m: m.group(1) or m.group(2), cleaned)
+    cleaned = _CLEAN_MD_ITALIC_RE.sub(lambda m: m.group(1) or m.group(2), cleaned)
+    cleaned = _CLEAN_MD_BULLET_RE.sub("", cleaned)
+    cleaned = _CLEAN_MD_WEB_LABEL_RE.sub("", cleaned)
+    cleaned = " ".join(cleaned.split())
+    return cleaned[:max_chars]
+
+
+def _is_google_grounding_redirect(hostname: str) -> bool:
+    return hostname.lower() in _GOOGLE_GROUNDING_REDIRECT_HOSTS
+
 
 def _safe_web_url(value: Any) -> str:
     raw = str(value or "").strip()[:500]
@@ -888,12 +917,40 @@ def _web_search_message_metadata(
             )
         seen_urls.add(url)
         seen_indices.add(original_index)
+
+        # Determine the user-facing domain label.
+        # If the clickable URL is a Google grounding redirect, the raw hostname is
+        # a Google infrastructure domain — never expose that to the user.
+        raw_host = (urlsplit(url).hostname or "").lower()[:180]
+        is_redirect = _is_google_grounding_redirect(raw_host)
+
+        # Prefer display_domain from PNAI-structured output.
+        item_display_domain = str(item.get("display_domain") or "").strip()[:180]
+        if is_redirect:
+            if item_display_domain and not _is_google_grounding_redirect(item_display_domain):
+                display_domain = item_display_domain
+            else:
+                # Fall back to title if it looks like a bare domain
+                candidate_title = str(item.get("title") or "").strip()
+                if candidate_title and re.match(
+                    r"^[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?(\.[a-z]{2,})+$",
+                    candidate_title,
+                    re.IGNORECASE,
+                ):
+                    display_domain = candidate_title.lower()[:180]
+                else:
+                    display_domain = ""
+        else:
+            display_domain = item_display_domain or raw_host
+
         source = {
             "index": original_index,
             "title": str(item.get("title") or item.get("domain") or url)[:180],
             "url": url,
-            "domain": (urlsplit(url).hostname or "")[:180],
-            "supports": str(item.get("supports") or "")[:300],
+            "domain": display_domain or raw_host,
+            "display_domain": display_domain,
+            "link_type": "google_grounding_redirect" if is_redirect else "direct",
+            "supports": _clean_support_text(str(item.get("supports") or ""), 300),
         }
         sources.append(source)
         source_by_original_index[original_index] = source
@@ -919,7 +976,7 @@ def _web_search_message_metadata(
             "title": source["title"],
             "url": source["url"],
             "domain": source["domain"],
-            "cited_text": str(item.get("cited_text") or "")[:300],
+            "cited_text": _clean_support_text(str(item.get("cited_text") or ""), 300),
         })
         if len(citations) >= 20:
             break

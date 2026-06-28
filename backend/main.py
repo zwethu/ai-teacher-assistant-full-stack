@@ -40,6 +40,7 @@ from routers.artifacts import router as artifacts_router
 from routers.auth import router as auth_router
 from routers.batches import router as batches_router
 from routers.chats import router as chats_router
+from routers.course_blueprint import router as course_blueprint_router
 from routers.email import router as email_router
 from routers.files import router as files_router
 from services.email_scheduler import shutdown_scheduler, start_scheduler
@@ -64,6 +65,7 @@ app.include_router(batches_router)
 app.include_router(artifacts_router)
 app.include_router(files_router)
 app.include_router(chats_router)
+app.include_router(course_blueprint_router)
 app.include_router(email_router, prefix="", tags=["email"])
 app.include_router(agent_router, prefix="/agent", tags=["agent"])
 

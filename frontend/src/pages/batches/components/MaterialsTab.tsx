@@ -22,6 +22,7 @@ import {
   Trash2,
   Upload,
   X,
+  BookOpenCheck,
 } from 'lucide-react'
 import {
   createChat,
@@ -34,6 +35,7 @@ import { formatDateTime } from '../../../utils/formatDate'
 import { emitChatCreated } from '../../../utils/chatEvents'
 import { BTN_PRIMARY } from '../constants'
 import { IndexStatusBadge } from './IndexStatusBadge'
+import { getCurrentCourseBlueprint, type CourseBlueprint } from '../../../services/courseBlueprintService'
 
 type Props = {
   batchId: string
@@ -44,6 +46,7 @@ type Props = {
   onFileUpload: (e: ChangeEvent<HTMLInputElement>) => void
   onDeleteFile: (file: BatchFile) => void
   onRefreshFiles: () => void
+  onOpenPlanning: () => void
 }
 
 type ChatWithPreview = Chat & { preview: string }
@@ -57,6 +60,7 @@ export function MaterialsTab({
   onFileUpload,
   onDeleteFile,
   onRefreshFiles,
+  onOpenPlanning,
 }: Props) {
   const navigate = useNavigate()
   const [chats, setChats] = useState<ChatWithPreview[]>([])
@@ -67,6 +71,7 @@ export function MaterialsTab({
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  const [blueprint, setBlueprint] = useState<CourseBlueprint | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const renameInputRef = useRef<HTMLInputElement>(null)
 
@@ -97,6 +102,8 @@ export function MaterialsTab({
   useEffect(() => {
     void loadChats()
   }, [loadChats])
+
+  useEffect(() => { void getCurrentCourseBlueprint(batchId).then(setBlueprint).catch(() => setBlueprint(null)) }, [batchId])
 
   useEffect(() => {
     if (!menuOpenId) return
@@ -320,6 +327,11 @@ export function MaterialsTab({
         </div>
 
         <div className="w-80 flex-shrink-0 flex flex-col min-h-0 gap-4">
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-4">
+            <div className="flex items-center gap-2 text-sm font-semibold text-emerald-900"><BookOpenCheck className="h-4 w-4"/>Course Blueprint</div>
+            {blueprint ? <><p className="mt-2 text-sm font-medium text-slate-800">{blueprint.title}</p><p className="mt-1 text-xs text-slate-500">Version {blueprint.version} · {blueprint.weekly_plan.length} weeks planned</p><p className="mt-1 text-xs text-slate-400">Updated {formatDateTime(blueprint.updated_at || blueprint.created_at || '')}</p></> : <p className="mt-2 text-xs text-slate-600">No active planning memory yet.</p>}
+            <button onClick={onOpenPlanning} className="mt-3 w-full rounded-lg border border-emerald-300 bg-white px-3 py-2 text-sm font-medium text-emerald-800">Open Blueprint</button>
+          </div>
           <div>
             <h3 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
               <Upload className="w-4 h-4 text-emerald-600" />

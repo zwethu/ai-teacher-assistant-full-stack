@@ -106,6 +106,7 @@ export function ChatLayout(props: Props) {
         ) : (
           <ChatMessagesPanel
             batchId={selectedBatch.id}
+            courseName={selectedBatch.course_name}
             messages={messages}
             messagesLoading={messagesLoading}
             runStates={runStates}

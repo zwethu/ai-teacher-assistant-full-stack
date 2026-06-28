@@ -168,6 +168,7 @@ export function ChatInput({
 
 type MessagesPanelProps = {
   batchId?: string
+  courseName?: string
   messages: ChatMessage[]
   messagesLoading: boolean
   showWelcome: boolean
@@ -180,6 +181,7 @@ type MessagesPanelProps = {
 
 export function ChatMessagesPanel({
   batchId,
+  courseName,
   messages,
   messagesLoading,
   showWelcome,
@@ -238,6 +240,7 @@ export function ChatMessagesPanel({
                 approvalDisabled={sending}
                 approvalCompleted={Boolean(msg.run_id && completedOutlineRunIds.has(msg.run_id))}
                 approvalSuperseded={Boolean(msg.run_id && supersededOutlineRunIds.has(msg.run_id))}
+                courseName={courseName || ''}
               />
             ))}
             {sending && !safeMessages.some((msg) => msg.pending) && <ThinkingIndicator />}

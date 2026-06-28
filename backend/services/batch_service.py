@@ -221,7 +221,8 @@ def delete_batch(batch_id: str, lecturer_id: str) -> bool:
       2. Delete GCS prefix remainder (manifests, artifacts, etc.)
       3. Delete all chats + messages
       4. Delete students subcollection
-      5. Delete the batch document itself
+      5. Delete Course Blueprint versions
+      6. Delete the batch document itself
     Returns False if not found or not owned by lecturer_id.
     """
     db = get_firestore()
@@ -258,7 +259,11 @@ def delete_batch(batch_id: str, lecturer_id: str) -> bool:
     for student_doc in batch_ref.collection(STUDENTS_SUBCOLLECTION).stream():
         student_doc.reference.delete()
 
-    # 5. Batch document
+    # 5. Course Blueprint versions (Firestore does not cascade subcollections)
+    for blueprint_doc in batch_ref.collection("course_blueprints").stream():
+        blueprint_doc.reference.delete()
+
+    # 6. Batch document
     batch_ref.delete()
     logger.info("Deleted batch %s and all associated data", batch_id)
     return True

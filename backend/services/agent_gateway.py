@@ -59,6 +59,10 @@ from services.artifact_service import (
 )
 from services.batch_service import get_batch
 from services.chat_service import add_message
+from services.course_blueprint_service import (
+    build_blueprint_session_context,
+    is_generation_workflow,
+)
 from utils.rtdb_client import (
     create_run_meta,
     finalize_open_run_steps,
@@ -292,7 +296,21 @@ def _build_session_state(
             batch_id=batch.batch_id,
             lecturer_id=lecturer_id,
         ),
+        "active_course_blueprint_id": "",
+        "active_course_blueprint_version": 0,
+        "course_blueprint_status": "none",
+        "course_blueprint_summary": "",
+        "course_blueprint_week_plan": {},
+        "course_blueprint_assessment_strategy": "",
+        "course_blueprint_lab_strategy": "",
+        "course_blueprint_teaching_preferences": {},
     }
+    if is_generation_workflow(workflow_type):
+        state.update(
+            build_blueprint_session_context(
+                batch.batch_id, lecturer_id, requested_week=week
+            )
+        )
     if approved_outline:
         artifact_type = str(approved_outline.get("outline_artifact_type") or "")
         key = {"lesson_plan": "lesson_plan_outline", "lab": "lab_outline", "quiz": "quiz_outline"}.get(artifact_type)

@@ -4,13 +4,14 @@ import type { BatchFile } from '../../../entity/File'
 import Toast from '../../../components/ui/Toast'
 import type { ToastMessage } from '../../../types'
 import { formatDate } from '../../../utils/formatDate'
-import { ArrowLeft, Clock, Trash2, Users } from 'lucide-react'
+import { ArrowLeft, BookOpenCheck, Clock, Trash2, Users } from 'lucide-react'
 import { BTN_SECONDARY } from '../constants'
 import type { DetailTab } from '../types'
 import { ArtifactsTab } from './ArtifactsTab'
 import { MaterialsTab } from './MaterialsTab'
 import { StudentsTab } from './StudentsTab'
 import type { Artifact, ArtifactSummary } from '../../../services/artifactService'
+import { PlanningTab } from './PlanningTab'
 
 type Props = {
   toast: ToastMessage | null
@@ -116,6 +117,11 @@ export function BatchDetailView({
       <div className="flex gap-1 mb-6 border-b border-slate-200">
         <button
           type="button"
+          onClick={() => setDetailTab('planning')}
+          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${detailTab === 'planning' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+        ><BookOpenCheck className="w-4 h-4" />Planning</button>
+        <button
+          type="button"
           onClick={() => setDetailTab('students')}
           className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
             detailTab === 'students'
@@ -186,8 +192,11 @@ export function BatchDetailView({
           onFileUpload={handleFileUpload}
           onDeleteFile={handleDeleteFile}
           onRefreshFiles={handleRefreshFiles}
+          onOpenPlanning={() => setDetailTab('planning')}
         />
       )}
+
+      {detailTab === 'planning' && <PlanningTab batchId={selectedBatch.id} />}
 
       {detailTab === 'artifacts' && (
         <ArtifactsTab

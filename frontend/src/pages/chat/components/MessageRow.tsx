@@ -10,6 +10,8 @@ import {
   FlaskConical,
   Loader2,
   Maximize2,
+  MoreHorizontal,
+  Save,
   User,
   X,
 } from 'lucide-react'
@@ -30,6 +32,8 @@ import type { RunUiState } from '../runTypes'
 import { splitSourcesSection } from '../utils/splitSourcesSection'
 import { RunDetails } from './run/RunDetails'
 import { ThinkingPanel } from './run/ThinkingPanel'
+import { CourseBlueprintReviewModal } from './CourseBlueprintReviewModal'
+import type { CourseBlueprint } from '../../../services/courseBlueprintService'
 
 export function MessageRow({
   msg,
@@ -39,6 +43,7 @@ export function MessageRow({
   approvalDisabled = false,
   approvalCompleted = false,
   approvalSuperseded = false,
+  courseName = '',
 }: {
   msg?: ChatMessage | null
   run?: RunUiState
@@ -47,7 +52,11 @@ export function MessageRow({
   approvalDisabled?: boolean
   approvalCompleted?: boolean
   approvalSuperseded?: boolean
+  courseName?: string
 }) {
+  const [blueprintOpen, setBlueprintOpen] = useState(false)
+  const [actionsOpen, setActionsOpen] = useState(false)
+  const [savedBlueprint, setSavedBlueprint] = useState<CourseBlueprint | null>(null)
   if (!msg) return null
 
   const isUser = msg.role === 'user'
@@ -59,6 +68,7 @@ export function MessageRow({
   const assistantIntro = typeof msg.metadata?.assistant_intro === 'string'
     ? msg.metadata.assistant_intro.trim()
     : ''
+  const canSaveBlueprint = Boolean(batchId && courseName && isCourseBlueprintSourceEligible(msg, isPending, isFailed))
 
   return (
     <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : ''}`}>
@@ -78,6 +88,17 @@ export function MessageRow({
           </div>
         ) : (
           <div className="max-w-full text-[15px] leading-7 text-slate-700">
+            {canSaveBlueprint && (
+              <div className="relative mb-1 flex justify-end">
+                <button type="button" onClick={() => setActionsOpen((value) => !value)} className="rounded-md p-1 text-slate-400 hover:bg-white/70 hover:text-slate-700" aria-label="Message actions"><MoreHorizontal className="h-4 w-4" /></button>
+                {actionsOpen && (
+                  <div className="absolute right-0 top-7 z-30 w-56 rounded-lg border border-slate-200 bg-white py-1 shadow-xl">
+                    <button type="button" onClick={() => { setActionsOpen(false); setBlueprintOpen(true) }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"><Save className="h-4 w-4 text-emerald-600" />Save to Course Blueprint...</button>
+                  </div>
+                )}
+              </div>
+            )}
+            {savedBlueprint && <p className="mb-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800">Course Blueprint v{savedBlueprint.version} saved.</p>}
             <RunDetails run={run} isFinal={isFinal} />
             {run && (
               <div className="mt-2">
@@ -116,12 +137,28 @@ export function MessageRow({
                 )
               ) : null}
             </div>
+            {blueprintOpen && batchId && (
+              <CourseBlueprintReviewModal batchId={batchId} courseName={courseName} message={msg} onClose={() => setBlueprintOpen(false)} onSaved={(blueprint) => { setSavedBlueprint(blueprint); setBlueprintOpen(false) }} />
+            )}
             {!isUser && batchId && <ArtifactExportButton batchId={batchId} msg={msg} />}
           </div>
         )}
       </div>
     </div>
   )
+}
+
+export function isCourseBlueprintSourceEligible(
+  msg: ChatMessage,
+  isPending = Boolean(msg.pending || msg.status === 'pending'),
+  isFailed = msg.status === 'failed',
+): boolean {
+  const metadata = msg.metadata || {}
+  const exportResult = metadata.export_result === true || Boolean(metadata.doc_url || metadata.form_url)
+  return msg.role === 'assistant' && !isPending && !isFailed && Boolean(msg.content.trim()) &&
+    metadata.outline_approvable !== true && metadata.artifact_preview_card !== true &&
+    metadata.pending_exportable !== true && metadata.exportable !== true && !exportResult &&
+    !metadata.course_blueprint_saved_id
 }
 
 function AssistantIntro({ content }: { content: string }) {

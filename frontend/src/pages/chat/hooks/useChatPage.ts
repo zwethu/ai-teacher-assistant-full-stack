@@ -134,6 +134,7 @@ export function useChatPage() {
   const runFallbackTimerRef = useRef<number | null>(null)
   const runPollIntervalRef = useRef<Record<string, number>>({})
   const workflowModeRunIdsRef = useRef<Record<string, GenerateMode>>({})
+  const scrollFrameRef = useRef<number | null>(null)
 
   const [routeHydration, setRouteHydration] = useState<RouteHydrationState>('idle')
   const [batches, setBatches] = useState<Batch[]>([])
@@ -448,17 +449,28 @@ export function useChatPage() {
       if (runFallbackTimerRef.current) {
         window.clearTimeout(runFallbackTimerRef.current)
       }
+      if (scrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(scrollFrameRef.current)
+      }
     }
   }, [])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, sending])
+  }, [messages.length, sending])
 
-  function scrollToBottomSmooth() {
-    requestAnimationFrame(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+  function scrollToBottom(behavior: ScrollBehavior = 'smooth') {
+    if (scrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(scrollFrameRef.current)
+    }
+    scrollFrameRef.current = window.requestAnimationFrame(() => {
+      scrollFrameRef.current = null
+      messagesEndRef.current?.scrollIntoView({ behavior, block: 'end' })
     })
+  }
+
+  function anchorToBottomDuringLiveUpdate() {
+    scrollToBottom('auto')
   }
 
   async function handleNewChat(title = 'New Chat') {
@@ -636,7 +648,7 @@ export function useChatPage() {
         status,
       },
     }))
-    scrollToBottomSmooth()
+    anchorToBottomDuringLiveUpdate()
   }
 
   function appendRunEvent(runId: string, event: AgentRunEvent) {
@@ -649,7 +661,7 @@ export function useChatPage() {
           )
       return { ...prev, [runId]: { ...current, events } }
     })
-    scrollToBottomSmooth()
+    anchorToBottomDuringLiveUpdate()
   }
 
   function appendRunDelta(
@@ -682,8 +694,6 @@ export function useChatPage() {
         },
       }
     })
-    scrollToBottomSmooth()
-
     setMessages((prev) => {
       const hasFinal = prev.some(
         (msg) => msg.run_id === runId && msg.role === 'assistant' && !msg.pending,
@@ -721,6 +731,7 @@ export function useChatPage() {
         },
       ]
     })
+    anchorToBottomDuringLiveUpdate()
   }
 
   function updateRunStreamMeta(runId: string, meta: AgentRunStreamMeta) {
@@ -755,7 +766,7 @@ export function useChatPage() {
         },
       }
     })
-    scrollToBottomSmooth()
+    anchorToBottomDuringLiveUpdate()
   }
 
   function updateRunStreamError(runId: string, streamError: string) {
@@ -814,7 +825,7 @@ export function useChatPage() {
             : msg,
         )
     })
-    scrollToBottomSmooth()
+    anchorToBottomDuringLiveUpdate()
   }
 
   async function pollFinalMessagesOnce(

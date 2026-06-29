@@ -1,11 +1,12 @@
 import { useLocation, useNavigate } from 'react-router-dom';
 import CatGame from '../components/cat/CatGame';
-import type { GameSession } from '../types/catGame.types';
+import type { GameSession, GameMode } from '../types/catGame.types';
 
 type LocationState = {
   session: GameSession;
   nickname: string;
   playerUid: string;
+  chosenGameMode: GameMode;   // set by GameModeSelectPage
 };
 
 export default function CatGamePage() {
@@ -13,8 +14,7 @@ export default function CatGamePage() {
   const navigate = useNavigate();
   const state = location.state as LocationState | null;
 
-  // Fallback for direct dev access without going through entry flow
-  if (!state?.session) {
+  if (!state?.session || !state?.chosenGameMode) {
     return (
       <div style={{
         width: '100vw', height: '100vh',
@@ -41,8 +41,8 @@ export default function CatGamePage() {
   return (
     <div style={{ width: '100vw', height: '100vh' }}>
       <CatGame
-        gameMode={state.session.gameMode}
-        questions={state.session.questions}
+        gameMode={state.chosenGameMode}
+        items={state.session.items}
         nickname={state.nickname}
         playerUid={state.playerUid}
         assessmentId={state.session.id}

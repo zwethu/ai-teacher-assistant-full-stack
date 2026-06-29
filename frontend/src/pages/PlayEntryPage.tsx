@@ -11,6 +11,7 @@ import {
 } from '../lib/gameSession';
 import type { GameSession } from '../types/catGame.types';
 import CatSprite from '../components/cat/CatSprite';
+import GameModeSelectPage from './GameModeSelectPage';
 import './PlayEntryPage.css';
 
 type FlowStep =
@@ -22,6 +23,7 @@ type FlowStep =
   | 'not_enrolled'
   | 'nickname'
   | 'already_played'
+  | 'mode_select'   // NEW
   | 'ready';
 
 export default function PlayEntryPage() {
@@ -37,7 +39,6 @@ export default function PlayEntryPage() {
   const [userEmail, setUserEmail] = useState('');
   const [userUid, setUserUid] = useState('');
 
-  // Step 1: Load game session
   useEffect(() => {
     if (!assessmentId) { setStep('invalid'); return; }
     getGameSession(assessmentId)
@@ -73,7 +74,7 @@ export default function PlayEntryPage() {
         setStep('nickname');
       } else {
         setNickname(profile.nickname);
-        setStep('ready');
+        setStep('mode_select'); // go straight to mode selection
       }
     } catch {
       setStep('invalid');
@@ -103,23 +104,12 @@ export default function PlayEntryPage() {
     try {
       await createPlayerProfile(userUid, trimmed, userEmail);
       setNickname(trimmed);
-      setStep('ready');
+      setStep('mode_select'); // after nickname → mode select
     } catch {
       setNicknameError('Something went wrong, try again.');
     } finally {
       setSaving(false);
     }
-  }
-
-  function handleEnterGame() {
-    if (!session) return;
-    navigate(`/play/${assessmentId}/game`, {
-      state: {
-        session,
-        nickname,
-        playerUid: userUid,
-      },
-    });
   }
 
   async function handleSignOut() {
@@ -258,24 +248,17 @@ export default function PlayEntryPage() {
     );
   }
 
-  // step === 'ready'
-  return (
-    <div className="play-entry-bg">
-      <div className="play-card">
-        <CatSprite mood="playful" />
-        <h2 className="play-title">Ready, {nickname}!</h2>
-        <p className="play-subtitle">
-          {session?.gameMode === 'mcq'
-            ? '🐾 Answer questions to earn fish for your cat!'
-            : '🧩 Match the pairs and earn fish!'}
-        </p>
-        <div className="play-mode-badge">
-          {session?.gameMode === 'mcq' ? '📝 Multiple Choice' : '🃏 Card Matching'}
-        </div>
-        <button className="play-primary-btn" onClick={handleEnterGame}>
-          Start Game 🐟
-        </button>
-      </div>
-    </div>
-  );
+  // step === 'mode_select' — render the mode picker inline
+  if (step === 'mode_select' && session) {
+    return (
+      <GameModeSelectPage
+        session={session}
+        nickname={nickname}
+        playerUid={userUid}
+      />
+    );
+  }
+
+  // fallback
+  return null;
 }

@@ -1,0 +1,124 @@
+.mode-select-bg {
+  min-height: 100vh;
+  background: linear-gradient(160deg, #fef9f0 0%, #fde8d0 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  font-family: 'Nunito', sans-serif;
+}
+
+.mode-select-card {
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1.5px solid rgba(255, 200, 150, 0.5);
+  border-radius: 28px;
+  padding: 36px 32px;
+  max-width: 680px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  box-shadow: 0 8px 40px rgba(244, 162, 97, 0.15);
+}
+
+.mode-select-title {
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: #8b5e52;
+  margin: 0;
+  text-align: center;
+}
+
+.mode-select-subtitle {
+  font-size: 1rem;
+  color: #c08060;
+  margin: 0;
+  text-align: center;
+}
+
+/* ─── Mode cards grid ─── */
+.mode-select-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  width: 100%;
+  margin-top: 8px;
+}
+
+@media (max-width: 540px) {
+  .mode-select-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.mode-option-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 20px 14px;
+  border-radius: 20px;
+  border: 2.5px solid transparent;
+  background: #fff8f0;
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  text-align: center;
+}
+
+.mode-option-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 6px 20px rgba(244, 162, 97, 0.2);
+}
+
+.mode-option-card--selected {
+  border-color: #f4a261;
+  background: #fff3e6;
+  box-shadow: 0 0 0 4px rgba(244, 162, 97, 0.2);
+  transform: translateY(-4px);
+}
+
+.mode-option-emoji {
+  font-size: 2.4rem;
+}
+
+.mode-option-label {
+  font-size: 1rem;
+  font-weight: 800;
+  color: #8b5e52;
+}
+
+.mode-option-desc {
+  font-size: 0.82rem;
+  color: #a07060;
+  line-height: 1.4;
+}
+
+/* ─── Start button ─── */
+.mode-start-btn {
+  margin-top: 8px;
+  padding: 14px 48px;
+  border: none;
+  border-radius: 50px;
+  background: linear-gradient(135deg, #f4a261, #e76f51);
+  color: white;
+  font-size: 1.1rem;
+  font-weight: 800;
+  font-family: 'Nunito', sans-serif;
+  cursor: pointer;
+  transition: opacity 0.2s, transform 0.15s;
+  box-shadow: 0 4px 16px rgba(231, 111, 81, 0.35);
+}
+
+.mode-start-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.mode-start-btn:not(:disabled):hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(231, 111, 81, 0.45);
+}

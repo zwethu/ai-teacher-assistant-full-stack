@@ -1,44 +1,37 @@
-export type MCQQuestion = {
+// ─── Universal content unit ─────────────────────────────────────
+export type GameItem = {
   id: string;
-  type: 'mcq';
-  question: string;
-  options: string[];
-  correctIndex: number;
+  term: string;
+  definition: string;
 };
 
-export type MatchingQuestion = {
-  id: string;
-  type: 'matching';
-  pairs: { left: string; right: string }[];
-};
+// ─── Game modes ──────────────────────────────────────────────────
+export type GameMode = 'mcq' | 'matching' | 'ropelink';
 
-export type RopeLinkQuestion = {
-  id: string;
-  type: 'ropelink';
-  pairs: { question: string; answer: string }[];
-};
+export type GameState = 'playing' | 'result';
 
-export type Question = MCQQuestion | MatchingQuestion | RopeLinkQuestion;
+export type CatMood = 'idle' | 'happy' | 'confused' | 'playful' | 'eating' | 'sleeping';
 
+// ─── Answer record (shared across all modes) ─────────────────────
 export type AnswerRecord = {
   questionId: string;
   correct: boolean;
 };
 
-export type GameMode = 'mcq' | 'matching' | 'ropelink';
-
-export type GameState = 'playing' | 'result';
-
-export type CatMood = 'idle' | 'happy' | 'confused' | 'playful' | 'eating';
-
+// ─── Firebase documents ──────────────────────────────────────────
 export type GameSession = {
   id: string;
   batchId: string;
-  gameMode: GameMode;
+  // gameMode removed — student picks at runtime
   status: 'open' | 'closed' | 'expired';
-  questions: Question[];
+  items: GameItem[];          // replaces questions array
   createdAt: Date;
   expiresAt?: Date;
+  gameModeStats?: {
+    mcq: number;
+    matching: number;
+    ropelink: number;
+  };
 };
 
 export type PlayerProfile = {
@@ -50,6 +43,7 @@ export type PlayerProfile = {
 export type AttemptResult = {
   playerUid: string;
   assessmentId: string;
+  chosenGameMode: GameMode;   // NEW — which mode the student chose
   score: number;
   accuracy: number;
   fish: number;

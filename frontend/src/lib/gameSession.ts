@@ -8,8 +8,10 @@ import {
   where,
   getDocs,
   serverTimestamp,
+  increment,
+  updateDoc,
 } from 'firebase/firestore';
-import type { GameSession, PlayerProfile, AttemptResult } from '../types/catGame.types';
+import type { GameSession, PlayerProfile, AttemptResult, GameMode } from '../types/catGame.types';
 
 // ─── Game Session ───────────────────────────────────────────────
 
@@ -66,4 +68,18 @@ export async function saveAttempt(result: AttemptResult): Promise<void> {
   const attemptId = `${result.assessmentId}_${result.playerUid}`;
   const ref = doc(db, 'attempts', attemptId);
   await setDoc(ref, { ...result, completedAt: serverTimestamp() });
+}
+
+// ─── Game Mode Choice Stats ──────────────────────────────────────
+// Increments the counter for the chosen mode on the session document.
+// Uses Firestore increment so concurrent writes are safe.
+
+export async function saveGameModeChoice(
+  assessmentId: string,
+  mode: GameMode
+): Promise<void> {
+  const ref = doc(db, 'gameSessions', assessmentId);
+  await updateDoc(ref, {
+    [`gameModeStats.${mode}`]: increment(1),
+  });
 }

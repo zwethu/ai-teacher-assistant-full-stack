@@ -1,7 +1,6 @@
 import { useState } from 'react';
-import type { AnswerRecord, GameMode } from '../../types/catGame.types';
-import type { MCQQuestion, MatchingQuestion, RopeLinkQuestion, Question } from '../../types/catGame.types';
-import { MOCK_MCQ, MOCK_MATCHING, MOCK_ROPELINK } from './mockData';
+import type { AnswerRecord, GameMode, GameItem } from '../../types/catGame.types';
+import { MOCK_ITEMS } from './mockData';
 import HUD from './HUD';
 import CatSprite from './CatSprite';
 import PetAndChoose from './modes/PetAndChoose';
@@ -12,36 +11,22 @@ import { saveAttempt } from '../../lib/gameSession';
 import './CatGame.css';
 
 type Props = {
-  gameMode?: GameMode;
-  questions?: Question[];
+  gameMode: GameMode;
+  items?: GameItem[];
   nickname?: string;
   playerUid?: string;
   assessmentId?: string;
 };
 
 export default function CatGame({
-  gameMode = 'mcq',
-  questions,
+  gameMode,
+  items,
   nickname = 'Player',
   playerUid,
   assessmentId,
 }: Props) {
-  const mcqQuestions = questions
-    ? (questions.filter(q => q.type === 'mcq') as MCQQuestion[])
-    : MOCK_MCQ;
-  const matchingQuestions = questions
-    ? (questions.filter(q => q.type === 'matching') as MatchingQuestion[])
-    : MOCK_MATCHING;
-  const ropeLinkQuestions = questions
-    ? (questions.filter(q => q.type === 'ropelink') as RopeLinkQuestion[])
-    : MOCK_ROPELINK;
-
-  const totalQuestions =
-    gameMode === 'mcq'
-      ? mcqQuestions.length
-      : gameMode === 'matching'
-      ? matchingQuestions.reduce((acc, q) => acc + q.pairs.length, 0)
-      : ropeLinkQuestions.reduce((acc, q) => acc + q.pairs.length, 0);
+  const activeItems = items && items.length > 0 ? items : MOCK_ITEMS;
+  const totalQuestions = activeItems.length;
 
   const [gameOver, setGameOver] = useState(false);
   const [happiness, setHappiness] = useState(60);
@@ -86,6 +71,7 @@ export default function CatGame({
         await saveAttempt({
           playerUid,
           assessmentId,
+          chosenGameMode: gameMode,
           score: fish,
           accuracy,
           fish,
@@ -149,7 +135,7 @@ export default function CatGame({
       <div className="interaction-area">
         {gameMode === 'mcq' && (
           <PetAndChoose
-            questions={mcqQuestions}
+            items={activeItems}
             onCorrect={handleCorrect}
             onWrong={handleWrong}
             onComplete={handleComplete}
@@ -157,14 +143,14 @@ export default function CatGame({
         )}
         {gameMode === 'matching' && (
           <MatchAndTreat
-            questions={matchingQuestions}
+            items={activeItems}
             onMatch={handleMatchPlay}
             onComplete={handleComplete}
           />
         )}
         {gameMode === 'ropelink' && (
           <RopeAndLink
-            questions={ropeLinkQuestions}
+            items={activeItems}
             onCorrect={handleCorrect}
             onWrong={handleWrong}
             onComplete={handleComplete}

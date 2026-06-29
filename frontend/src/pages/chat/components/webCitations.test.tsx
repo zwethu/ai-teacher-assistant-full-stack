@@ -23,7 +23,7 @@ describe('web citation presentation', () => {
   })
 
   it('renders metadata-backed web sources', () => {
-    const html = renderToStaticMarkup(<WebSourcesList sources={[{ index: 1, title: 'Official docs', url: 'https://docs.example/path', domain: 'docs.example', supports: 'Supports the claim' }]} citations={[{ index: 1, source_index: 1, cited_text: 'Claim evidence' }]} hasMarkdownSources={false} />)
+    const html = renderToStaticMarkup(<WebSourcesList sources={[{ index: 1, title: 'Official docs', url: 'https://docs.example/path', domain: 'docs.example', display_domain: 'docs.example', supports: 'Supports the claim' }]} citations={[{ index: 1, source_index: 1, cited_text: 'Claim evidence' }]} hasMarkdownSources={false} />)
     expect(html).toContain('Web Sources')
     expect(html).toContain('Official docs')
     expect(html).toContain('Supports the claim')

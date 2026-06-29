@@ -38,6 +38,7 @@ from urllib.parse import urlsplit, urlunsplit
 from fastapi import BackgroundTasks, HTTPException, status
 
 from entity.Batch import BatchModel
+from entity.CourseBlueprint import CourseBlueprintContent
 from services.agent_engine_client import get_agent_engine_resource_name, stream_agent_response
 from services.agent_platform_sessions import get_agent_session_state
 from services.agent_artifact_context import build_agent_artifact_manifest
@@ -387,16 +388,38 @@ def course_blueprint_suggestion_metadata(
     )
     if blocked:
         return {}
+    blueprint = suggestion.get("blueprint")
+    if not isinstance(blueprint, dict):
+        return {}
+    try:
+        validated_blueprint = CourseBlueprintContent.model_validate(blueprint)
+    except Exception:
+        logger.warning(
+            "Rejected invalid Course Blueprint recommendation run_id=%s", run_id
+        )
+        return {}
+    if validated_blueprint.plan_scope is None:
+        return {}
+    recommendation = validated_blueprint.model_dump(mode="json")
+    encoded = json.dumps(
+        recommendation, ensure_ascii=False, separators=(",", ":")
+    ).encode("utf-8")
+    if len(encoded) > 200_000:
+        logger.warning(
+            "Rejected oversized Course Blueprint recommendation run_id=%s bytes=%d",
+            run_id,
+            len(encoded),
+        )
+        return {}
     return {
         "course_blueprint_save_suggested": True,
         "course_blueprint_suggestion_confidence": "high",
-        "course_blueprint_suggestion_title": str(
-            suggestion.get("suggested_title") or ""
-        ).strip()[:300],
+        "course_blueprint_suggestion_title": validated_blueprint.title,
         "course_blueprint_suggestion_reason": str(
             suggestion.get("reason") or ""
         ).strip()[:500],
         "course_blueprint_suggestion_run_id": run_id,
+        "course_blueprint_recommendation": recommendation,
     }
 
 

@@ -41,6 +41,8 @@ import { RunDetails } from './run/RunDetails'
 import { ThinkingPanel } from './run/ThinkingPanel'
 import { CourseBlueprintReviewModal } from './CourseBlueprintReviewModal'
 import type { CourseBlueprint } from '../../../services/courseBlueprintService'
+import { normalizeCourseBlueprintRecommendation } from '../../../services/courseBlueprintService'
+import { SuggestedCourseBlueprintModal } from './SuggestedCourseBlueprintModal'
 
 export function MessageRow({
   msg,
@@ -61,7 +63,7 @@ export function MessageRow({
   approvalSuperseded?: boolean
   courseName?: string
 }) {
-  const [blueprintOpen, setBlueprintOpen] = useState(false)
+  const [blueprintMode, setBlueprintMode] = useState<'manual' | 'suggested' | 'edit-suggested' | null>(null)
   const [actionsOpen, setActionsOpen] = useState(false)
   const [savedBlueprint, setSavedBlueprint] = useState<CourseBlueprint | null>(null)
   if (!msg) return null
@@ -76,9 +78,11 @@ export function MessageRow({
     ? msg.metadata.assistant_intro.trim()
     : ''
   const canSaveBlueprint = Boolean(batchId && courseName && !savedBlueprint && isCourseBlueprintSourceEligible(msg, isPending, isFailed))
+  const blueprintRecommendation = normalizeCourseBlueprintRecommendation(msg.metadata?.course_blueprint_recommendation)
   const showSuggestedBlueprintButton = canSaveBlueprint &&
     msg.metadata?.course_blueprint_save_suggested === true &&
-    msg.metadata?.course_blueprint_suggestion_confidence === 'high'
+    msg.metadata?.course_blueprint_suggestion_confidence === 'high' &&
+    Boolean(blueprintRecommendation)
 
   return (
     <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : ''}`}>
@@ -103,7 +107,7 @@ export function MessageRow({
                 <button type="button" onClick={() => setActionsOpen((value) => !value)} className="rounded-md p-1 text-slate-400 hover:bg-white/70 hover:text-slate-700" aria-label="Message actions"><MoreHorizontal className="h-4 w-4" /></button>
                 {actionsOpen && (
                   <div className="absolute right-0 top-7 z-30 w-56 rounded-lg border border-slate-200 bg-white py-1 shadow-xl">
-                    <button type="button" onClick={() => { setActionsOpen(false); setBlueprintOpen(true) }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"><Save className="h-4 w-4 text-emerald-600" />Save to Course Blueprint...</button>
+                    <button type="button" onClick={() => { setActionsOpen(false); setBlueprintMode('manual') }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"><Save className="h-4 w-4 text-emerald-600" />Save to Course Blueprint...</button>
                   </div>
                 )}
               </div>
@@ -149,12 +153,15 @@ export function MessageRow({
             </div>
             {showSuggestedBlueprintButton && (
               <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50/70 p-3">
-                <button type="button" onClick={() => setBlueprintOpen(true)} className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700"><Save className="h-4 w-4" />Save to Course Blueprint</button>
+                <button type="button" onClick={() => setBlueprintMode('suggested')} className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700"><Save className="h-4 w-4" />Save to Course Blueprint</button>
                 <p className="mt-2 text-xs leading-5 text-emerald-800">Suggested by the consultant because this response looks reusable as course planning memory.</p>
               </div>
             )}
-            {blueprintOpen && batchId && (
-              <CourseBlueprintReviewModal batchId={batchId} courseName={courseName} message={msg} onClose={() => setBlueprintOpen(false)} onSaved={(blueprint) => { setSavedBlueprint(blueprint); setBlueprintOpen(false) }} />
+            {blueprintMode === 'suggested' && batchId && blueprintRecommendation && (
+              <SuggestedCourseBlueprintModal batchId={batchId} message={msg} recommendation={blueprintRecommendation} onClose={() => setBlueprintMode(null)} onEdit={() => setBlueprintMode('edit-suggested')} onSaved={(blueprint) => { setSavedBlueprint(blueprint); setBlueprintMode(null) }} />
+            )}
+            {(blueprintMode === 'manual' || blueprintMode === 'edit-suggested') && batchId && (
+              <CourseBlueprintReviewModal batchId={batchId} courseName={courseName} message={msg} initialContent={blueprintMode === 'edit-suggested' ? blueprintRecommendation || undefined : undefined} onClose={() => setBlueprintMode(null)} onSaved={(blueprint) => { setSavedBlueprint(blueprint); setBlueprintMode(null) }} />
             )}
             {!isUser && batchId && <ArtifactExportButton batchId={batchId} msg={msg} />}
           </div>

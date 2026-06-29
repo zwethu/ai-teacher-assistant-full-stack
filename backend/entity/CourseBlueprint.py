@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
@@ -10,6 +12,27 @@ class CourseBlueprintWeeklyPlanItem(BaseModel):
     lab_goal: str | None = Field(default=None, max_length=2000)
     assessment_idea: str | None = Field(default=None, max_length=2000)
     notes: str | None = Field(default=None, max_length=2000)
+    source_status: Literal[
+        "generated_artifact", "saved_blueprint", "user_provided", "proposed", "unknown"
+    ] | None = None
+    source_refs: list[str] = Field(default_factory=list, max_length=10)
+
+    @field_validator("theme", "lesson_goal", "lab_goal", "assessment_idea", "notes")
+    @classmethod
+    def strip_item_text(cls, value: str | None) -> str | None:
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("source_refs")
+    @classmethod
+    def clean_source_refs(cls, value: list[str]) -> list[str]:
+        cleaned: list[str] = []
+        for item in value:
+            text = item.strip()
+            if len(text) > 300:
+                raise ValueError("source reference is too long")
+            if text and text not in cleaned:
+                cleaned.append(text)
+        return cleaned
 
 
 class CourseBlueprintContent(BaseModel):
@@ -20,8 +43,16 @@ class CourseBlueprintContent(BaseModel):
     lab_strategy: str = Field(default="", max_length=8000)
     teaching_preferences: dict[str, str] = Field(default_factory=dict)
     open_questions: list[str] = Field(default_factory=list, max_length=100)
+    planning_horizon_weeks: int | None = Field(default=None, ge=1, le=104)
+    plan_scope: Literal[
+        "full_course", "remaining_weeks", "strategy_only", "partial_update"
+    ] | None = None
+    assumptions: list[str] = Field(default_factory=list, max_length=100)
+    source_summary: str = Field(default="", max_length=4000)
 
-    @field_validator("title", "summary", "assessment_strategy", "lab_strategy")
+    @field_validator(
+        "title", "summary", "assessment_strategy", "lab_strategy", "source_summary"
+    )
     @classmethod
     def strip_text(cls, value: str) -> str:
         return value.strip()
@@ -42,7 +73,7 @@ class CourseBlueprintContent(BaseModel):
             cleaned[clean_key] = clean_value
         return cleaned
 
-    @field_validator("open_questions")
+    @field_validator("open_questions", "assumptions")
     @classmethod
     def clean_questions(cls, value: list[str]) -> list[str]:
         cleaned = [item.strip() for item in value if item.strip()]

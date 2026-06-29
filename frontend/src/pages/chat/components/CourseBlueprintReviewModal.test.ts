@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   hasSubstantiveBlueprintContent,
+  initialBlueprintForm,
   normalizeApiErrorMessage,
 } from './CourseBlueprintReviewModal'
 import type { CourseBlueprintContent } from '../../../services/courseBlueprintService'
@@ -73,6 +74,20 @@ describe('hasSubstantiveBlueprintContent', () => {
   it('returns true after "Copy source into Summary" action (non-empty content)', () => {
     const form = emptyForm({ summary: '## Week 1\nIntro to React\n**Key Concepts**: ...' })
     expect(hasSubstantiveBlueprintContent(form, [])).toBe(true)
+  })
+})
+
+describe('initialBlueprintForm', () => {
+  it('keeps manual mode blank and prefills suggested edit mode', () => {
+    expect(initialBlueprintForm('Test Course').summary).toBe('')
+    const initial = emptyForm({
+      summary: 'Recommended plan',
+      plan_scope: 'full_course',
+      weekly_plan: [{ week: 1, theme: 'Foundations', source_status: 'proposed' }],
+    })
+    const form = initialBlueprintForm('Test Course', initial)
+    expect(form.summary).toBe('Recommended plan')
+    expect(form.weekly_plan[0].source_status).toBe('proposed')
   })
 })
 

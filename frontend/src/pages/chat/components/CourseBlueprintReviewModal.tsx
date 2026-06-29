@@ -100,6 +100,7 @@ type Props = {
   message: ChatMessage
   onClose: () => void
   onSaved: (blueprint: CourseBlueprint) => void
+  initialContent?: CourseBlueprintContent
 }
 
 const emptyForm = (courseName: string): CourseBlueprintContent => ({
@@ -110,11 +111,22 @@ const emptyForm = (courseName: string): CourseBlueprintContent => ({
   lab_strategy: '',
   teaching_preferences: {},
   open_questions: [],
+  planning_horizon_weeks: null,
+  plan_scope: null,
+  assumptions: [],
+  source_summary: '',
 })
 
-export function CourseBlueprintReviewModal({ batchId, courseName, message, onClose, onSaved }: Props) {
-  const [form, setForm] = useState<CourseBlueprintContent>(() => emptyForm(courseName))
-  const [preferences, setPreferences] = useState<Array<{ key: string; value: string }>>([])
+export function initialBlueprintForm(courseName: string, initialContent?: CourseBlueprintContent): CourseBlueprintContent {
+  return initialContent
+    ? { ...initialContent, weekly_plan: initialContent.weekly_plan.map((item) => ({ ...item, source_refs: [...(item.source_refs || [])] })), open_questions: [...initialContent.open_questions], assumptions: [...(initialContent.assumptions || [])], teaching_preferences: { ...initialContent.teaching_preferences } }
+    : emptyForm(courseName)
+}
+
+export function CourseBlueprintReviewModal({ batchId, courseName, message, onClose, onSaved, initialContent }: Props) {
+  const [form, setForm] = useState<CourseBlueprintContent>(() => initialBlueprintForm(courseName, initialContent))
+  const [preferences, setPreferences] = useState<Array<{ key: string; value: string }>>(() =>
+    Object.entries(initialContent?.teaching_preferences || {}).map(([key, value]) => ({ key, value })))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -170,7 +182,7 @@ export function CourseBlueprintReviewModal({ batchId, courseName, message, onClo
         {/* Header */}
         <header className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
           <div>
-            <h2 className="text-lg font-semibold text-slate-900">Review Course Blueprint</h2>
+            <h2 className="text-lg font-semibold text-slate-900">{initialContent ? 'Edit Recommended Course Blueprint' : 'Review Course Blueprint'}</h2>
             <p className="text-sm text-slate-500">Nothing is saved until you confirm.</p>
           </div>
           <button onClick={onClose} disabled={saving} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Close">
@@ -215,6 +227,10 @@ export function CourseBlueprintReviewModal({ batchId, courseName, message, onClo
             </div>
 
             <TextField label="Title" value={form.title} onChange={(value) => setField('title', value)} />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="text-sm font-medium text-slate-700">Planning horizon (weeks)<input type="number" min={1} max={104} value={form.planning_horizon_weeks || ''} onChange={(event) => setField('planning_horizon_weeks', event.target.value ? Number(event.target.value) : null)} className="mt-1 w-full rounded-lg border px-3 py-2 font-normal" /></label>
+              <label className="text-sm font-medium text-slate-700">Plan scope<select value={form.plan_scope || ''} onChange={(event) => setField('plan_scope', (event.target.value || null) as CourseBlueprintContent['plan_scope'])} className="mt-1 w-full rounded-lg border px-3 py-2 font-normal"><option value="">Not specified</option><option value="full_course">Full course</option><option value="remaining_weeks">Remaining weeks</option><option value="strategy_only">Strategy only</option><option value="partial_update">Partial update</option></select></label>
+            </div>
             <TextArea label="Summary" value={form.summary} onChange={(value) => setField('summary', value)} />
 
             <EditorSection
@@ -237,6 +253,7 @@ export function CourseBlueprintReviewModal({ batchId, courseName, message, onClo
 
             <TextArea label="Assessment strategy" value={form.assessment_strategy} onChange={(value) => setField('assessment_strategy', value)} />
             <TextArea label="Lab strategy" value={form.lab_strategy} onChange={(value) => setField('lab_strategy', value)} />
+            <TextArea label="Source summary" value={form.source_summary || ''} onChange={(value) => setField('source_summary', value)} />
 
             <EditorSection
               title="Teaching preferences"
@@ -282,6 +299,18 @@ export function CourseBlueprintReviewModal({ batchId, courseName, message, onClo
                   <button onClick={() => setField('open_questions', form.open_questions.filter((_, i) => i !== index))} className="text-red-500" aria-label="Remove question">
                     <Trash2 className="h-4 w-4" />
                   </button>
+                </div>
+              ))}
+            </EditorSection>
+
+            <EditorSection
+              title="Assumptions"
+              onAdd={() => setField('assumptions', [...(form.assumptions || []), ''])}
+            >
+              {(form.assumptions || []).map((assumption, index) => (
+                <div key={index} className="flex gap-2">
+                  <input value={assumption} onChange={(event) => setField('assumptions', (form.assumptions || []).map((item, itemIndex) => itemIndex === index ? event.target.value : item))} className="min-w-0 flex-1 rounded-lg border px-3 py-2 text-sm" placeholder="Assumption" />
+                  <button onClick={() => setField('assumptions', (form.assumptions || []).filter((_, itemIndex) => itemIndex !== index))} className="text-red-500" aria-label="Remove assumption"><Trash2 className="h-4 w-4" /></button>
                 </div>
               ))}
             </EditorSection>
@@ -336,6 +365,7 @@ function WeeklyPlanRow({
 }) {
   return (
     <div className="space-y-2 rounded-xl border border-slate-200 p-3">
+      {item.source_status && <div className="text-xs font-medium text-emerald-700">{sourceStatusLabel(item.source_status)}</div>}
       <div className="flex gap-2">
         <input
           type="number"
@@ -364,8 +394,19 @@ function WeeklyPlanRow({
           className="w-full rounded-lg border px-3 py-2 text-sm"
         />
       ))}
+      {item.source_refs && item.source_refs.length > 0 && <p className="text-xs text-slate-500">Sources: {item.source_refs.join(', ')}</p>}
     </div>
   )
+}
+
+function sourceStatusLabel(status: NonNullable<CourseBlueprintWeeklyPlanItem['source_status']>) {
+  return ({
+    generated_artifact: 'From generated artifact',
+    saved_blueprint: 'From saved blueprint',
+    user_provided: 'From your instruction',
+    proposed: 'Proposed',
+    unknown: 'Source unknown',
+  } as const)[status]
 }
 
 function TextField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {

@@ -473,7 +473,7 @@ export function WebSourcesList({
   )
 }
 
-function MarkdownBlock({ content, webSources = [] }: { content: string; webSources?: WebSourceMetadata[] }) {
+export function MarkdownBlock({ content, webSources = [] }: { content: string; webSources?: WebSourceMetadata[] }) {
   const sourceByIndex = new Map(webSources.map((source) => [source.index, source]))
   const sourceByUrl = new Map(webSources.map((source) => [source.url, source]))
   return (

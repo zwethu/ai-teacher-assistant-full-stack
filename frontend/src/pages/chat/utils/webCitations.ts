@@ -178,7 +178,7 @@ export function normalizeWebSources(metadata?: Record<string, unknown>): WebSour
       redirectLabelSeen.set(displayDomain.toLowerCase(), pos)
     }
 
-    if (result.length >= 10) break
+    if (result.length >= 20) break
   }
   return result
 }
@@ -186,7 +186,7 @@ export function normalizeWebSources(metadata?: Record<string, unknown>): WebSour
 export function normalizeWebCitations(metadata?: Record<string, unknown>): WebCitationMetadata[] {
   if (!Array.isArray(metadata?.web_citations)) return []
   const result: WebCitationMetadata[] = []
-  for (const raw of metadata.web_citations.slice(0, 20)) {
+  for (const raw of metadata.web_citations.slice(0, 40)) {
     if (!raw || typeof raw !== 'object') continue
     const item = raw as Record<string, unknown>
     const sourceIndex = Number(item.source_index)
@@ -198,6 +198,15 @@ export function normalizeWebCitations(metadata?: Record<string, unknown>): WebCi
     })
   }
   return result
+}
+
+export function normalizeWebQueries(metadata?: Record<string, unknown>): string[] {
+  if (!Array.isArray(metadata?.web_queries)) return []
+  return metadata.web_queries
+    .filter((query): query is string => typeof query === 'string')
+    .map((query) => query.trim().slice(0, 300))
+    .filter(Boolean)
+    .slice(0, 8)
 }
 
 export function markdownUrls(markdown: string): Set<string> {
@@ -228,18 +237,23 @@ export function citationRemarkPlugin(sourceByIndex: Map<number, WebSourceMetadat
           next.push(child)
           continue
         }
-        const pattern = /\[([1-9]\d*)\]/g
+        const pattern = /\[([1-9]\d*(?:\s*,\s*[1-9]\d*)*)\]/g
         let cursor = 0
         let match: RegExpExecArray | null
         while ((match = pattern.exec(child.value))) {
-          const source = sourceByIndex.get(Number(match[1]))
-          if (!source) continue
           if (match.index > cursor) next.push({ type: 'text', value: child.value.slice(cursor, match.index) })
-          next.push({
-            type: 'link',
-            url: source.url,
-            title: `${source.title} — ${source.display_domain || source.domain}`,
-            children: [{ type: 'text', value: match[0] }],
+          const indices = match[1].split(',').map((value) => Number(value.trim()))
+          indices.forEach((index, position) => {
+            const source = sourceByIndex.get(index)
+            if (position > 0) next.push({ type: 'text', value: ' ' })
+            next.push({
+              type: 'link',
+              url: source?.url || `#citation-unavailable-${index}`,
+              title: source
+                ? `${source.title} — ${source.display_domain || source.domain}`
+                : 'Source not available in captured metadata.',
+              children: [{ type: 'text', value: `[${index}]` }],
+            })
           })
           cursor = match.index + match[0].length
         }

@@ -924,7 +924,7 @@ def _web_search_message_metadata(
     source_by_original_index: dict[int, dict[str, Any]] = {}
     seen_urls: set[str] = set()
     seen_indices: set[int] = set()
-    for item in (raw.get("sources") or [])[:20]:
+    for item in (raw.get("sources") or [])[:40]:
         if not isinstance(item, dict):
             continue
         url = _safe_web_url(item.get("url"))
@@ -977,13 +977,13 @@ def _web_search_message_metadata(
         }
         sources.append(source)
         source_by_original_index[original_index] = source
-        if len(sources) >= 10:
+        if len(sources) >= 20:
             break
     if not sources:
         return {}
 
     citations: list[dict[str, Any]] = []
-    for item in (raw.get("citations") or [])[:40]:
+    for item in (raw.get("citations") or [])[:80]:
         if not isinstance(item, dict):
             continue
         try:
@@ -1001,7 +1001,7 @@ def _web_search_message_metadata(
             "domain": source["domain"],
             "cited_text": _clean_support_text(str(item.get("cited_text") or ""), 300),
         })
-        if len(citations) >= 20:
+        if len(citations) >= 40:
             break
 
     is_card = bool(
@@ -1017,8 +1017,13 @@ def _web_search_message_metadata(
                 [visible_text, str(message_metadata.get("assistant_intro") or "")],
             )
         )
+        referenced_indices = {
+            int(number)
+            for group in re.findall(r"\[([1-9]\d*(?:\s*,\s*[1-9]\d*)*)\]", text)
+            for number in re.findall(r"[1-9]\d*", group)
+        }
         referenced = any(
-            re.search(rf"\[{source['index']}\](?!\()", text) or source["url"] in text
+            source["index"] in referenced_indices or source["url"] in text
             for source in sources
         )
         if not referenced:
@@ -1032,13 +1037,19 @@ def _web_search_message_metadata(
     mode = str(raw.get("extraction_mode") or "none")
     if mode not in {"grounding_metadata", "model_text_fallback", "none"}:
         mode = "none"
-    return {
+    result = {
         "web_search_used": True,
         "web_search_extraction_mode": mode,
         "web_queries": queries,
+        "web_source_count": len(sources),
+        "web_citation_count": len(citations),
         "web_sources": sources,
         "web_citations": citations,
     }
+    if len(json.dumps(result, ensure_ascii=False).encode("utf-8")) > 100_000:
+        logger.warning("Rejected oversized web citation metadata")
+        return {}
+    return result
 
 
 # ---------------------------------------------------------------------------

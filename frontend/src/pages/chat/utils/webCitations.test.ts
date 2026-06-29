@@ -3,6 +3,7 @@ import {
   cleanSourceSupportText,
   isGoogleGroundingRedirectUrl,
   normalizeWebCitations,
+  normalizeWebQueries,
   normalizeWebSources,
 } from './webCitations'
 
@@ -27,6 +28,14 @@ describe('isGoogleGroundingRedirectUrl', () => {
   it('returns false for empty/invalid input', () => {
     expect(isGoogleGroundingRedirectUrl('')).toBe(false)
     expect(isGoogleGroundingRedirectUrl('not-a-url')).toBe(false)
+  })
+})
+
+describe('normalizeWebQueries', () => {
+  it('keeps at most eight bounded string queries', () => {
+    const queries = normalizeWebQueries({ web_queries: [...Array.from({ length: 10 }, (_, index) => ` query ${index} `), 42] })
+    expect(queries).toHaveLength(8)
+    expect(queries[0]).toBe('query 0')
   })
 })
 
@@ -167,6 +176,16 @@ describe('normalizeWebSources — direct URLs', () => {
     })
     expect(sources).toHaveLength(1)
   })
+
+  it('keeps up to 20 bounded sources', () => {
+    const sources = normalizeWebSources({
+      web_sources: Array.from({ length: 25 }, (_, index) => ({
+        index: index + 1, title: `Source ${index + 1}`, url: `https://source${index + 1}.example`,
+      })),
+    })
+    expect(sources).toHaveLength(20)
+    expect(sources[10].index).toBe(11)
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -216,5 +235,14 @@ describe('normalizeWebCitations — cited_text cleanup', () => {
     })
     expect(citations).toHaveLength(1)
     expect(citations[0].cited_text).toBe('valid')
+  })
+
+  it('keeps up to 40 bounded citations', () => {
+    const citations = normalizeWebCitations({
+      web_citations: Array.from({ length: 45 }, (_, index) => ({
+        index: index + 1, source_index: (index % 20) + 1, cited_text: `Claim ${index + 1}`,
+      })),
+    })
+    expect(citations).toHaveLength(40)
   })
 })

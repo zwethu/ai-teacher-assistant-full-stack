@@ -41,6 +41,12 @@ class NativeStreamingTest(unittest.IsolatedAsyncioTestCase):
             ),
             {},
         )
+        grouped = agent_gateway._web_search_message_metadata(
+            {"last_web_search": {"status": "success", "sources": [source]}},
+            visible_text="Preview uses [1, 2]",
+            message_metadata={"artifact_preview_card": True},
+        )
+        self.assertTrue(grouped["web_search_used"])
         self.assertEqual(
             agent_gateway._web_search_message_metadata(
                 {"last_web_search": {"status": "success", "sources": [source]}},
@@ -49,6 +55,28 @@ class NativeStreamingTest(unittest.IsolatedAsyncioTestCase):
             ),
             {},
         )
+
+    def test_web_search_metadata_supports_twenty_sources_and_forty_citations(self) -> None:
+        sources = [
+            {"index": index, "title": f"Source {index}", "url": f"https://source{index}.example/path"}
+            for index in range(1, 26)
+        ]
+        citations = [
+            {"index": index, "source_index": ((index - 1) % 20) + 1, "cited_text": f"Claim {index}"}
+            for index in range(1, 46)
+        ]
+        result = agent_gateway._web_search_message_metadata(
+            {"last_web_search": {
+                "status": "success", "extraction_mode": "grounding_metadata",
+                "queries": ["query"], "sources": sources, "citations": citations,
+            }},
+            visible_text="Answer [11]", message_metadata={},
+        )
+        self.assertEqual(len(result["web_sources"]), 20)
+        self.assertEqual(len(result["web_citations"]), 40)
+        self.assertEqual(result["web_source_count"], 20)
+        self.assertEqual(result["web_citation_count"], 40)
+        self.assertEqual(result["web_sources"][10]["index"], 11)
 
     def test_preview_card_metadata_is_limited_to_lesson_plans_and_labs(self) -> None:
         lesson = agent_gateway._draft_message_metadata(

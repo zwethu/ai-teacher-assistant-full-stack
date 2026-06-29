@@ -32,8 +32,8 @@ import type { RunUiState } from '../runTypes'
 import { splitSourcesSection } from '../utils/splitSourcesSection'
 import {
   citationRemarkPlugin,
-  markdownUrls,
   normalizeWebCitations,
+  normalizeWebQueries,
   normalizeWebSources,
   type WebSourceMetadata,
 } from '../utils/webCitations'
@@ -406,11 +406,11 @@ export function ResponseMarkdown({
   metadata?: Record<string, unknown>
 }) {
   const [sourcesOpen, setSourcesOpen] = useState(false)
+  const [selectedSource, setSelectedSource] = useState<WebSourceMetadata | null>(null)
   const { body, sources } = splitSourcesSection(content)
   const webSources = normalizeWebSources(metadata)
   const citations = normalizeWebCitations(metadata)
-  const existingUrls = markdownUrls(sources)
-  const uniqueWebSources = webSources.filter((source) => !existingUrls.has(source.url))
+  const webQueries = normalizeWebQueries(metadata)
 
   return (
     <div className="animate-in fade-in duration-300">
@@ -420,28 +420,22 @@ export function ResponseMarkdown({
           Generating...
         </div>
       )}
-      <MarkdownBlock content={body || content} webSources={webSources} />
-      {(sources || uniqueWebSources.length > 0) && (
+      <MarkdownBlock content={body || content} webSources={webSources} onCitationSelect={setSelectedSource} />
+      {(sources || webSources.length > 0) && (
         <div className="mt-3">
           <button
             type="button"
-            onClick={() => setSourcesOpen((value) => !value)}
+            onClick={() => setSourcesOpen(true)}
             className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-white hover:text-slate-900"
           >
             <FileText className="h-3.5 w-3.5" />
             Sources
             <ChevronDown className={`h-3.5 w-3.5 transition-transform ${sourcesOpen ? 'rotate-180' : ''}`} />
           </button>
-          {sourcesOpen && (
-            <div className="mt-2 rounded-lg border border-slate-200 bg-white/70 px-3 py-2 text-sm">
-              {sources && <MarkdownBlock content={sources} />}
-              {uniqueWebSources.length > 0 && (
-                <WebSourcesList sources={uniqueWebSources} citations={citations} hasMarkdownSources={Boolean(sources)} />
-              )}
-            </div>
-          )}
         </div>
       )}
+      {sourcesOpen && <SourcesModal queries={webQueries} sources={webSources} citations={citations} markdownSources={sources} onClose={() => setSourcesOpen(false)} />}
+      {selectedSource && <CitationSourceModal source={selectedSource} citedText={citations.find((citation) => citation.source_index === selectedSource.index)?.cited_text || ''} onClose={() => setSelectedSource(null)} />}
     </div>
   )
 }
@@ -468,9 +462,10 @@ export function WebSourcesList({
             <li key={source.url} className="flex gap-2 text-xs leading-5">
               <span className="font-semibold text-emerald-700">[{source.index}]</span>
               <div className="min-w-0">
-                <a href={source.url} target="_blank" rel="noreferrer" className="font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-800">{source.title}</a>
+                <div className="font-medium text-slate-800">{source.title}</div>
                 {visibleDomain && <div className="truncate text-slate-500">{visibleDomain}{isGroundedLink && <span className="ml-1 text-slate-400">· Google grounded link</span>}</div>}
                 {supportText && <div className="text-slate-600 line-clamp-2">{supportText}</div>}
+                <a href={source.url} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 rounded-md border border-emerald-200 px-2 py-1 font-medium text-emerald-700 hover:bg-emerald-50"><ExternalLink className="h-3 w-3" />Open source</a>
               </div>
             </li>
           )
@@ -480,7 +475,29 @@ export function WebSourcesList({
   )
 }
 
-export function MarkdownBlock({ content, webSources = [] }: { content: string; webSources?: WebSourceMetadata[] }) {
+export function CitationSourceModal({ source, citedText, onClose }: { source: WebSourceMetadata; citedText: string; onClose: () => void }) {
+  useModalLifecycle(onClose)
+  const supportText = source.supports || citedText
+  const visibleDomain = source.display_domain || source.domain
+  return createPortal(<div className="fixed inset-0 z-[360] flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={`Source ${source.index}`} onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><div className="w-full max-w-md rounded-2xl border border-white/60 bg-white p-5 shadow-2xl"><div className="flex items-start justify-between gap-3"><div><div className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Source [{source.index}]</div><h2 className="mt-1 text-lg font-semibold text-slate-900">{source.title}</h2>{visibleDomain && <p className="mt-1 text-sm text-slate-500">{visibleDomain}</p>}</div><button type="button" onClick={onClose} className="rounded-full p-2 text-slate-500 hover:bg-slate-100" aria-label="Close source popup"><X className="h-4 w-4" /></button></div>{supportText && <p className="mt-4 text-sm leading-6 text-slate-600">{supportText}</p>}{source.link_type === 'google_grounding_redirect' && <p className="mt-3 text-xs text-slate-400">Google grounded link</p>}<a href={source.url} target="_blank" rel="noreferrer" className="mt-5 inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-emerald-700"><ExternalLink className="h-4 w-4" />Open source</a></div></div>, document.body)
+}
+
+export function SourcesModal({ queries, sources, citations, markdownSources, onClose }: { queries: string[]; sources: WebSourceMetadata[]; citations: ReturnType<typeof normalizeWebCitations>; markdownSources: string; onClose: () => void }) {
+  useModalLifecycle(onClose)
+  return createPortal(<div className="fixed inset-0 z-[350] flex items-center justify-center bg-slate-950/50 p-3 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Web Sources" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"><header className="flex items-center justify-between border-b border-slate-200 px-5 py-4"><div><h2 className="text-lg font-semibold text-slate-900">Web Sources</h2><p className="text-sm text-slate-500">Sources captured during this response.</p></div><button type="button" onClick={onClose} className="rounded-full p-2 text-slate-500 hover:bg-slate-100" aria-label="Close Web Sources"><X className="h-5 w-5" /></button></header><div className="min-h-0 flex-1 overflow-y-auto p-5">{queries.length > 0 && <section className="mb-5"><h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Search queries</h3><div className="flex flex-wrap gap-2">{queries.map((query) => <span key={query} className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs text-slate-600">{query}</span>)}</div></section>}{sources.length > 0 && <WebSourcesList sources={sources} citations={citations} hasMarkdownSources={false} />}{markdownSources && <section className={`${sources.length > 0 ? 'mt-5 border-t border-slate-200 pt-5' : ''}`}><MarkdownBlock content={markdownSources} /></section>}</div></section></div>, document.body)
+}
+
+function useModalLifecycle(onClose: () => void) {
+  useEffect(() => {
+    const previous = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const close = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
+    window.addEventListener('keydown', close)
+    return () => { document.body.style.overflow = previous; window.removeEventListener('keydown', close) }
+  }, [onClose])
+}
+
+export function MarkdownBlock({ content, webSources = [], onCitationSelect }: { content: string; webSources?: WebSourceMetadata[]; onCitationSelect?: (source: WebSourceMetadata) => void }) {
   const sourceByIndex = new Map(webSources.map((source) => [source.index, source]))
   const sourceByUrl = new Map(webSources.map((source) => [source.url, source]))
   return (
@@ -498,12 +515,13 @@ export function MarkdownBlock({ content, webSources = [] }: { content: string; w
         a: ({ href, children, ...props }) => {
           const source = href ? sourceByUrl.get(href) : undefined
           const isCitation = Boolean(source && /^\[\d+\]$/.test(String(children)))
+          const unavailableCitation = Boolean(href?.startsWith('#citation-unavailable-') && /^\[\d+\]$/.test(String(children)))
+          if (unavailableCitation) return <span className="mx-0.5 inline-flex rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0.5 align-baseline text-xs font-semibold text-slate-400" title="Source not available in captured metadata.">{children}</span>
+          if (isCitation && source) return <button type="button" onClick={() => onCitationSelect?.(source)} className="mx-0.5 inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 align-baseline text-xs font-semibold text-emerald-700 no-underline hover:bg-emerald-100" title={`${source.title} — ${source.display_domain || source.domain}`}>{children}</button>
           return (
             <a
               href={href}
-              className={isCitation
-                ? 'mx-0.5 inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 align-baseline text-xs font-semibold text-emerald-700 no-underline hover:bg-emerald-100'
-                : 'break-words font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-800'}
+              className="break-words font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-800"
               target="_blank"
               rel="noreferrer"
               {...props}

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import type { MatchingQuestion, AnswerRecord } from '../../../types/catGame.types';
+import type { GameItem, AnswerRecord } from '../../../types/catGame.types';
 
 type Card = {
   id: string;
@@ -10,43 +10,35 @@ type Card = {
 };
 
 type Props = {
-  questions: MatchingQuestion[];
+  items: GameItem[];
   onMatch: () => void;
   onComplete: (answers: AnswerRecord[]) => void;
 };
 
-export default function MatchAndTreat({ questions, onMatch, onComplete }: Props) {
+function shuffle<T>(arr: T[]): T[] {
+  return [...arr].sort(() => Math.random() - 0.5);
+}
+
+export default function MatchAndTreat({ items, onMatch, onComplete }: Props) {
   const [cards, setCards] = useState<Card[]>([]);
   const [selected, setSelected] = useState<Card | null>(null);
   const [shaking, setShaking] = useState<string | null>(null);
   const [answers, setAnswers] = useState<AnswerRecord[]>([]);
 
+  // Build cards from GameItem[]: term on left, definition on right
   useEffect(() => {
     const allCards: Card[] = [];
-    questions.forEach(q => {
-      q.pairs.forEach((pair, i) => {
-        const pairId = `${q.id}-pair-${i}`;
-        allCards.push({ id: `${pairId}-L`, text: pair.left, pairId, side: 'left', matched: false });
-        allCards.push({ id: `${pairId}-R`, text: pair.right, pairId, side: 'right', matched: false });
-      });
+    items.forEach(item => {
+      allCards.push({ id: `${item.id}-L`, text: item.term,       pairId: item.id, side: 'left',  matched: false });
+      allCards.push({ id: `${item.id}-R`, text: item.definition, pairId: item.id, side: 'right', matched: false });
     });
     setCards(shuffle(allCards));
-  }, [questions]);
-
-  function shuffle<T>(arr: T[]): T[] {
-    return [...arr].sort(() => Math.random() - 0.5);
-  }
+  }, [items]);
 
   function handleCardClick(card: Card) {
     if (card.matched || shaking) return;
-    if (selected === null) {
-      setSelected(card);
-      return;
-    }
-    if (selected.id === card.id) {
-      setSelected(null);
-      return;
-    }
+    if (selected === null) { setSelected(card); return; }
+    if (selected.id === card.id) { setSelected(null); return; }
 
     const isMatch = selected.pairId === card.pairId && selected.side !== card.side;
 
@@ -56,28 +48,22 @@ export default function MatchAndTreat({ questions, onMatch, onComplete }: Props)
       setCards(prev => prev.map(c => c.pairId === card.pairId ? { ...c, matched: true } : c));
       setSelected(null);
       onMatch();
-
-      const totalPairs = questions.reduce((acc, q) => acc + q.pairs.length, 0);
-      if (newAnswers.length >= totalPairs) {
+      if (newAnswers.length >= items.length) {
         setTimeout(() => onComplete(newAnswers), 600);
       }
     } else {
       setShaking(card.id);
       setAnswers(prev => [...prev, { questionId: card.pairId, correct: false }]);
-      setTimeout(() => {
-        setShaking(null);
-        setSelected(null);
-      }, 700);
+      setTimeout(() => { setShaking(null); setSelected(null); }, 700);
     }
   }
 
   const matchedCount = cards.filter(c => c.matched && c.side === 'left').length;
-  const totalPairs = questions.reduce((acc, q) => acc + q.pairs.length, 0);
 
   return (
     <div className="mode-panel">
       <div className="question-progress">
-        Pairs matched: {matchedCount} / {totalPairs}
+        Pairs matched: {matchedCount} / {items.length}
       </div>
       <div className="match-grid">
         {cards.map(card => (

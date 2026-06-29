@@ -1,136 +1,111 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
-import type { RopeLinkQuestion, AnswerRecord } from '../../../types/catGame.types';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import type { GameItem, AnswerRecord } from '../../../types/catGame.types';
 
 type Props = {
-  questions: RopeLinkQuestion[];
+  items: GameItem[];
   onCorrect: () => void;
   onWrong: () => void;
   onComplete: (answers: AnswerRecord[]) => void;
 };
 
 type Connection = {
-  questionIndex: number;
-  answerIndex: number;
+  leftIndex: number;   // index in items (term side)
+  rightIndex: number;  // index in shuffledRight
 };
 
-export default function RopeAndLink({ questions, onCorrect, onWrong, onComplete }: Props) {
-  const [roundIndex, setRoundIndex] = useState(0);
+export default function RopeAndLink({ items, onCorrect, onWrong, onComplete }: Props) {
+  // Shuffle the right (definition) column once on mount
+  const shuffledRight = useMemo(
+    () => [...items].sort(() => Math.random() - 0.5),
+    [items]
+  );
+
   const [connections, setConnections] = useState<Connection[]>([]);
   const [draggingFrom, setDraggingFrom] = useState<number | null>(null);
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
   const [shakeAnswer, setShakeAnswer] = useState<number | null>(null);
   const [shakeQuestion, setShakeQuestion] = useState<number | null>(null);
   const [answers, setAnswers] = useState<AnswerRecord[]>([]);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const questionRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const answerRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const svgRef = useRef<SVGSVGElement>(null);
   const [svgSize, setSvgSize] = useState({ w: 0, h: 0 });
 
-  const round = questions[roundIndex];
-  const pairs = round.pairs;
-  // Shuffle answers display order once per round
-  const [shuffledAnswerOrder] = useState<number[]>(() =>
-    [...Array(pairs.length).keys()].sort(() => Math.random() - 0.5)
-  );
-
-  // Resize observer to keep SVG dimensions synced
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => {
-      setSvgSize({ w: el.offsetWidth, h: el.offsetHeight });
-    });
+    const ro = new ResizeObserver(() => setSvgSize({ w: el.offsetWidth, h: el.offsetHeight }));
     ro.observe(el);
     setSvgSize({ w: el.offsetWidth, h: el.offsetHeight });
     return () => ro.disconnect();
   }, []);
 
-  const getCenter = useCallback((el: HTMLButtonElement | null): { x: number; y: number } | null => {
+  const getCenter = useCallback((el: HTMLButtonElement | null) => {
     if (!el || !containerRef.current) return null;
-    const containerRect = containerRef.current.getBoundingClientRect();
-    const rect = el.getBoundingClientRect();
-    return {
-      x: rect.left + rect.width / 2 - containerRect.left,
-      y: rect.top + rect.height / 2 - containerRect.top,
-    };
+    const cr = containerRef.current.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2 - cr.left, y: r.top + r.height / 2 - cr.top };
   }, []);
 
-  function isConnected(qIdx: number) {
-    return connections.some(c => c.questionIndex === qIdx);
+  function isLeftConnected(idx: number) {
+    return connections.some(c => c.leftIndex === idx);
   }
 
-  function getConnectionForAnswer(aIdx: number) {
-    return connections.find(c => c.answerIndex === shuffledAnswerOrder[aIdx]);
+  function isRightConnected(idx: number) {
+    return connections.some(c => c.rightIndex === idx);
   }
 
-  function handleQuestionPointerDown(e: React.PointerEvent, qIdx: number) {
-    if (isConnected(qIdx)) return;
+  function handleQuestionPointerDown(e: React.PointerEvent, idx: number) {
+    if (isLeftConnected(idx)) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    setDraggingFrom(qIdx);
-    const containerRect = containerRef.current!.getBoundingClientRect();
-    setDragPos({ x: e.clientX - containerRect.left, y: e.clientY - containerRect.top });
+    setDraggingFrom(idx);
+    const cr = containerRef.current!.getBoundingClientRect();
+    setDragPos({ x: e.clientX - cr.left, y: e.clientY - cr.top });
   }
 
   function handlePointerMove(e: React.PointerEvent) {
     if (draggingFrom === null) return;
-    const containerRect = containerRef.current!.getBoundingClientRect();
-    setDragPos({ x: e.clientX - containerRect.left, y: e.clientY - containerRect.top });
+    const cr = containerRef.current!.getBoundingClientRect();
+    setDragPos({ x: e.clientX - cr.left, y: e.clientY - cr.top });
   }
 
   function handlePointerUp(e: React.PointerEvent) {
     if (draggingFrom === null) return;
-
-    // Check if released over an answer button
-    const containerRect = containerRef.current!.getBoundingClientRect();
     const px = e.clientX;
     const py = e.clientY;
 
-    let droppedOnAnswerDisplayIdx: number | null = null;
-    answerRefs.current.forEach((ref, displayIdx) => {
+    let droppedOnIdx: number | null = null;
+    answerRefs.current.forEach((ref, idx) => {
       if (!ref) return;
-      const rect = ref.getBoundingClientRect();
-      if (px >= rect.left && px <= rect.right && py >= rect.top && py <= rect.bottom) {
-        droppedOnAnswerDisplayIdx = displayIdx;
+      const r = ref.getBoundingClientRect();
+      if (px >= r.left && px <= r.right && py >= r.top && py <= r.bottom) {
+        droppedOnIdx = idx;
       }
     });
 
-    if (droppedOnAnswerDisplayIdx !== null) {
-      const realAnswerIdx = shuffledAnswerOrder[droppedOnAnswerDisplayIdx];
-      const isCorrect = realAnswerIdx === draggingFrom;
+    if (droppedOnIdx !== null) {
+      // Correct if the right-column item at droppedOnIdx is the same item as items[draggingFrom]
+      const isCorrect = shuffledRight[droppedOnIdx].id === items[draggingFrom].id;
 
       if (isCorrect) {
-        const newConn: Connection = { questionIndex: draggingFrom, answerIndex: realAnswerIdx };
+        const newConn: Connection = { leftIndex: draggingFrom, rightIndex: droppedOnIdx };
         const newConnections = [...connections, newConn];
         setConnections(newConnections);
-        const newAnswer: AnswerRecord = { questionId: `${round.id}-pair-${draggingFrom}`, correct: true };
+        const newAnswer: AnswerRecord = { questionId: items[draggingFrom].id, correct: true };
         const updatedAnswers = [...answers, newAnswer];
         setAnswers(updatedAnswers);
         onCorrect();
-
-        if (newConnections.length >= pairs.length) {
-          // Round complete
-          setTimeout(() => {
-            if (roundIndex + 1 >= questions.length) {
-              onComplete(updatedAnswers);
-            } else {
-              setRoundIndex(r => r + 1);
-              setConnections([]);
-              setAnswers(updatedAnswers);
-            }
-          }, 800);
+        if (newConnections.length >= items.length) {
+          setTimeout(() => onComplete(updatedAnswers), 800);
         }
       } else {
-        // Wrong — shake both nodes
-        setShakeAnswer(droppedOnAnswerDisplayIdx);
+        setShakeAnswer(droppedOnIdx);
         setShakeQuestion(draggingFrom);
         onWrong();
-        const newAnswer: AnswerRecord = { questionId: `${round.id}-pair-${draggingFrom}`, correct: false };
-        setAnswers(prev => [...prev, newAnswer]);
-        setTimeout(() => {
-          setShakeAnswer(null);
-          setShakeQuestion(null);
-        }, 600);
+        setAnswers(prev => [...prev, { questionId: items[draggingFrom].id, correct: false }]);
+        setTimeout(() => { setShakeAnswer(null); setShakeQuestion(null); }, 600);
       }
     }
 
@@ -138,28 +113,20 @@ export default function RopeAndLink({ questions, onCorrect, onWrong, onComplete 
     setDragPos(null);
   }
 
-  // Build SVG lines for locked connections
   const lockedLines = connections.map(conn => {
-    const qEl = questionRefs.current[conn.questionIndex];
-    const displayIdx = shuffledAnswerOrder.indexOf(conn.answerIndex);
-    const aEl = answerRefs.current[displayIdx];
-    const from = getCenter(qEl);
-    const to = getCenter(aEl);
+    const from = getCenter(questionRefs.current[conn.leftIndex]);
+    const to = getCenter(answerRefs.current[conn.rightIndex]);
     if (!from || !to) return null;
-    return { from, to, key: `${conn.questionIndex}-${conn.answerIndex}` };
+    return { from, to, key: `${conn.leftIndex}-${conn.rightIndex}` };
   });
 
-  // Live drag line
-  const dragLine = draggingFrom !== null && dragPos
-    ? getCenter(questionRefs.current[draggingFrom])
-    : null;
-
-  const ROPE_COLORS = ['#f4a261', '#5cb85c', '#5b9bd5', '#d9534f'];
+  const dragLine = draggingFrom !== null ? getCenter(questionRefs.current[draggingFrom]) : null;
+  const ROPE_COLORS = ['#f4a261', '#5cb85c', '#5b9bd5', '#d9534f', '#9b59b6', '#1abc9c'];
 
   return (
     <div className="mode-panel rope-panel">
       <div className="question-progress">
-        Round {roundIndex + 1} of {questions.length} &nbsp;·&nbsp; Connected: {connections.length} / {pairs.length}
+        Connected: {connections.length} / {items.length}
       </div>
 
       <div
@@ -168,7 +135,6 @@ export default function RopeAndLink({ questions, onCorrect, onWrong, onComplete 
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
       >
-        {/* SVG overlay for ropes */}
         <svg
           ref={svgRef}
           className="rope-svg"
@@ -202,50 +168,47 @@ export default function RopeAndLink({ questions, onCorrect, onWrong, onComplete 
           )}
         </svg>
 
-        {/* Questions column (left) */}
+        {/* Terms column (left) */}
         <div className="rope-col rope-col-left">
-          {pairs.map((pair, qIdx) => (
+          {items.map((item, idx) => (
             <button
-              key={qIdx}
-              ref={el => { questionRefs.current[qIdx] = el; }}
+              key={item.id}
+              ref={el => { questionRefs.current[idx] = el; }}
               className={[
                 'rope-node rope-node-question',
-                isConnected(qIdx) ? 'rope-node-locked' : '',
-                draggingFrom === qIdx ? 'rope-node-dragging' : '',
-                shakeQuestion === qIdx ? 'rope-shake' : '',
+                isLeftConnected(idx) ? 'rope-node-locked' : '',
+                draggingFrom === idx ? 'rope-node-dragging' : '',
+                shakeQuestion === idx ? 'rope-shake' : '',
               ].join(' ')}
-              onPointerDown={e => handleQuestionPointerDown(e, qIdx)}
-              disabled={isConnected(qIdx)}
+              onPointerDown={e => handleQuestionPointerDown(e, idx)}
+              disabled={isLeftConnected(idx)}
             >
-              {pair.question}
+              {item.term}
             </button>
           ))}
         </div>
 
-        {/* Answers column (right) */}
+        {/* Definitions column (right, shuffled) */}
         <div className="rope-col rope-col-right">
-          {shuffledAnswerOrder.map((realIdx, displayIdx) => {
-            const conn = getConnectionForAnswer(displayIdx);
-            return (
-              <button
-                key={displayIdx}
-                ref={el => { answerRefs.current[displayIdx] = el; }}
-                className={[
-                  'rope-node rope-node-answer',
-                  conn ? 'rope-node-locked' : '',
-                  shakeAnswer === displayIdx ? 'rope-shake' : '',
-                ].join(' ')}
-                disabled={!!conn}
-              >
-                {pairs[realIdx].answer}
-              </button>
-            );
-          })}
+          {shuffledRight.map((item, idx) => (
+            <button
+              key={item.id}
+              ref={el => { answerRefs.current[idx] = el; }}
+              className={[
+                'rope-node rope-node-answer',
+                isRightConnected(idx) ? 'rope-node-locked' : '',
+                shakeAnswer === idx ? 'rope-shake' : '',
+              ].join(' ')}
+              disabled={isRightConnected(idx)}
+            >
+              {item.definition}
+            </button>
+          ))}
         </div>
       </div>
 
       <div className="rope-hint">
-        {draggingFrom !== null ? '🪢 Drop on the matching answer!' : '👆 Drag from a question to its answer'}
+        {draggingFrom !== null ? '🪢 Drop on the matching definition!' : '👆 Drag from a term to its definition'}
       </div>
     </div>
   );

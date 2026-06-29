@@ -1,14 +1,31 @@
-import { useState } from 'react';
-import type { MCQQuestion, AnswerRecord } from '../../../types/catGame.types';
+import { useState, useMemo } from 'react';
+import type { GameItem, AnswerRecord } from '../../../types/catGame.types';
 
 type Props = {
-  questions: MCQQuestion[];
+  items: GameItem[];
   onCorrect: () => void;
   onWrong: () => void;
   onComplete: (answers: AnswerRecord[]) => void;
 };
 
-export default function PetAndChoose({ questions, onCorrect, onWrong, onComplete }: Props) {
+// Build MCQ questions from GameItem[]
+// Each item's term becomes the question, its definition is the correct answer,
+// and 3 other definitions are picked randomly as distractors.
+function buildQuestions(items: GameItem[]) {
+  return items.map((item, i) => {
+    const distractors = items
+      .filter((_, j) => j !== i)
+      .map(d => d.definition)
+      .sort(() => Math.random() - 0.5)
+      .slice(0, 3);
+    const options = [...distractors, item.definition].sort(() => Math.random() - 0.5);
+    const correctIndex = options.indexOf(item.definition);
+    return { id: item.id, question: item.term, options, correctIndex };
+  });
+}
+
+export default function PetAndChoose({ items, onCorrect, onWrong, onComplete }: Props) {
+  const questions = useMemo(() => buildQuestions(items), [items]);
   const [index, setIndex] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
   const [answers, setAnswers] = useState<AnswerRecord[]>([]);

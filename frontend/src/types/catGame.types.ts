@@ -1,34 +1,41 @@
-// ─── Universal content unit ─────────────────────────────────────
+// ─── Universal content unit ────────────────────────────────────────────────
 export type GameItem = {
   id: string;
   term: string;
   definition: string;
 };
 
-// ─── Game modes ──────────────────────────────────────────────────
-export type GameMode = 'mcq' | 'matching' | 'ropelink';
+// ─── Game modes (MCQ removed) ──────────────────────────────────────────────
+export type GameMode = 'matching' | 'ropelink';
 
 export type GameState = 'playing' | 'result';
 
 export type CatMood = 'idle' | 'happy' | 'confused' | 'playful' | 'eating' | 'sleeping';
 
-// ─── Answer record (shared across all modes) ─────────────────────
+// ─── Answer record ─────────────────────────────────────────────────────────
 export type AnswerRecord = {
   questionId: string;
   correct: boolean;
 };
 
-// ─── Firebase documents ──────────────────────────────────────────
+// ─── Behavior summary (stealth assessment signals) ─────────────────────────
+export type BehaviorSummary = {
+  firstActionDelayMs: number;       // planning: time from puzzle shown → first action
+  submitCount: number;              // total submit presses
+  wrongSubmitCount: number;         // submits that had at least one wrong pair/link
+  totalWrongLinksOrPairs: number;   // cumulative wrong pairs across all submits
+  reviewTimesMs: number[];          // durations between feedback shown → next change/submit
+};
+
+// ─── Firebase documents ────────────────────────────────────────────────────
 export type GameSession = {
   id: string;
   batchId: string;
-  // gameMode removed — student picks at runtime
   status: 'open' | 'closed' | 'expired';
-  items: GameItem[];          // replaces questions array
+  items: GameItem[];
   createdAt: Date;
   expiresAt?: Date;
   gameModeStats?: {
-    mcq: number;
     matching: number;
     ropelink: number;
   };
@@ -43,10 +50,11 @@ export type PlayerProfile = {
 export type AttemptResult = {
   playerUid: string;
   assessmentId: string;
-  chosenGameMode: GameMode;   // NEW — which mode the student chose
+  chosenGameMode: GameMode;
   score: number;
   accuracy: number;
   fish: number;
   happiness: number;
   completedAt: Date;
+  behavior?: BehaviorSummary;       // stealth assessment data
 };

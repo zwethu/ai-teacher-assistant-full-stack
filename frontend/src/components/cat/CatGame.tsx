@@ -1,9 +1,8 @@
 import { useState } from 'react';
-import type { AnswerRecord, GameMode, GameItem } from '../../types/catGame.types';
+import type { AnswerRecord, GameMode, GameItem, BehaviorSummary } from '../../types/catGame.types';
 import { MOCK_ITEMS } from './mockData';
 import HUD from './HUD';
 import CatSprite from './CatSprite';
-import PetAndChoose from './modes/PetAndChoose';
 import MatchAndTreat from './modes/MatchAndTreat';
 import RopeAndLink from './modes/RopeAndLink';
 import ResultScreen from './ResultScreen';
@@ -35,7 +34,7 @@ export default function CatGame({
   const [catMood, setCatMood] = useState<'idle' | 'happy' | 'confused' | 'playful' | 'eating'>('idle');
   const [resultSaved, setResultSaved] = useState(false);
 
-  const answered = answers.length;
+  const answered = answers.filter(a => a.correct).length;
 
   function triggerMood(mood: 'happy' | 'confused' | 'playful', duration = 1400) {
     setCatMood(mood);
@@ -53,13 +52,7 @@ export default function CatGame({
     setHappiness(h => Math.max(0, h - 5));
   }
 
-  function handleMatchPlay() {
-    triggerMood('playful');
-    setFish(f => f + 5);
-    setHappiness(h => Math.min(100, h + 8));
-  }
-
-  async function handleComplete(newAnswers: AnswerRecord[]) {
+  async function handleComplete(newAnswers: AnswerRecord[], behavior?: BehaviorSummary) {
     const allAnswers = [...answers, ...newAnswers];
     setAnswers(allAnswers);
     setGameOver(true);
@@ -77,6 +70,7 @@ export default function CatGame({
           fish,
           happiness,
           completedAt: new Date(),
+          behavior,
         });
         setResultSaved(true);
       } catch (e) {
@@ -107,11 +101,9 @@ export default function CatGame({
   }
 
   const modePill =
-    gameMode === 'mcq'
-      ? '🐾 Answer questions to earn 🐟 fish!'
-      : gameMode === 'matching'
-      ? '🧩 Match the pairs for more 🐟 fish!'
-      : '🪢 Connect each question to its answer!';
+    gameMode === 'matching'
+      ? '🧩 Match all pairs then submit!'
+      : '🪢 Connect all terms then submit!';
 
   return (
     <div className="cat-game-container">
@@ -133,18 +125,11 @@ export default function CatGame({
       </div>
 
       <div className="interaction-area">
-        {gameMode === 'mcq' && (
-          <PetAndChoose
-            items={activeItems}
-            onCorrect={handleCorrect}
-            onWrong={handleWrong}
-            onComplete={handleComplete}
-          />
-        )}
         {gameMode === 'matching' && (
           <MatchAndTreat
             items={activeItems}
-            onMatch={handleMatchPlay}
+            onCorrect={handleCorrect}
+            onWrong={handleWrong}
             onComplete={handleComplete}
           />
         )}

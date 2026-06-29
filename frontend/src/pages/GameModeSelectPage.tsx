@@ -13,12 +13,6 @@ type Props = {
 
 const MODES: { mode: GameMode; emoji: string; label: string; desc: string }[] = [
   {
-    mode: 'mcq',
-    emoji: '📝',
-    label: 'Pet & Choose',
-    desc: 'Read a question and pick the right answer. Feed your cat fish for every correct answer!',
-  },
-  {
     mode: 'matching',
     emoji: '🃏',
     label: 'Match & Treat',
@@ -28,7 +22,7 @@ const MODES: { mode: GameMode; emoji: string; label: string; desc: string }[] = 
     mode: 'ropelink',
     emoji: '🪢',
     label: 'Rope & Link',
-    desc: 'Draw a rope to connect each term on the left to its answer on the right.',
+    desc: 'Draw a rope to connect each term on the left to its definition on the right.',
   },
 ];
 

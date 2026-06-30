@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import type { AnswerRecord, GameMode, GameItem, BehaviorSummary } from '../../types/catGame.types';
 import { MOCK_ITEMS } from './mockData';
-import HUD from './HUD';
 import CatSprite from './CatSprite';
 import MatchAndTreat from './modes/MatchAndTreat';
 import RopeAndLink from './modes/RopeAndLink';
@@ -28,27 +27,17 @@ export default function CatGame({
   const totalQuestions = activeItems.length;
 
   const [gameOver,    setGameOver]    = useState(false);
-  const [happiness,   setHappiness]   = useState(40);
   const [answers,     setAnswers]     = useState<AnswerRecord[]>([]);
   const [catMood,     setCatMood]     = useState<'idle' | 'happy' | 'confused' | 'playful' | 'eating'>('idle');
   const [resultSaved, setResultSaved] = useState(false);
-
-  const answered = answers.filter(a => a.correct).length;
 
   function triggerMood(mood: 'happy' | 'confused' | 'playful', duration = 1400) {
     setCatMood(mood);
     setTimeout(() => setCatMood('idle'), duration);
   }
 
-  function handleCorrect() {
-    triggerMood('happy');
-    setHappiness(h => Math.min(100, h + 12));
-  }
-
-  function handleWrong() {
-    triggerMood('confused');
-    // No happiness penalty — unlimited lives for more stealth data
-  }
+  function handleCorrect() { triggerMood('happy'); }
+  function handleWrong()   { triggerMood('confused'); }
 
   async function handleComplete(newAnswers: AnswerRecord[], behavior?: BehaviorSummary) {
     const allAnswers = [...answers, ...newAnswers];
@@ -65,7 +54,6 @@ export default function CatGame({
           chosenGameMode: gameMode,
           score: correct,
           accuracy,
-          happiness,
           completedAt: new Date(),
           behavior,
         });
@@ -78,7 +66,6 @@ export default function CatGame({
 
   function handleRestart() {
     setGameOver(false);
-    setHappiness(40);
     setAnswers([]);
     setCatMood('idle');
   }
@@ -88,8 +75,6 @@ export default function CatGame({
       <ResultScreen
         answers={answers}
         totalQuestions={totalQuestions}
-        happiness={happiness}
-        fish={answered}
         nickname={nickname}
         onRestart={!assessmentId ? handleRestart : undefined}
       />
@@ -103,16 +88,6 @@ export default function CatGame({
 
   return (
     <div className="cat-game-container">
-      <div className="room-deco window">🪟</div>
-      <div className="room-deco plant">🪴</div>
-      <div className="room-deco shelf">🕯️ 📚</div>
-
-      <HUD
-        happiness={happiness}
-        answered={answered}
-        totalQuestions={totalQuestions}
-      />
-
       <div className="cat-center-area">
         <CatSprite mood={catMood} />
         <div className="mode-pill">{modePill}</div>

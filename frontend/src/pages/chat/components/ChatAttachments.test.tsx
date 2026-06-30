@@ -28,6 +28,7 @@ function renderInput(overrides: Partial<ComponentProps<typeof ChatInput>> = {}) 
     activeGenerateMode: null, onSelectGenerateMode: vi.fn(), onClearGenerateMode: vi.fn(),
     pendingAttachments: [imageAttachment], attachmentsUploading: false,
     attachmentErrors: [], onAttachmentFiles: vi.fn(), onRemoveAttachment: vi.fn(),
+    onPaste: vi.fn(),
     ...overrides,
   }
   render(<ChatInput {...props} />)

@@ -35,6 +35,7 @@ type Props = Pick<
   | 'attachmentErrors'
   | 'handleAttachmentFiles'
   | 'removePendingAttachment'
+  | 'handleComposerPaste'
 >
 
 export function ChatLayout(props: Props) {
@@ -68,6 +69,7 @@ export function ChatLayout(props: Props) {
     attachmentErrors,
     handleAttachmentFiles,
     removePendingAttachment,
+    handleComposerPaste,
   } = props
 
   const isRouteInvalid = routeHydration === 'invalid'
@@ -161,6 +163,7 @@ export function ChatLayout(props: Props) {
             attachmentErrors={attachmentErrors}
             onAttachmentFiles={handleAttachmentFiles}
             onRemoveAttachment={removePendingAttachment}
+            onPaste={handleComposerPaste}
           />
         </div>
       </div>

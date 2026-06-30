@@ -1,5 +1,5 @@
 import { useRef, useState, type RefObject } from 'react'
-import type { ChangeEvent, KeyboardEvent } from 'react'
+import type { ChangeEvent, ClipboardEvent, KeyboardEvent } from 'react'
 import type { ChatMessage } from '../../../entity/Chat'
 import { BookOpen, FileQuestion, FileText, FlaskConical, Image as ImageIcon, Loader2, Paperclip, Send, Sparkles, X } from 'lucide-react'
 import { MessageRow, ThinkingIndicator } from './MessageRow'
@@ -29,6 +29,7 @@ type Props = {
   attachmentErrors: string[]
   onAttachmentFiles: (e: ChangeEvent<HTMLInputElement>) => void
   onRemoveAttachment: (attachmentId: string) => void
+  onPaste: (e: ClipboardEvent<HTMLTextAreaElement>) => void
 }
 
 export function ChatInput({
@@ -51,6 +52,7 @@ export function ChatInput({
   attachmentErrors,
   onAttachmentFiles,
   onRemoveAttachment,
+  onPaste,
 }: Props) {
   const [menuOpen, setMenuOpen] = useState(false)
   const attachmentInputRef = useRef<HTMLInputElement>(null)
@@ -200,6 +202,7 @@ export function ChatInput({
             onChange={(e) => onInputChange(e.target.value)}
             onInput={onTextareaInput}
             onKeyDown={onInputKeyDown}
+            onPaste={onPaste}
             placeholder={placeholder}
             disabled={disabled || sending}
             className="flex-1 resize-none bg-transparent px-4 py-3 text-[15px] text-slate-800 placeholder:text-slate-400 focus:outline-none disabled:cursor-not-allowed max-h-40 overflow-y-auto leading-6"

@@ -5,6 +5,7 @@ import {
   useState,
   type Dispatch,
   type ChangeEvent,
+  type ClipboardEvent,
   type KeyboardEvent,
   type SetStateAction,
 } from 'react'
@@ -596,9 +597,7 @@ export function useChatPage() {
     }
   }
 
-  async function handleAttachmentFiles(e: ChangeEvent<HTMLInputElement>) {
-    const selectedFiles = Array.from(e.target.files || [])
-    e.target.value = ''
+  async function uploadAttachmentFiles(selectedFiles: File[]) {
     if (!selectedFiles.length || !selectedBatch || attachmentsUploading) return
     const errors: string[] = []
     const availableSlots = Math.max(0, 5 - pendingAttachments.length)
@@ -642,6 +641,35 @@ export function useChatPage() {
     }
     setAttachmentErrors([...errors])
     setAttachmentsUploading(false)
+  }
+
+  async function handleAttachmentFiles(e: ChangeEvent<HTMLInputElement>) {
+    const selectedFiles = Array.from(e.target.files || [])
+    e.target.value = ''
+    await uploadAttachmentFiles(selectedFiles)
+  }
+
+  function handleComposerPaste(e: ClipboardEvent<HTMLTextAreaElement>) {
+    const imageFiles = Array.from(e.clipboardData.items)
+      .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+      .map((item, index) => {
+        const blob = item.getAsFile()
+        if (!blob) return null
+        const extension = {
+          'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp',
+          'image/heic': 'heic', 'image/heif': 'heif',
+        }[blob.type]
+        if (!extension) return null
+        return new File(
+          [blob],
+          `screenshot-${new Date().toISOString().replace(/[:.]/g, '-')}-${index + 1}.${extension}`,
+          { type: blob.type, lastModified: Date.now() },
+        )
+      })
+      .filter((file): file is File => file !== null)
+    if (!imageFiles.length) return
+    e.preventDefault()
+    void uploadAttachmentFiles(imageFiles)
   }
 
   function removePendingAttachment(attachmentId: string) {
@@ -1203,6 +1231,7 @@ export function useChatPage() {
     attachmentErrors,
     handleAttachmentFiles,
     removePendingAttachment,
+    handleComposerPaste,
     currentRunId,
     runStates,
     inputDisabled,

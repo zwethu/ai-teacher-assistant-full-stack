@@ -16,6 +16,7 @@ export type AgentInvokePayload = {
   approval_action?: '' | 'approve_outline'
   approved_outline_run_id?: string
   connectors?: AgentConnectors
+  attachment_ids?: string[]
 }
 
 async function invokeAgent(

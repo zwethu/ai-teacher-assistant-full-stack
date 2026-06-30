@@ -1,10 +1,11 @@
-import { useState, type RefObject } from 'react'
-import type { KeyboardEvent } from 'react'
+import { useRef, useState, type RefObject } from 'react'
+import type { ChangeEvent, KeyboardEvent } from 'react'
 import type { ChatMessage } from '../../../entity/Chat'
-import { BookOpen, FileQuestion, FlaskConical, Loader2, Send, Sparkles, X } from 'lucide-react'
+import { BookOpen, FileQuestion, FileText, FlaskConical, Image as ImageIcon, Loader2, Paperclip, Send, Sparkles, X } from 'lucide-react'
 import { MessageRow, ThinkingIndicator } from './MessageRow'
 import { ConnectorToggles, type ConnectorsState } from './ConnectorToggles'
 import type { RunUiState } from '../runTypes'
+import type { PendingChatAttachment } from '../hooks/useChatPage'
 
 export type GenerateMode = 'lesson_plan' | 'lab' | 'assessment'
 
@@ -23,6 +24,11 @@ type Props = {
   activeGenerateMode: GenerateMode | null
   onSelectGenerateMode: (mode: GenerateMode) => void
   onClearGenerateMode: () => void
+  pendingAttachments: PendingChatAttachment[]
+  attachmentsUploading: boolean
+  attachmentErrors: string[]
+  onAttachmentFiles: (e: ChangeEvent<HTMLInputElement>) => void
+  onRemoveAttachment: (attachmentId: string) => void
 }
 
 export function ChatInput({
@@ -40,8 +46,14 @@ export function ChatInput({
   activeGenerateMode,
   onSelectGenerateMode,
   onClearGenerateMode,
+  pendingAttachments,
+  attachmentsUploading,
+  attachmentErrors,
+  onAttachmentFiles,
+  onRemoveAttachment,
 }: Props) {
   const [menuOpen, setMenuOpen] = useState(false)
+  const attachmentInputRef = useRef<HTMLInputElement>(null)
 
   function selectGenerateMode(mode: GenerateMode) {
     onSelectGenerateMode(mode)
@@ -136,7 +148,51 @@ export function ChatInput({
             </button>
           </div>
         )}
+        {pendingAttachments.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-2">
+            {pendingAttachments.map((attachment) => (
+              <div key={attachment.attachment_id} className="flex max-w-xs items-center gap-2 rounded-xl border border-slate-200 bg-white/90 p-2 shadow-sm">
+                {attachment.attachment_kind === 'image' && attachment.previewUrl ? (
+                  <img src={attachment.previewUrl} alt="" className="h-10 w-10 rounded-lg object-cover" />
+                ) : attachment.attachment_kind === 'image' ? (
+                  <ImageIcon className="h-5 w-5 text-sky-600" />
+                ) : (
+                  <FileText className="h-5 w-5 text-emerald-600" />
+                )}
+                <div className="min-w-0">
+                  <p className="truncate text-xs font-medium text-slate-700">{attachment.file_name}</p>
+                  <p className="text-[11px] text-slate-400">
+                    {(attachment.size_bytes / 1024 / 1024).toFixed(1)} MB
+                    {attachment.attachment_kind === 'image' ? ' · chat-only' : ` · ${attachment.parse_status}`}
+                  </p>
+                </div>
+                <button type="button" onClick={() => onRemoveAttachment(attachment.attachment_id)} className="rounded p-1 text-slate-400 hover:bg-slate-100" aria-label={`Remove ${attachment.file_name}`}>
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        {attachmentErrors.map((error) => <p key={error} className="mb-1 text-xs text-red-600">{error}</p>)}
         <div className="flex items-end gap-2 p-2 rounded-[28px] bg-white/55 border border-white/60 shadow-[0_8px_32px_rgba(15,23,42,0.08)]">
+          <input
+            ref={attachmentInputRef}
+            type="file"
+            multiple
+            accept=".pdf,.docx,.pptx,.txt,.md,.markdown,.csv,.png,.jpg,.jpeg,.webp,.heic,.heif"
+            onChange={onAttachmentFiles}
+            disabled={disabled || sending || attachmentsUploading}
+            className="sr-only"
+          />
+          <button
+            type="button"
+            onClick={() => attachmentInputRef.current?.click()}
+            disabled={disabled || sending || attachmentsUploading || pendingAttachments.length >= 5}
+            className="mb-0.5 ml-1 inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-slate-500 hover:bg-white/80 disabled:opacity-40"
+            aria-label="Attach files"
+          >
+            {attachmentsUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+          </button>
           <textarea
             ref={textareaRef}
             rows={1}
@@ -151,7 +207,7 @@ export function ChatInput({
           <button
             type="button"
             onClick={onSend}
-            disabled={!input.trim() || disabled || sending}
+            disabled={(!input.trim() && pendingAttachments.length === 0) || disabled || sending || attachmentsUploading}
             className="flex-shrink-0 inline-flex items-center justify-center w-10 h-10 mb-0.5 mr-1 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-600/25 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
             aria-label="Send message"
           >

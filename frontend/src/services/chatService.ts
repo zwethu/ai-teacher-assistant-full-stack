@@ -1,4 +1,4 @@
-import type { Chat, ChatMessage } from '../entity/Chat'
+import type { Chat, ChatAttachment, ChatMessage } from '../entity/Chat'
 import api from '../lib/api'
 import type { LessonPlanExportResult } from './artifactService'
 import type { AgentRunEvent, AgentRunStatus, AgentRunStep } from './agentRunStream'
@@ -69,6 +69,7 @@ export async function sendMessage(
   chatId: string,
   content: string,
   connectors: Record<string, boolean> = {},
+  attachmentIds: string[] = [],
 ): Promise<{
   user_message: ChatMessage
   run_id: string
@@ -80,8 +81,32 @@ export async function sendMessage(
     run_id: string
     rtdb_run_path: string
     status: 'running' | 'done' | 'failed'
-  }>(`/batches/${batchId}/chats/${chatId}/messages`, { content, connectors })
+  }>(`/batches/${batchId}/chats/${chatId}/messages`, {
+    content, connectors, attachment_ids: attachmentIds,
+  })
   return res.data
+}
+
+export async function uploadChatAttachment(
+  batchId: string, chatId: string, file: File,
+): Promise<ChatAttachment> {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('file_title', file.name)
+  const res = await api.post<ChatAttachment>(
+    `/batches/${batchId}/chats/${chatId}/attachments`, form,
+  )
+  return res.data
+}
+
+export async function getChatAttachmentContent(
+  batchId: string, chatId: string, attachmentId: string, thumbnail = false,
+): Promise<Blob> {
+  const res = await api.get(
+    `/batches/${batchId}/chats/${chatId}/attachments/${attachmentId}/content`,
+    { params: { thumbnail }, responseType: 'blob' },
+  )
+  return res.data as Blob
 }
 
 export async function generateDocsFromPendingArtifact(

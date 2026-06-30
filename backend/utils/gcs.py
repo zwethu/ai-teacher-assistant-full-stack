@@ -38,6 +38,25 @@ def batch_upload_blob_path(
     return f"lecturers/{lecturer_id}/batches/{batch_id}/uploads/{file_id}/{safe_name}"
 
 
+def chat_attachment_blob_path(
+    lecturer_id: str, batch_id: str, chat_id: str, attachment_id: str, file_name: str,
+) -> str:
+    safe_name = safe_file_name(file_name)
+    return (
+        f"lecturers/{lecturer_id}/batches/{batch_id}/chats/{chat_id}"
+        f"/attachments/{attachment_id}/{safe_name}"
+    )
+
+
+def chat_attachment_thumbnail_path(
+    lecturer_id: str, batch_id: str, chat_id: str, attachment_id: str,
+) -> str:
+    return (
+        f"lecturers/{lecturer_id}/batches/{batch_id}/chats/{chat_id}"
+        f"/attachments/{attachment_id}/thumbnail.jpg"
+    )
+
+
 def upload_bytes(
     blob_path: str,
     data: bytes,
@@ -70,6 +89,20 @@ def delete_blob(gcs_path: str) -> None:
             logger.debug("GCS object already gone: gs://%s/%s", bucket_name, blob_path)
         else:
             logger.warning("Failed to delete GCS object %s: %s", gcs_path, exc)
+
+
+def signed_read_url(gcs_path: str, expires_minutes: int = 10) -> str:
+    """Create a short-lived read URL for a gs:// object."""
+    if not gcs_path.startswith("gs://"):
+        raise ValueError("Invalid GCS path")
+    from datetime import timedelta
+
+    bucket_name, _, blob_path = gcs_path[5:].partition("/")
+    if not bucket_name or not blob_path:
+        raise ValueError("Invalid GCS path")
+    return _get_client().bucket(bucket_name).blob(blob_path).generate_signed_url(
+        version="v4", expiration=timedelta(minutes=expires_minutes), method="GET"
+    )
 
 
 def delete_prefix(lecturer_id: str, batch_id: str) -> int:

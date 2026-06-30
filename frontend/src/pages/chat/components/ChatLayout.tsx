@@ -30,6 +30,11 @@ type Props = Pick<
   | 'connectors'
   | 'setConnectors'
   | 'routeHydration'
+  | 'pendingAttachments'
+  | 'attachmentsUploading'
+  | 'attachmentErrors'
+  | 'handleAttachmentFiles'
+  | 'removePendingAttachment'
 >
 
 export function ChatLayout(props: Props) {
@@ -58,6 +63,11 @@ export function ChatLayout(props: Props) {
     connectors,
     setConnectors,
     routeHydration,
+    pendingAttachments,
+    attachmentsUploading,
+    attachmentErrors,
+    handleAttachmentFiles,
+    removePendingAttachment,
   } = props
 
   const isRouteInvalid = routeHydration === 'invalid'
@@ -146,6 +156,11 @@ export function ChatLayout(props: Props) {
             onClearGenerateMode={() => setActiveGenerateMode(null)}
             connectors={connectors}
             onConnectorsChange={(key, value) => setConnectors(prev => ({ ...prev, [key]: value }))}
+            pendingAttachments={pendingAttachments}
+            attachmentsUploading={attachmentsUploading}
+            attachmentErrors={attachmentErrors}
+            onAttachmentFiles={handleAttachmentFiles}
+            onRemoveAttachment={removePendingAttachment}
           />
         </div>
       </div>

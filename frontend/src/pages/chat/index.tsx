@@ -32,6 +32,11 @@ export default function Chat() {
         connectors={state.connectors}
         setConnectors={state.setConnectors}
         routeHydration={state.routeHydration}
+        pendingAttachments={state.pendingAttachments}
+        attachmentsUploading={state.attachmentsUploading}
+        attachmentErrors={state.attachmentErrors}
+        handleAttachmentFiles={state.handleAttachmentFiles}
+        removePendingAttachment={state.removePendingAttachment}
       />
     </ChatErrorBoundary>
   )

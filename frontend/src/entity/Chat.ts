@@ -1,3 +1,37 @@
+export type AttachmentKind = 'document' | 'image' | 'other'
+export type AttachmentStatus = 'pending' | 'ready' | 'failed' | 'skipped'
+
+export type ChatAttachmentSnapshot = {
+  attachment_id: string
+  file_name: string
+  file_title: string
+  content_type: string
+  size_bytes: number
+  attachment_kind: AttachmentKind
+  parse_status: AttachmentStatus
+  vision_status: AttachmentStatus
+  thumbnail_available: boolean
+  promotion_allowed: false
+}
+
+export type ChatAttachment = ChatAttachmentSnapshot & {
+  batch_id: string
+  chat_id: string
+  message_id: string | null
+  lecturer_id: string
+  gcs_path: string
+  thumbnail_gcs_path: string | null
+  scope: 'chat'
+  extracted_text_path: null
+  extracted_text_preview: string
+  vision_summary: string
+  ocr_text: string
+  expires_at: string | null
+  promoted_file_id: null
+  created_at: string | null
+  updated_at: string | null
+}
+
 export type ChatMessage = {
   message_id: string
   chat_id: string
@@ -8,6 +42,7 @@ export type ChatMessage = {
   run_id?: string
   pending?: boolean
   metadata?: Record<string, unknown>
+  attachments?: ChatAttachmentSnapshot[]
 }
 
 export type Chat = {

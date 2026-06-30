@@ -5,6 +5,7 @@ import uuid
 from typing import Any
 
 from google.cloud.firestore import SERVER_TIMESTAMP
+from google.cloud import firestore
 
 from services.agent_sessions import make_agent_session_id
 from utils.firestore_client import get_firestore
@@ -15,6 +16,7 @@ BATCHES_COLLECTION = "batches"
 CHATS_SUBCOLLECTION = "chats"
 MESSAGES_SUBCOLLECTION = "messages"
 RUNS_SUBCOLLECTION = "runs"
+ATTACHMENTS_SUBCOLLECTION = "attachments"
 
 
 # ---------------------------------------------------------------------------
@@ -70,6 +72,7 @@ def _msg_to_dict(doc_id: str, data: dict[str, Any]) -> dict[str, Any]:
         "content": str(data.get("content") or ""),
         "run_id": str(data.get("run_id") or ""),
         "metadata": data.get("metadata") or {},
+        "attachments": data.get("attachments") or [],
         "created_at": (created.isoformat() if hasattr(created, "isoformat") else (str(created) if created else None)),
     }
 
@@ -264,6 +267,92 @@ def add_message(
     if metadata:
         result["metadata"] = metadata
     return result
+
+
+def _attachment_snapshot(data: dict[str, Any]) -> dict[str, Any]:
+    """Stable message metadata; intentionally excludes extracted/vision text."""
+    return {
+        "attachment_id": str(data.get("attachment_id") or ""),
+        "file_name": str(data.get("file_name") or ""),
+        "file_title": str(data.get("file_title") or data.get("file_name") or ""),
+        "content_type": str(data.get("content_type") or "application/octet-stream"),
+        "size_bytes": int(data.get("size_bytes") or 0),
+        "attachment_kind": str(data.get("attachment_kind") or "other"),
+        "parse_status": str(data.get("parse_status") or "skipped"),
+        "vision_status": str(data.get("vision_status") or "skipped"),
+        "thumbnail_available": bool(data.get("thumbnail_gcs_path")),
+        "promotion_allowed": False,
+    }
+
+
+def add_user_message_with_attachments(
+    *, batch_id: str, chat_id: str, content: str, lecturer_id: str,
+    run_id: str, attachment_ids: list[str] | None = None,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Atomically persist a user message and claim its chat attachments."""
+    from services.attachment_constants import (
+        MAX_ATTACHMENTS_PER_MESSAGE, MAX_IMAGES_PER_MESSAGE,
+        MAX_MESSAGE_ATTACHMENT_BYTES,
+    )
+
+    ids = list(dict.fromkeys(attachment_ids or []))
+    if len(ids) != len(attachment_ids or []):
+        raise ValueError("Duplicate attachment IDs are not allowed.")
+    if len(ids) > MAX_ATTACHMENTS_PER_MESSAGE:
+        raise ValueError(f"A message can include at most {MAX_ATTACHMENTS_PER_MESSAGE} attachments.")
+
+    db = get_firestore()
+    chat_ref = _chats_col(batch_id).document(chat_id)
+    msg_id = str(uuid.uuid4())
+    msg_ref = _messages_col(batch_id, chat_id).document(msg_id)
+    refs = [chat_ref.collection(ATTACHMENTS_SUBCOLLECTION).document(item) for item in ids]
+    transaction = db.transaction()
+
+    @firestore.transactional
+    def _commit(txn):
+        chat_snap = chat_ref.get(transaction=txn)
+        chat_data = chat_snap.to_dict() or {}
+        if not chat_snap.exists or chat_data.get("lecturer_id") != lecturer_id:
+            raise PermissionError("Chat not found or access denied")
+
+        records: list[dict[str, Any]] = []
+        for ref in refs:
+            snap = ref.get(transaction=txn)
+            data = snap.to_dict() or {}
+            if not snap.exists:
+                raise ValueError("Attachment not found.")
+            if (
+                data.get("lecturer_id") != lecturer_id
+                or data.get("batch_id") != batch_id
+                or data.get("chat_id") != chat_id
+                or data.get("scope") != "chat"
+            ):
+                raise PermissionError("Attachment not found or access denied")
+            if data.get("message_id"):
+                raise ValueError("An attachment has already been sent.")
+            records.append(data)
+
+        if sum(1 for item in records if item.get("attachment_kind") == "image") > MAX_IMAGES_PER_MESSAGE:
+            raise ValueError(f"A message can include at most {MAX_IMAGES_PER_MESSAGE} images.")
+        if sum(int(item.get("size_bytes") or 0) for item in records) > MAX_MESSAGE_ATTACHMENT_BYTES:
+            raise ValueError("Attachments exceed the 30 MB per-message limit.")
+
+        snapshots = [_attachment_snapshot(item) for item in records]
+        doc = {
+            "message_id": msg_id, "chat_id": chat_id, "role": "user", "content": content,
+            "run_id": run_id, "attachments": snapshots, "created_at": SERVER_TIMESTAMP,
+        }
+        txn.set(msg_ref, doc)
+        for ref in refs:
+            txn.update(ref, {"message_id": msg_id, "updated_at": SERVER_TIMESTAMP})
+        txn.update(chat_ref, {"updated_at": SERVER_TIMESTAMP})
+        return snapshots, records
+
+    snapshots, records = _commit(transaction)
+    return {
+        "message_id": msg_id, "chat_id": chat_id, "role": "user", "content": content,
+        "run_id": run_id, "attachments": snapshots,
+    }, records
 
 
 def update_assistant_message_metadata_for_run(

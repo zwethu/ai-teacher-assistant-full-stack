@@ -4,13 +4,14 @@ import {
   useRef,
   useState,
   type Dispatch,
+  type ChangeEvent,
   type KeyboardEvent,
   type SetStateAction,
 } from 'react'
 import axios from 'axios'
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import type { Batch } from '../../../entity/Batch'
-import type { Chat, ChatMessage } from '../../../entity/Chat'
+import type { Chat, ChatAttachment, ChatMessage } from '../../../entity/Chat'
 import { useAuth } from '../../../hooks/useAuth'
 import { getBatchById, listBatches } from '../../../services/batchService'
 import {
@@ -21,6 +22,7 @@ import {
   listChats,
   listMessages,
   sendMessage,
+  uploadChatAttachment,
   updateChatTitle,
   type ChatRunRecord,
 } from '../../../services/chatService'
@@ -53,7 +55,10 @@ type StartRunResult = {
   chat_id?: string
   rtdb_run_path?: string
   status: 'running' | 'done' | 'failed'
+  user_message?: ChatMessage
 }
+
+export type PendingChatAttachment = ChatAttachment & { previewUrl?: string }
 
 const STREAM_DELAY_MESSAGE =
   'Live updates are delayed. I will fetch the final response when ready.'
@@ -156,6 +161,9 @@ export function useChatPage() {
   const [input, setInput] = useState('')
   const [activeGenerateMode, setActiveGenerateMode] = useState<GenerateMode | null>(null)
   const [sending, setSending] = useState(false)
+  const [pendingAttachments, setPendingAttachments] = useState<PendingChatAttachment[]>([])
+  const [attachmentsUploading, setAttachmentsUploading] = useState(false)
+  const [attachmentErrors, setAttachmentErrors] = useState<string[]>([])
   const [currentRunId, setCurrentRunId] = useState<string | null>(null)
   const [runStates, setRunStates] = useState<Record<string, RunUiState>>({})
 
@@ -533,8 +541,9 @@ export function useChatPage() {
   }
 
   async function handleSend(text?: string) {
-    const content = (text ?? input).trim()
-    if (!content || !selectedBatch || sending) return
+    const typedContent = (text ?? input).trim()
+    const content = typedContent || (pendingAttachments.length ? 'Please review the attached file(s).' : '')
+    if (!content || !selectedBatch || sending || attachmentsUploading) return
 
     let chat = activeChat
     if (!chat) {
@@ -543,17 +552,19 @@ export function useChatPage() {
     }
     const batchId = selectedBatch.id
     const chatId = chat.chat_id
+    const attachmentsForMessage = [...pendingAttachments]
+    const attachmentIds = attachmentsForMessage.map((item) => item.attachment_id)
 
     setInput('')
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
     const generateMode = activeGenerateMode
-    await startRunInChat({
+    const started = await startRunInChat({
       batchId,
       chat,
       message: content,
       invoke: async () => {
         if (!generateMode) {
-          return sendMessage(batchId, chatId, content, connectors)
+          return sendMessage(batchId, chatId, content, connectors, attachmentIds)
         }
         const payload = {
           batch_id: batchId,
@@ -565,6 +576,7 @@ export function useChatPage() {
           save_draft: false,
           message: content,
           connectors,
+          attachment_ids: attachmentIds,
         }
         const result = generateMode === 'lab'
           ? await generateLab('', payload)
@@ -575,6 +587,68 @@ export function useChatPage() {
       },
       updateTitleIfNew: true,
       workflowMode: generateMode,
+      attachmentSnapshots: attachmentsForMessage,
+    })
+    if (started) {
+      attachmentsForMessage.forEach((item) => item.previewUrl && URL.revokeObjectURL(item.previewUrl))
+      setPendingAttachments([])
+      setAttachmentErrors([])
+    }
+  }
+
+  async function handleAttachmentFiles(e: ChangeEvent<HTMLInputElement>) {
+    const selectedFiles = Array.from(e.target.files || [])
+    e.target.value = ''
+    if (!selectedFiles.length || !selectedBatch || attachmentsUploading) return
+    const errors: string[] = []
+    const availableSlots = Math.max(0, 5 - pendingAttachments.length)
+    const files = selectedFiles.slice(0, availableSlots)
+    if (selectedFiles.length > availableSlots) errors.push('A message can include at most 5 attachments.')
+    const existingImages = pendingAttachments.filter((item) => item.attachment_kind === 'image').length
+    let acceptedImages = 0
+    let totalBytes = pendingAttachments.reduce((sum, item) => sum + item.size_bytes, 0)
+    const candidates = files.filter((file) => {
+      const image = file.type.startsWith('image/') || /\.(png|jpe?g|webp|heic|heif)$/i.test(file.name)
+      if (image && existingImages + acceptedImages >= 3) {
+        errors.push(`${file.name}: A message can include at most 3 images.`)
+        return false
+      }
+      if (totalBytes + file.size > 30 * 1024 * 1024) {
+        errors.push(`${file.name}: Attachments exceed the 30 MB per-message limit.`)
+        return false
+      }
+      if (image) acceptedImages += 1
+      totalBytes += file.size
+      return true
+    })
+    if (!candidates.length) {
+      setAttachmentErrors(errors)
+      return
+    }
+    let chat = activeChat
+    if (!chat) chat = await handleNewChat('New Chat')
+    if (!chat) return
+    setAttachmentsUploading(true)
+    setAttachmentErrors(errors)
+    for (const file of candidates) {
+      try {
+        const attachment = await uploadChatAttachment(selectedBatch.id, chat.chat_id, file)
+        const previewUrl = attachment.attachment_kind === 'image' ? URL.createObjectURL(file) : undefined
+        setPendingAttachments((prev) => [...prev, { ...attachment, previewUrl }])
+      } catch (err) {
+        const detail = axios.isAxiosError(err) ? err.response?.data?.detail : ''
+        errors.push(`${file.name}: ${typeof detail === 'string' ? detail : 'Upload failed.'}`)
+      }
+    }
+    setAttachmentErrors([...errors])
+    setAttachmentsUploading(false)
+  }
+
+  function removePendingAttachment(attachmentId: string) {
+    setPendingAttachments((prev) => {
+      const removed = prev.find((item) => item.attachment_id === attachmentId)
+      if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl)
+      return prev.filter((item) => item.attachment_id !== attachmentId)
     })
   }
 
@@ -622,6 +696,7 @@ export function useChatPage() {
     invoke,
     updateTitleIfNew = false,
     workflowMode = null,
+    attachmentSnapshots = [],
   }: {
     batchId: string
     chat: Chat
@@ -629,6 +704,7 @@ export function useChatPage() {
     invoke: () => Promise<StartRunResult>
     updateTitleIfNew?: boolean
     workflowMode?: GenerateMode | null
+    attachmentSnapshots?: PendingChatAttachment[]
   }) {
     const chatId = chat.chat_id
     setSending(true)
@@ -639,11 +715,17 @@ export function useChatPage() {
       role: 'user',
       content: message,
       created_at: new Date().toISOString(),
+      attachments: attachmentSnapshots,
     }
     setMessages((prev) => [...prev, optimisticUser])
 
     try {
       const result = await invoke()
+      if (result.user_message) {
+        setMessages((prev) => prev.map((item) => (
+          item.message_id === optimisticUser.message_id ? result.user_message! : item
+        )))
+      }
       unsubscribeFromRun(result.run_id)
       if (workflowMode) {
         workflowModeRunIdsRef.current[result.run_id] = workflowMode
@@ -676,6 +758,7 @@ export function useChatPage() {
           setActiveChat((prev) => (prev ? { ...prev, title: newTitle } : prev))
         })
       }
+      return true
     } catch (err) {
       console.error(err)
       const errMsg: ChatMessage = {
@@ -687,6 +770,7 @@ export function useChatPage() {
       }
       setMessages((prev) => [...prev, errMsg])
       setSending(false)
+      return false
     }
   }
 
@@ -1114,6 +1198,11 @@ export function useChatPage() {
     activeGenerateMode,
     setActiveGenerateMode,
     sending,
+    pendingAttachments,
+    attachmentsUploading,
+    attachmentErrors,
+    handleAttachmentFiles,
+    removePendingAttachment,
     currentRunId,
     runStates,
     inputDisabled,

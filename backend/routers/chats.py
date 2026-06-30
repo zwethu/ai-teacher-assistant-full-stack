@@ -2,7 +2,8 @@
 
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from services.agent_gateway import start_chat_run
@@ -30,6 +31,13 @@ from services.chat_service import (
     list_messages,
     update_assistant_message_metadata_for_run,
     update_chat_title,
+)
+from entity.ChatAttachment import ChatAttachment
+from services.chat_attachment_service import (
+    AttachmentValidationError,
+    create_chat_attachment,
+    get_attachment_url,
+    get_chat_attachment,
 )
 from services.google_workspace.credentials import (
     GoogleOAuthInvalidError,
@@ -60,6 +68,7 @@ class ConnectorState(BaseModel):
 class SendMessageBody(BaseModel):
     content: str
     connectors: ConnectorState = Field(default_factory=ConnectorState)
+    attachment_ids: list[str] = Field(default_factory=list)
 
 
 class UpdateTitleBody(BaseModel):
@@ -130,6 +139,51 @@ async def get_chat_endpoint(
 # ---------------------------------------------------------------------------
 # Message endpoints
 # ---------------------------------------------------------------------------
+
+@router.post("/{chat_id}/attachments", response_model=ChatAttachment, status_code=status.HTTP_201_CREATED)
+async def upload_chat_attachment_endpoint(
+    batch_id: str,
+    chat_id: str,
+    file: UploadFile = File(...),
+    file_title: str = Form(""),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> ChatAttachment:
+    lecturer_id = current_user["uid"]
+    if get_chat(batch_id, chat_id, lecturer_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
+    data = await file.read()
+    try:
+        return create_chat_attachment(
+            batch_id=batch_id, chat_id=chat_id, lecturer_id=lecturer_id,
+            file_name=file.filename or "upload", file_title=file_title,
+            content_type=file.content_type or "application/octet-stream", data=data,
+        )
+    except AttachmentValidationError as exc:
+        detail = str(exc)
+        code = status.HTTP_413_REQUEST_ENTITY_TOO_LARGE if "MB" in detail or "quota" in detail else status.HTTP_422_UNPROCESSABLE_ENTITY
+        raise HTTPException(status_code=code, detail=detail) from exc
+
+
+@router.get("/{chat_id}/attachments/{attachment_id}", response_model=ChatAttachment)
+async def get_chat_attachment_endpoint(
+    batch_id: str, chat_id: str, attachment_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> ChatAttachment:
+    attachment = get_chat_attachment(batch_id, chat_id, attachment_id, current_user["uid"])
+    if attachment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+    return attachment
+
+
+@router.get("/{chat_id}/attachments/{attachment_id}/content")
+async def get_chat_attachment_content_endpoint(
+    batch_id: str, chat_id: str, attachment_id: str, thumbnail: bool = False,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    url = get_attachment_url(batch_id, chat_id, attachment_id, current_user["uid"], thumbnail)
+    if not url:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment content not found")
+    return RedirectResponse(url=url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
 @router.get("/{chat_id}/messages", response_model=list[dict])
 async def list_messages_endpoint(
@@ -231,6 +285,7 @@ async def send_message_endpoint(
         week=None,
         save_draft=False,
         pending_artifact=False,
+        attachment_ids=body.attachment_ids,
     )
 
 

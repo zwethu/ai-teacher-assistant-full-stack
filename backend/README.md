@@ -15,6 +15,11 @@ This FastAPI service is only for what **cannot** run in the browser:
 3. **Scheduled emails** (optional) — APScheduler cron when you add `services/email_scheduler.py`
 4. **Agent proxy** (optional) — forward requests to Agent Engine if you must not expose an endpoint or API key to the client
 
+Chat attachment image analysis is opt-in. Set `ATTACHMENT_VISION_MODEL` to a
+Vertex Gemini model name to enable summary/OCR processing. Native multimodal
+Agent Engine input is intentionally disabled for this release; keep
+`ENABLE_NATIVE_MULTIMODAL_ATTACHMENTS=false`.
+
 ## Layout
 
 ```

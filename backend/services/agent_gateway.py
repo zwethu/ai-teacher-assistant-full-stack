@@ -62,7 +62,7 @@ from services.artifact_service import (
     save_quiz_draft_from_session,
 )
 from services.batch_service import get_batch
-from services.chat_service import add_message
+from services.chat_service import add_message, add_user_message_with_attachments
 from services.course_blueprint_service import (
     build_blueprint_session_context,
     build_blueprint_status_context,
@@ -111,6 +111,7 @@ async def start_chat_run(
     approval_action: str = "",
     approved_outline_run_id: str = "",
     approved_outline: dict[str, Any] | None = None,
+    attachment_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Persist the user message, create a run, start the agent in the background.
 
@@ -156,9 +157,15 @@ async def start_chat_run(
         }
 
     # --- 3. Persist user message with run_id ---
-    user_msg = add_message(
-        batch_id, chat_id, "user", user_message, lecturer_id, run_id=run_id,
-    )
+    try:
+        user_msg, attachment_records = add_user_message_with_attachments(
+            batch_id=batch_id, chat_id=chat_id, content=user_message,
+            lecturer_id=lecturer_id, run_id=run_id, attachment_ids=attachment_ids,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     agent_session_id = ensure_chat_agent_session(
         batch_id=batch_id,
         chat_id=chat_id,
@@ -214,6 +221,7 @@ async def start_chat_run(
         approved_outline_run_id=approved_outline_run_id,
         approved_outline=approved_outline,
         artifact_sync_preflight=artifact_sync_preflight,
+        attachment_records=attachment_records,
     )
 
     # --- 6. Schedule background agent task ---
@@ -246,6 +254,59 @@ async def start_chat_run(
 # Session state builder
 # ---------------------------------------------------------------------------
 
+def build_chat_attachment_context(records: list[dict[str, Any]] | None) -> dict[str, Any]:
+    """Return bounded, text-only trusted attachment state for the current run."""
+    from services.attachment_constants import (
+        MAX_AGENT_ATTACHMENT_CONTEXT_CHARS,
+        MAX_AGENT_CONTEXT_PER_ATTACHMENT_CHARS,
+    )
+
+    manifest: list[dict[str, Any]] = []
+    blocks: list[str] = []
+    remaining = MAX_AGENT_ATTACHMENT_CONTEXT_CHARS
+    for item in records or []:
+        attachment_id = str(item.get("attachment_id") or "")
+        kind = str(item.get("attachment_kind") or "other")
+        file_name = str(item.get("file_name") or "attachment")
+        manifest.append({
+            "attachment_id": attachment_id,
+            "file_name": file_name,
+            "content_type": str(item.get("content_type") or ""),
+            "attachment_kind": kind,
+            "parse_status": str(item.get("parse_status") or "skipped"),
+            "vision_status": str(item.get("vision_status") or "skipped"),
+            "chat_only": kind == "image",
+        })
+        lines = [
+            f"Attachment: {file_name}",
+            f"Attachment ID: {attachment_id}",
+            f"Type: {kind} ({item.get('content_type') or 'unknown'})",
+        ]
+        if kind == "image":
+            lines.append("Scope: chat-only. This image is not saved to Course Space and cannot be promoted.")
+            if item.get("vision_summary"):
+                lines.append(f"Vision summary: {item['vision_summary']}")
+            if item.get("ocr_text"):
+                lines.append(f"OCR text: {item['ocr_text']}")
+        elif item.get("extracted_text_preview"):
+            lines.append(f"Extracted preview: {item['extracted_text_preview']}")
+        block = "\n".join(lines)
+        truncated = len(block) > MAX_AGENT_CONTEXT_PER_ATTACHMENT_CHARS
+        block = block[:MAX_AGENT_CONTEXT_PER_ATTACHMENT_CHARS]
+        if truncated:
+            block += "\n[Attachment context truncated]"
+        if len(block) > remaining:
+            if remaining > 80:
+                blocks.append(block[:remaining - 40] + "\n[Total attachment context truncated]")
+            break
+        blocks.append(block)
+        remaining -= len(block) + 2
+    return {
+        "current_chat_attachment_ids": [item["attachment_id"] for item in manifest],
+        "current_chat_attachments_manifest": manifest,
+        "current_chat_attachment_context": "\n\n".join(blocks),
+    }
+
 def _build_session_state(
     *,
     run_id: str,
@@ -265,6 +326,7 @@ def _build_session_state(
     approved_outline_run_id: str = "",
     approved_outline: dict[str, Any] | None = None,
     artifact_sync_preflight: dict[str, Any] | None = None,
+    attachment_records: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build the trusted session state payload sent to the agent.
 
@@ -316,7 +378,9 @@ def _build_session_state(
         "course_blueprint_assessment_strategy": "",
         "course_blueprint_lab_strategy": "",
         "course_blueprint_teaching_preferences": {},
+        "enable_native_multimodal_attachments": False,
     }
+    state.update(build_chat_attachment_context(attachment_records))
     if is_generation_workflow(workflow_type):
         state.update(
             build_blueprint_session_context(

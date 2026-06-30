@@ -20,6 +20,12 @@ dependencies = [
     "google-cloud-discoveryengine",
     "google-cloud-aiplatform[adk,agent-engines]",
     "python-multipart",
+    "pypdf",
+    "python-docx",
+    "python-pptx",
+    "pillow",
+    "pillow-heif",
+    "google-genai",
 ]
 
 [build-system]

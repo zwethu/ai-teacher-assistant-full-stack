@@ -14,13 +14,15 @@ import {
   Save,
   User,
   X,
+  Image as ImageIcon,
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import rehypeSanitize from 'rehype-sanitize'
 import remarkGfm from 'remark-gfm'
-import type { ChatMessage } from '../../../entity/Chat'
+import type { ChatAttachmentSnapshot, ChatMessage } from '../../../entity/Chat'
 import { startGoogleOAuth } from '../../../services/authService'
 import { exportPendingQuizToGoogleForms, generateDocsFromPendingArtifact } from '../../../services/chatService'
+import { getChatAttachmentContent } from '../../../services/chatService'
 import {
   exportArtifactDraftToGoogleDocs,
   exportQuizDraftToGoogleForms,
@@ -97,8 +99,13 @@ export function MessageRow({
       </div>
       <div className={`flex-1 min-w-0 pt-1 ${isUser ? 'flex justify-end' : ''}`}>
         {isUser ? (
-          <div className="inline-block max-w-full text-[15px] leading-7 whitespace-pre-wrap px-4 py-2.5 rounded-3xl rounded-br-md bg-emerald-500/15 border border-emerald-300/30 text-slate-800">
-            {msg.content}
+          <div className="max-w-full">
+            <div className="inline-block max-w-full text-[15px] leading-7 whitespace-pre-wrap px-4 py-2.5 rounded-3xl rounded-br-md bg-emerald-500/15 border border-emerald-300/30 text-slate-800">
+              {msg.content}
+            </div>
+            {batchId && msg.attachments && msg.attachments.length > 0 && (
+              <MessageAttachments batchId={batchId} chatId={msg.chat_id} attachments={msg.attachments} />
+            )}
           </div>
         ) : (
           <div className="max-w-full text-[15px] leading-7 text-slate-700">
@@ -167,6 +174,78 @@ export function MessageRow({
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function MessageAttachments({
+  batchId, chatId, attachments,
+}: {
+  batchId: string
+  chatId: string
+  attachments: ChatAttachmentSnapshot[]
+}) {
+  const [urls, setUrls] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    let cancelled = false
+    const created: string[] = []
+    async function loadThumbnails() {
+      for (const attachment of attachments) {
+        if (attachment.attachment_kind !== 'image' || !attachment.thumbnail_available) continue
+        try {
+          const blob = await getChatAttachmentContent(batchId, chatId, attachment.attachment_id, true)
+          if (cancelled) return
+          const url = URL.createObjectURL(blob)
+          created.push(url)
+          setUrls((prev) => ({ ...prev, [attachment.attachment_id]: url }))
+        } catch {
+          // Keep the metadata card usable when a preview cannot be loaded.
+        }
+      }
+    }
+    void loadThumbnails()
+    return () => {
+      cancelled = true
+      created.forEach((url) => URL.revokeObjectURL(url))
+    }
+  }, [attachments, batchId, chatId])
+
+  async function viewAttachment(attachment: ChatAttachmentSnapshot) {
+    try {
+      const blob = await getChatAttachmentContent(batchId, chatId, attachment.attachment_id)
+      const url = URL.createObjectURL(blob)
+      window.open(url, '_blank', 'noopener,noreferrer')
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    } catch {
+      // The card retains status metadata even if the object has expired.
+    }
+  }
+
+  return (
+    <div className="mt-2 flex flex-wrap justify-end gap-2">
+      {attachments.map((attachment) => (
+        <button
+          type="button"
+          key={attachment.attachment_id}
+          onClick={() => void viewAttachment(attachment)}
+          className="flex max-w-xs items-center gap-2 rounded-xl border border-slate-200 bg-white/85 p-2 text-left shadow-sm hover:bg-white"
+        >
+          {urls[attachment.attachment_id] ? (
+            <img src={urls[attachment.attachment_id]} alt="" className="h-11 w-11 rounded-lg object-cover" />
+          ) : attachment.attachment_kind === 'image' ? (
+            <ImageIcon className="h-5 w-5 text-sky-600" />
+          ) : (
+            <FileText className="h-5 w-5 text-emerald-600" />
+          )}
+          <span className="min-w-0">
+            <span className="block truncate text-xs font-medium text-slate-700">{attachment.file_title || attachment.file_name}</span>
+            <span className="block text-[11px] text-slate-400">
+              {attachment.attachment_kind === 'image' ? 'Image · chat-only' : `Document · ${attachment.parse_status}`}
+            </span>
+          </span>
+        </button>
+      ))}
     </div>
   )
 }

@@ -52,6 +52,7 @@ class AgentInvokeRequest(BaseModel):
     approval_action: str | None = None
     approved_outline_run_id: str | None = None
     connectors: ConnectorState = Field(default_factory=ConnectorState)
+    attachment_ids: list[str] = Field(default_factory=list)
 
 
 class AgentInvokeResponse(BaseModel):
@@ -59,6 +60,7 @@ class AgentInvokeResponse(BaseModel):
     chat_id: str
     rtdb_run_path: str
     status: str = "running"
+    user_message: dict
 
 
 # ---------------------------------------------------------------------------
@@ -216,6 +218,7 @@ async def invoke_agent(
         approval_action=body.approval_action or "",
         approved_outline_run_id=body.approved_outline_run_id or "",
         approved_outline=approved_outline,
+        attachment_ids=body.attachment_ids,
     )
 
     return AgentInvokeResponse(
@@ -223,6 +226,7 @@ async def invoke_agent(
         chat_id=chat_id,
         rtdb_run_path=result["rtdb_run_path"],
         status=result["status"],
+        user_message=result["user_message"],
     )
 
 

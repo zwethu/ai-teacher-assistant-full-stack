@@ -24,9 +24,7 @@ function shuffle<T>(arr: T[]): T[] {
 export default function MatchAndTreat({ items, onCorrect, onWrong, onComplete }: Props) {
   const [cards, setCards] = useState<Card[]>([]);
   const [selected, setSelected] = useState<Card | null>(null);
-  // Map from pairId → match state
   const [matchStates, setMatchStates] = useState<Record<string, MatchState>>({});
-  // Track which pairId each card is currently paired to by the player
   const [playerPairs, setPlayerPairs] = useState<Record<string, string>>({}); // leftCardId → rightCardId
 
   // ─── Behavior tracking refs ─────────────────────────────────────────────
@@ -53,7 +51,6 @@ export default function MatchAndTreat({ items, onCorrect, onWrong, onComplete }:
     if (firstActionRef.current === null) {
       firstActionRef.current = Date.now();
     }
-    // If there was feedback shown, record review time
     if (lastFeedbackTimeRef.current !== null) {
       reviewTimesRef.current.push(Date.now() - lastFeedbackTimeRef.current);
       lastFeedbackTimeRef.current = null;
@@ -63,7 +60,6 @@ export default function MatchAndTreat({ items, onCorrect, onWrong, onComplete }:
   function handleCardClick(card: Card) {
     recordFirstAction();
 
-    // Clear wrong state for this pair when player interacts again
     if (matchStates[card.pairId] === 'wrong') {
       setMatchStates(prev => ({ ...prev, [card.pairId]: 'unmatched' }));
     }
@@ -78,7 +74,6 @@ export default function MatchAndTreat({ items, onCorrect, onWrong, onComplete }:
       return;
     }
 
-    // Must be one left and one right to form a pair
     if (selected.side === card.side) {
       setSelected(card);
       return;
@@ -87,21 +82,20 @@ export default function MatchAndTreat({ items, onCorrect, onWrong, onComplete }:
     const leftCard  = selected.side === 'left' ? selected : card;
     const rightCard = selected.side === 'right' ? selected : card;
 
-    // Record this as player's current pairing (overwrites previous pairing for this left card)
     setPlayerPairs(prev => ({ ...prev, [leftCard.id]: rightCard.id }));
     setSelected(null);
   }
 
-  // Build display: which right card is each left card currently paired with?
   const leftCards  = cards.filter(c => c.side === 'left');
   const rightCards = cards.filter(c => c.side === 'right');
+  const allPaired  = leftCards.every(lc => playerPairs[lc.id] !== undefined);
 
-  // A pair is "pending" (shown as connected) if playerPairs has an entry for it
-  const allPaired = leftCards.every(lc => playerPairs[lc.id] !== undefined);
+  // All cards mixed together for grid display
+  const allShuffledCards = cards;
 
   function handleSubmit() {
     if (!allPaired) return;
-    recordFirstAction(); // in case first action was submit itself
+    recordFirstAction();
 
     submitCountRef.current += 1;
     let wrongCount = 0;
@@ -110,7 +104,6 @@ export default function MatchAndTreat({ items, onCorrect, onWrong, onComplete }:
 
     leftCards.forEach(lc => {
       const pairedRightId = playerPairs[lc.id];
-      // Correct if the right card belongs to the same item
       const isCorrect = pairedRightId === `${lc.pairId}-R`;
       newMatchStates[lc.pairId] = isCorrect ? 'matched' : 'wrong';
       answers.push({ questionId: lc.pairId, correct: isCorrect });
@@ -129,7 +122,6 @@ export default function MatchAndTreat({ items, onCorrect, onWrong, onComplete }:
     lastFeedbackTimeRef.current = Date.now();
 
     if (wrongCount === 0) {
-      // All correct — compute behavior and complete
       const behavior: BehaviorSummary = {
         firstActionDelayMs: firstActionRef.current
           ? firstActionRef.current - startTimeRef.current
@@ -143,63 +135,39 @@ export default function MatchAndTreat({ items, onCorrect, onWrong, onComplete }:
     }
   }
 
-  // ─── Render ──────────────────────────────────────────────────────────────
   return (
     <div className="mode-panel">
       <div className="question-progress">
         Pairs connected: {Object.keys(playerPairs).length} / {leftCards.length}
       </div>
 
-      {/* Two-column layout: left terms | right definitions */}
-      <div className="match-two-col">
-        <div className="match-col">
-          {leftCards.map(lc => {
-            const state = matchStates[lc.pairId] ?? 'unmatched';
-            const isPaired = playerPairs[lc.id] !== undefined;
-            return (
-              <button
-                key={lc.id}
-                className={[
-                  'match-card',
-                  state === 'matched' ? 'matched' : '',
-                  state === 'wrong'   ? 'wrong-pair' : '',
-                  selected?.id === lc.id ? 'selected' : '',
-                  isPaired && state === 'unmatched' ? 'paired-pending' : '',
-                ].join(' ')}
-                onClick={() => handleCardClick(lc)}
-                disabled={state === 'matched'}
-              >
-                {state === 'matched' ? '🐟 ' : ''}{lc.text}
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="match-col">
-          {rightCards.map(rc => {
-            const state = matchStates[rc.pairId] ?? 'unmatched';
-            const isPairedByPlayer = Object.values(playerPairs).includes(rc.id);
-            return (
-              <button
-                key={rc.id}
-                className={[
-                  'match-card',
-                  state === 'matched' ? 'matched' : '',
-                  state === 'wrong'   ? 'wrong-pair' : '',
-                  selected?.id === rc.id ? 'selected' : '',
-                  isPairedByPlayer && state === 'unmatched' ? 'paired-pending' : '',
-                ].join(' ')}
-                onClick={() => handleCardClick(rc)}
-                disabled={state === 'matched'}
-              >
-                {state === 'matched' ? '🐟 ' : ''}{rc.text}
-              </button>
-            );
-          })}
-        </div>
+      {/* Phone-number style grid: 3 columns, all cards mixed */}
+      <div className="match-grid">
+        {allShuffledCards.map(card => {
+          const state = matchStates[card.pairId] ?? 'unmatched';
+          const isPaired =
+            card.side === 'left'
+              ? playerPairs[card.id] !== undefined
+              : Object.values(playerPairs).includes(card.id);
+          return (
+            <button
+              key={card.id}
+              className={[
+                'match-card',
+                state === 'matched'  ? 'matched'        : '',
+                state === 'wrong'    ? 'wrong-pair'     : '',
+                selected?.id === card.id ? 'selected'  : '',
+                isPaired && state === 'unmatched' ? 'paired-pending' : '',
+              ].join(' ')}
+              onClick={() => handleCardClick(card)}
+              disabled={state === 'matched'}
+            >
+              {state === 'matched' ? '🐟 ' : ''}{card.text}
+            </button>
+          );
+        })}
       </div>
 
-      {/* Submit button */}
       <button
         className="submit-btn"
         onClick={handleSubmit}
@@ -208,7 +176,6 @@ export default function MatchAndTreat({ items, onCorrect, onWrong, onComplete }:
         {allPaired ? '✅ Submit Answers' : `Pair all ${leftCards.length} items first`}
       </button>
 
-      {/* Hint */}
       <div className="match-hint">
         {selected
           ? `Selected: "${selected.text}" — now click its match`

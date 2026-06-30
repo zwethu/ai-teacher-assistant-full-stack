@@ -107,7 +107,6 @@ export default function RopeAndLink({ items, onCorrect, onWrong, onComplete }: P
     });
 
     if (droppedOnIdx !== null && !isRightConnected(droppedOnIdx)) {
-      // Remove any existing pending connection from this left node
       setConnections(prev => [
         ...prev.filter(c => c.leftIndex !== draggingFrom),
         { leftIndex: draggingFrom, rightIndex: droppedOnIdx!, state: 'pending' },
@@ -147,7 +146,6 @@ export default function RopeAndLink({ items, onCorrect, onWrong, onComplete }: P
     if (wrongCount > 0) {
       wrongSubmitCountRef.current += 1;
       onWrong();
-      // Reset wrong connections so player can redo them
       setConnections(updatedConns.filter(c => c.state === 'correct'));
     } else {
       onCorrect();
@@ -170,7 +168,6 @@ export default function RopeAndLink({ items, onCorrect, onWrong, onComplete }: P
     }
   }
 
-  // ─── SVG lines ─────────────────────────────────────────────────────────
   const ROPE_COLORS: Record<Connection['state'], string> = {
     pending: '#aaa',
     correct: '#5cb85c',
@@ -186,6 +183,9 @@ export default function RopeAndLink({ items, onCorrect, onWrong, onComplete }: P
 
   const dragLine = draggingFrom !== null ? getCenter(questionRefs.current[draggingFrom]) : null;
 
+  // Only render SVG when there are actual lines to draw
+  const hasSvgContent = lockedLines.some(l => l !== null) || (dragLine !== null && dragPos !== null);
+
   return (
     <div className="mode-panel rope-panel">
       <div className="question-progress">
@@ -198,38 +198,41 @@ export default function RopeAndLink({ items, onCorrect, onWrong, onComplete }: P
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
       >
-        <svg
-          ref={svgRef}
-          className="rope-svg"
-          width={svgSize.w}
-          height={svgSize.h}
-          style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none', overflow: 'visible' }}
-        >
-          {lockedLines.map((line, i) =>
-            line ? (
+        {/* Only mount SVG when there are lines to draw — prevents grey blob */}
+        {hasSvgContent && (
+          <svg
+            ref={svgRef}
+            className="rope-svg"
+            width={svgSize.w}
+            height={svgSize.h}
+            style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none', overflow: 'visible' }}
+          >
+            {lockedLines.map((line, i) =>
+              line ? (
+                <path
+                  key={line.key}
+                  d={`M ${line.from.x} ${line.from.y} C ${line.from.x + 60} ${line.from.y}, ${line.to.x - 60} ${line.to.y}, ${line.to.x} ${line.to.y}`}
+                  stroke={line.color}
+                  strokeWidth="3"
+                  fill="none"
+                  strokeLinecap="round"
+                  opacity="0.9"
+                />
+              ) : null
+            )}
+            {dragLine && dragPos && (
               <path
-                key={line.key}
-                d={`M ${line.from.x} ${line.from.y} C ${line.from.x + 60} ${line.from.y}, ${line.to.x - 60} ${line.to.y}, ${line.to.x} ${line.to.y}`}
-                stroke={line.color}
-                strokeWidth="3"
+                d={`M ${dragLine.x} ${dragLine.y} C ${dragLine.x + 60} ${dragLine.y}, ${dragPos.x - 60} ${dragPos.y}, ${dragPos.x} ${dragPos.y}`}
+                stroke="#bbb"
+                strokeWidth="2.5"
                 fill="none"
+                strokeDasharray="6 4"
                 strokeLinecap="round"
-                opacity="0.9"
+                opacity="0.7"
               />
-            ) : null
-          )}
-          {dragLine && dragPos && (
-            <path
-              d={`M ${dragLine.x} ${dragLine.y} C ${dragLine.x + 60} ${dragLine.y}, ${dragPos.x - 60} ${dragPos.y}, ${dragPos.x} ${dragPos.y}`}
-              stroke="#bbb"
-              strokeWidth="2.5"
-              fill="none"
-              strokeDasharray="6 4"
-              strokeLinecap="round"
-              opacity="0.7"
-            />
-          )}
-        </svg>
+            )}
+          </svg>
+        )}
 
         {/* Terms column (left) */}
         <div className="rope-col rope-col-left">
@@ -241,11 +244,11 @@ export default function RopeAndLink({ items, onCorrect, onWrong, onComplete }: P
                 ref={el => { questionRefs.current[idx] = el; }}
                 className={[
                   'rope-node rope-node-question',
-                  conn?.state === 'correct' ? 'rope-node-locked' : '',
-                  conn?.state === 'pending' ? 'rope-node-pending' : '',
-                  conn?.state === 'wrong'   ? 'rope-node-wrong'  : '',
-                  draggingFrom === idx      ? 'rope-node-dragging' : '',
-                  shakeLeft === idx         ? 'rope-shake' : '',
+                  conn?.state === 'correct'  ? 'rope-node-locked'   : '',
+                  conn?.state === 'pending'  ? 'rope-node-pending'  : '',
+                  conn?.state === 'wrong'    ? 'rope-node-wrong'    : '',
+                  draggingFrom === idx       ? 'rope-node-dragging' : '',
+                  shakeLeft === idx          ? 'rope-shake'         : '',
                 ].join(' ')}
                 onPointerDown={e => handleQuestionPointerDown(e, idx)}
                 disabled={conn?.state === 'correct'}
@@ -266,10 +269,10 @@ export default function RopeAndLink({ items, onCorrect, onWrong, onComplete }: P
                 ref={el => { answerRefs.current[idx] = el; }}
                 className={[
                   'rope-node rope-node-answer',
-                  conn?.state === 'correct' ? 'rope-node-locked' : '',
+                  conn?.state === 'correct' ? 'rope-node-locked'  : '',
                   conn?.state === 'pending' ? 'rope-node-pending' : '',
-                  conn?.state === 'wrong'   ? 'rope-node-wrong'  : '',
-                  shakeRight === idx        ? 'rope-shake' : '',
+                  conn?.state === 'wrong'   ? 'rope-node-wrong'   : '',
+                  shakeRight === idx        ? 'rope-shake'        : '',
                 ].join(' ')}
                 disabled={conn?.state === 'correct'}
               >
@@ -280,7 +283,6 @@ export default function RopeAndLink({ items, onCorrect, onWrong, onComplete }: P
         </div>
       </div>
 
-      {/* Submit button */}
       <button
         className="submit-btn"
         onClick={handleSubmit}

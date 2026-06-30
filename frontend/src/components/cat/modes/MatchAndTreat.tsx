@@ -24,16 +24,16 @@ function shuffle<T>(arr: T[]): T[] {
 export default function MatchAndTreat({ items, onCorrect, onWrong, onComplete }: Props) {
   const [cards, setCards] = useState<Card[]>([]);
   const [selected, setSelected] = useState<Card | null>(null);
-  const [matchStates, setMatchStates] = useState<Record<string, MatchState>>({}); // keyed by pairId
+  const [matchStates, setMatchStates] = useState<Record<string, MatchState>>({});
   const [playerPairs, setPlayerPairs] = useState<Record<string, string>>({}); // bidirectional: cardId -> cardId
 
-  const startTimeRef         = useRef<number>(Date.now());
-  const firstActionRef       = useRef<number | null>(null);
-  const submitCountRef       = useRef(0);
-  const wrongSubmitCountRef  = useRef(0);
-  const totalWrongPairsRef   = useRef(0);
-  const lastFeedbackTimeRef  = useRef<number | null>(null);
-  const reviewTimesRef       = useRef<number[]>([]);
+  const startTimeRef        = useRef<number>(Date.now());
+  const firstActionRef      = useRef<number | null>(null);
+  const submitCountRef      = useRef(0);
+  const wrongSubmitCountRef = useRef(0);
+  const totalWrongPairsRef  = useRef(0);
+  const lastFeedbackTimeRef = useRef<number | null>(null);
+  const reviewTimesRef      = useRef<number[]>([]);
 
   useEffect(() => {
     const allCards: Card[] = [];
@@ -63,7 +63,7 @@ export default function MatchAndTreat({ items, onCorrect, onWrong, onComplete }:
     if (matchStates[card.pairId] === 'matched') return;
 
     if (matchStates[card.pairId] === 'wrong') {
-      const partnerId = playerPairs[card.id];
+      const partnerId    = playerPairs[card.id];
       const partnerPairId = cards.find(c => c.id === partnerId)?.pairId;
       setMatchStates(prev => {
         const next = { ...prev, [card.pairId]: 'unmatched' as MatchState };
@@ -80,21 +80,11 @@ export default function MatchAndTreat({ items, onCorrect, onWrong, onComplete }:
       return;
     }
 
-    if (selected?.id === card.id) {
-      setSelected(null);
-      return;
-    }
-
-    if (selected === null) {
-      setSelected(card);
-      return;
-    }
+    if (selected?.id === card.id) { setSelected(null); return; }
+    if (selected === null)        { setSelected(card);  return; }
 
     // Same side — swap selection
-    if (selected.side === card.side) {
-      setSelected(card);
-      return;
-    }
+    if (selected.side === card.side) { setSelected(card); return; }
 
     // Different sides — pair them
     const termCard = selected.side === 'term' ? selected : card;
@@ -186,10 +176,10 @@ export default function MatchAndTreat({ items, onCorrect, onWrong, onComplete }:
               aria-disabled={isMatched}
               className={[
                 'match-card',
-                isMatched                ? 'matched',
-                state === 'wrong'       ? 'wrong-pair'     : '',
-                selected?.id === card.id ? 'selected'      : '',
-                isPaired && !isMatched  ? 'paired-pending' : '',
+                isMatched                 ? 'matched'       : '',
+                state === 'wrong'         ? 'wrong-pair'    : '',
+                selected?.id === card.id  ? 'selected'      : '',
+                isPaired && !isMatched    ? 'paired-pending': '',
               ].filter(Boolean).join(' ')}
               onClick={() => !isMatched && handleCardClick(card)}
               onKeyDown={e => {
@@ -197,7 +187,7 @@ export default function MatchAndTreat({ items, onCorrect, onWrong, onComplete }:
                 if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCardClick(card); }
               }}
             >
-              {isMatched ? '🐟 ' : ''}{card.text}
+              {isMatched ? '✅ ' : ''}{card.text}
             </div>
           );
         })}

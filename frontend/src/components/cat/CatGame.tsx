@@ -24,14 +24,13 @@ export default function CatGame({
   playerUid,
   assessmentId,
 }: Props) {
-  const activeItems = items && items.length > 0 ? items : MOCK_ITEMS;
+  const activeItems    = items && items.length > 0 ? items : MOCK_ITEMS;
   const totalQuestions = activeItems.length;
 
-  const [gameOver, setGameOver] = useState(false);
-  const [happiness, setHappiness] = useState(60);
-  const [fish, setFish] = useState(0);
-  const [answers, setAnswers] = useState<AnswerRecord[]>([]);
-  const [catMood, setCatMood] = useState<'idle' | 'happy' | 'confused' | 'playful' | 'eating'>('idle');
+  const [gameOver,    setGameOver]    = useState(false);
+  const [happiness,   setHappiness]   = useState(40);
+  const [answers,     setAnswers]     = useState<AnswerRecord[]>([]);
+  const [catMood,     setCatMood]     = useState<'idle' | 'happy' | 'confused' | 'playful' | 'eating'>('idle');
   const [resultSaved, setResultSaved] = useState(false);
 
   const answered = answers.filter(a => a.correct).length;
@@ -43,13 +42,12 @@ export default function CatGame({
 
   function handleCorrect() {
     triggerMood('happy');
-    setHappiness(h => Math.min(100, h + 10));
-    setFish(f => f + 5);
+    setHappiness(h => Math.min(100, h + 12));
   }
 
   function handleWrong() {
     triggerMood('confused');
-    setHappiness(h => Math.max(0, h - 5));
+    // No happiness penalty — unlimited lives for more stealth data
   }
 
   async function handleComplete(newAnswers: AnswerRecord[], behavior?: BehaviorSummary) {
@@ -58,16 +56,15 @@ export default function CatGame({
     setGameOver(true);
 
     if (playerUid && assessmentId && !resultSaved) {
-      const correct = allAnswers.filter(a => a.correct).length;
+      const correct  = allAnswers.filter(a => a.correct).length;
       const accuracy = totalQuestions > 0 ? Math.round((correct / totalQuestions) * 100) : 0;
       try {
         await saveAttempt({
           playerUid,
           assessmentId,
           chosenGameMode: gameMode,
-          score: fish,
+          score: correct,
           accuracy,
-          fish,
           happiness,
           completedAt: new Date(),
           behavior,
@@ -81,8 +78,7 @@ export default function CatGame({
 
   function handleRestart() {
     setGameOver(false);
-    setHappiness(60);
-    setFish(0);
+    setHappiness(40);
     setAnswers([]);
     setCatMood('idle');
   }
@@ -93,7 +89,7 @@ export default function CatGame({
         answers={answers}
         totalQuestions={totalQuestions}
         happiness={happiness}
-        fish={fish}
+        fish={answered}
         nickname={nickname}
         onRestart={!assessmentId ? handleRestart : undefined}
       />
@@ -115,7 +111,6 @@ export default function CatGame({
         happiness={happiness}
         answered={answered}
         totalQuestions={totalQuestions}
-        fish={fish}
       />
 
       <div className="cat-center-area">

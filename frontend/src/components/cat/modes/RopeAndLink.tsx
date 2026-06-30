@@ -27,8 +27,8 @@ export default function RopeAndLink({ items, onCorrect, onWrong, onComplete }: P
   const [shakeRight, setShakeRight] = useState<number | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
-  const questionRefs = useRef<(HTMLButtonElement | null)[]>([]);
-  const answerRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const questionRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const answerRefs = useRef<(HTMLDivElement | null)[]>([]);
   const svgRef = useRef<SVGSVGElement>(null);
   const [svgSize, setSvgSize] = useState({ w: 0, h: 0 });
 
@@ -52,7 +52,7 @@ export default function RopeAndLink({ items, onCorrect, onWrong, onComplete }: P
     return () => ro.disconnect();
   }, []);
 
-  const getCenter = useCallback((el: HTMLButtonElement | null) => {
+  const getCenter = useCallback((el: HTMLDivElement | null) => {
     if (!el || !containerRef.current) return null;
     const cr = containerRef.current.getBoundingClientRect();
     const r = el.getBoundingClientRect();
@@ -187,7 +187,7 @@ export default function RopeAndLink({ items, onCorrect, onWrong, onComplete }: P
   const hasSvgContent = lockedLines.some(l => l !== null) || (dragLine !== null && dragPos !== null);
 
   return (
-    <div className="mode-panel rope-panel">
+    <form className="mode-panel rope-panel" autoComplete="off" onSubmit={e => e.preventDefault()}>
       <div className="question-progress">
         Connected: {connections.filter(c => c.state !== 'wrong').length} / {items.length}
       </div>
@@ -195,6 +195,7 @@ export default function RopeAndLink({ items, onCorrect, onWrong, onComplete }: P
       <div
         ref={containerRef}
         className="rope-arena"
+        translate="no"
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
       >
@@ -238,10 +239,14 @@ export default function RopeAndLink({ items, onCorrect, onWrong, onComplete }: P
         <div className="rope-col rope-col-left">
           {items.map((item, idx) => {
             const conn = connections.find(c => c.leftIndex === idx);
+            const isDisabled = conn?.state === 'correct';
             return (
-              <button
+              <div
                 key={item.id}
                 ref={el => { questionRefs.current[idx] = el; }}
+                role="button"
+                tabIndex={isDisabled ? -1 : 0}
+                aria-disabled={isDisabled}
                 className={[
                   'rope-node rope-node-question',
                   conn?.state === 'correct'  ? 'rope-node-locked'   : '',
@@ -250,11 +255,10 @@ export default function RopeAndLink({ items, onCorrect, onWrong, onComplete }: P
                   draggingFrom === idx       ? 'rope-node-dragging' : '',
                   shakeLeft === idx          ? 'rope-shake'         : '',
                 ].join(' ')}
-                onPointerDown={e => handleQuestionPointerDown(e, idx)}
-                disabled={conn?.state === 'correct'}
+                onPointerDown={e => !isDisabled && handleQuestionPointerDown(e, idx)}
               >
                 {item.term}
-              </button>
+              </div>
             );
           })}
         </div>
@@ -263,10 +267,14 @@ export default function RopeAndLink({ items, onCorrect, onWrong, onComplete }: P
         <div className="rope-col rope-col-right">
           {shuffledRight.map((item, idx) => {
             const conn = connections.find(c => c.rightIndex === idx);
+            const isDisabled = conn?.state === 'correct';
             return (
-              <button
+              <div
                 key={item.id}
                 ref={el => { answerRefs.current[idx] = el; }}
+                role="button"
+                tabIndex={isDisabled ? -1 : 0}
+                aria-disabled={isDisabled}
                 className={[
                   'rope-node rope-node-answer',
                   conn?.state === 'correct' ? 'rope-node-locked'  : '',
@@ -274,16 +282,16 @@ export default function RopeAndLink({ items, onCorrect, onWrong, onComplete }: P
                   conn?.state === 'wrong'   ? 'rope-node-wrong'   : '',
                   shakeRight === idx        ? 'rope-shake'        : '',
                 ].join(' ')}
-                disabled={conn?.state === 'correct'}
               >
                 {item.definition}
-              </button>
+              </div>
             );
           })}
         </div>
       </div>
 
       <button
+        type="submit"
         className="submit-btn"
         onClick={handleSubmit}
         disabled={!allConnected}
@@ -296,6 +304,6 @@ export default function RopeAndLink({ items, onCorrect, onWrong, onComplete }: P
           ? '🪢 Drop on the matching definition!'
           : '👆 Drag from a term to its definition'}
       </div>
-    </div>
+    </form>
   );
 }

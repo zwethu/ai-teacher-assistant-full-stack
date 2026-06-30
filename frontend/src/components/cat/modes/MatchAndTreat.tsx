@@ -133,25 +133,25 @@ export default function MatchAndTreat({ items, onCorrect, onWrong, onComplete }:
   }
 
   return (
-    <div className="mode-panel">
+    <form className="mode-panel" autoComplete="off" onSubmit={e => e.preventDefault()}>
       <div className="question-progress">
         Pairs connected: {Object.keys(playerPairs).length} / {leftCards.length}
       </div>
 
-      <div className="match-grid">
+      <div className="match-grid" translate="no">
         {allShuffledCards.map(card => {
           const state = matchStates[card.pairId] ?? 'unmatched';
+          const isDisabled = state === 'matched';
           const isPaired =
             card.side === 'left'
               ? playerPairs[card.id] !== undefined
               : Object.values(playerPairs).includes(card.id);
           return (
-            <button
+            <div
               key={card.id}
-              // These three props kill the browser autocomplete / spellcheck blob
-              type="button"
-              autoComplete="off"
-              spellCheck={false}
+              role="button"
+              tabIndex={isDisabled ? -1 : 0}
+              aria-disabled={isDisabled}
               className={[
                 'match-card',
                 state === 'matched'          ? 'matched'       : '',
@@ -159,18 +159,23 @@ export default function MatchAndTreat({ items, onCorrect, onWrong, onComplete }:
                 selected?.id === card.id     ? 'selected'      : '',
                 isPaired && state === 'unmatched' ? 'paired-pending' : '',
               ].join(' ')}
-              onClick={() => handleCardClick(card)}
-              disabled={state === 'matched'}
+              onClick={() => !isDisabled && handleCardClick(card)}
+              onKeyDown={e => {
+                if (isDisabled) return;
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  handleCardClick(card);
+                }
+              }}
             >
               {state === 'matched' ? '🐟 ' : ''}{card.text}
-            </button>
+            </div>
           );
         })}
       </div>
 
       <button
-        type="button"
-        autoComplete="off"
+        type="submit"
         className="submit-btn"
         onClick={handleSubmit}
         disabled={!allPaired}
@@ -183,6 +188,6 @@ export default function MatchAndTreat({ items, onCorrect, onWrong, onComplete }:
           ? `Selected: "${selected.text}" — now click its match`
           : 'Click a term, then click its matching definition'}
       </div>
-    </div>
+    </form>
   );
 }

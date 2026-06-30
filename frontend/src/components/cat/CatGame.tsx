@@ -110,7 +110,6 @@ export default function CatGame({
       <div className="room-deco window">🪟</div>
       <div className="room-deco plant">🪴</div>
       <div className="room-deco shelf">🕯️ 📚</div>
-      <div className="room-deco rug">🟫</div>
 
       <HUD
         happiness={happiness}

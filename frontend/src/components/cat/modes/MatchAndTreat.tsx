@@ -87,10 +87,7 @@ export default function MatchAndTreat({ items, onCorrect, onWrong, onComplete }:
   }
 
   const leftCards  = cards.filter(c => c.side === 'left');
-  const rightCards = cards.filter(c => c.side === 'right');
   const allPaired  = leftCards.every(lc => playerPairs[lc.id] !== undefined);
-
-  // All cards mixed together for grid display
   const allShuffledCards = cards;
 
   function handleSubmit() {
@@ -141,7 +138,6 @@ export default function MatchAndTreat({ items, onCorrect, onWrong, onComplete }:
         Pairs connected: {Object.keys(playerPairs).length} / {leftCards.length}
       </div>
 
-      {/* Phone-number style grid: 3 columns, all cards mixed */}
       <div className="match-grid">
         {allShuffledCards.map(card => {
           const state = matchStates[card.pairId] ?? 'unmatched';
@@ -152,11 +148,15 @@ export default function MatchAndTreat({ items, onCorrect, onWrong, onComplete }:
           return (
             <button
               key={card.id}
+              // These three props kill the browser autocomplete / spellcheck blob
+              type="button"
+              autoComplete="off"
+              spellCheck={false}
               className={[
                 'match-card',
-                state === 'matched'  ? 'matched'        : '',
-                state === 'wrong'    ? 'wrong-pair'     : '',
-                selected?.id === card.id ? 'selected'  : '',
+                state === 'matched'          ? 'matched'       : '',
+                state === 'wrong'            ? 'wrong-pair'    : '',
+                selected?.id === card.id     ? 'selected'      : '',
                 isPaired && state === 'unmatched' ? 'paired-pending' : '',
               ].join(' ')}
               onClick={() => handleCardClick(card)}
@@ -169,6 +169,8 @@ export default function MatchAndTreat({ items, onCorrect, onWrong, onComplete }:
       </div>
 
       <button
+        type="button"
+        autoComplete="off"
         className="submit-btn"
         onClick={handleSubmit}
         disabled={!allPaired}

@@ -276,6 +276,10 @@ def build_chat_attachment_context(records: list[dict[str, Any]] | None) -> dict[
             "parse_status": str(item.get("parse_status") or "skipped"),
             "vision_status": str(item.get("vision_status") or "skipped"),
             "chat_only": kind == "image",
+            "vision_summary": str(item.get("vision_summary") or "")[:4000] if kind == "image" else "",
+            "ocr_text": str(item.get("ocr_text") or "")[:4000] if kind == "image" else "",
+            "vision_error": str(item.get("vision_error") or "")[:300] if kind == "image" else "",
+            "vision_source": str(item.get("vision_source") or "none") if kind == "image" else "none",
         })
         lines = [
             f"Attachment: {file_name}",

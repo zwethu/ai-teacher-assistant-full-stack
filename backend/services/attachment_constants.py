@@ -21,6 +21,7 @@ EXTENSION_CONTENT_TYPES = {
     ".md": {"text/markdown", "text/plain"},
     ".markdown": {"text/markdown", "text/plain"},
     ".csv": {"text/csv", "text/plain", "application/csv"},
+    ".json": {"application/json", "text/json"},
     ".png": {"image/png"},
     ".jpg": {"image/jpeg"},
     ".jpeg": {"image/jpeg"},
@@ -42,4 +43,3 @@ ATTACHMENT_RETENTION_DAYS = 30
 THUMBNAIL_MAX_SIZE = (768, 768)
 
 NATIVE_MULTIMODAL_ENV = "ENABLE_NATIVE_MULTIMODAL_ATTACHMENTS"
-

@@ -13,6 +13,7 @@ from services.file_service import (
     upload_batch_file,
 )
 from utils.firebase_auth import CurrentUser, get_current_user
+from services.chat_attachment_service import AttachmentValidationError, validate_batch_document
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,6 @@ ALLOWED_CONTENT_TYPES = frozenset(
         "application/json",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        "application/msword",
         "text/csv",
     }
 )
@@ -47,12 +47,6 @@ async def upload_file_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch not found")
 
     content_type = file.content_type or "application/octet-stream"
-    if content_type not in ALLOWED_CONTENT_TYPES:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Unsupported file type: {content_type}. Allowed: PDF, TXT, MD, DOCX, JSON.",
-        )
-
     file_bytes = await file.read()
     size_mb = len(file_bytes) / (1024 * 1024)
     if size_mb > MAX_FILE_SIZE_MB:
@@ -61,9 +55,16 @@ async def upload_file_endpoint(
             detail=f"File too large ({size_mb:.1f} MB). Maximum is {MAX_FILE_SIZE_MB} MB.",
         )
 
+    try:
+        safe_name, content_type = validate_batch_document(
+            file.filename or "upload", content_type, file_bytes, MAX_FILE_SIZE_MB * 1024 * 1024,
+        )
+    except AttachmentValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
     record = upload_batch_file(
         file_bytes=file_bytes,
-        file_name=file.filename or "upload",
+        file_name=safe_name,
         file_title=file_title or file.filename or "",
         content_type=content_type,
         batch_id=batch_id,

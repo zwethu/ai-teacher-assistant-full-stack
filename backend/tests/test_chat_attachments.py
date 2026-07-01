@@ -5,7 +5,7 @@ import pytest
 from unittest.mock import MagicMock
 
 from services.agent_gateway import build_chat_attachment_context
-from services.chat_attachment_service import AttachmentValidationError, validate_attachment, _vision_context
+from services.chat_attachment_service import AttachmentValidationError, validate_attachment, validate_batch_document, _vision_context
 from services.document_extraction import ExtractionResult, ExtractedSegment, chunk_extraction, extract_document
 
 
@@ -35,6 +35,12 @@ def test_validation_rejects_signature_and_ooxml_type_mismatch() -> None:
             "application/vnd.openxmlformats-officedocument.presentationml.presentation",
             _ooxml("word/document.xml"),
         )
+
+
+def test_batch_validation_rejects_legacy_doc_and_accepts_json() -> None:
+    with pytest.raises(AttachmentValidationError):
+        validate_batch_document("legacy.doc", "application/msword", b"doc", 50 * 1024 * 1024)
+    assert validate_batch_document("data.json", "application/json", b'{"ok": true}', 50 * 1024 * 1024)[1] == "application/json"
 
 
 def test_agent_context_is_bounded_and_marks_images_chat_only() -> None:

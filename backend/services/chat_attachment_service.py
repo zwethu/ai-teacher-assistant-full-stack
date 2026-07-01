@@ -96,6 +96,8 @@ def _normalize_content_type(content_type: str, extension: str) -> str:
     content_type = content_type.lower().split(";", 1)[0].strip()
     if extension == ".csv" and content_type in {"application/csv", "text/plain"}:
         return "text/csv"
+    if extension == ".json" and content_type == "text/json":
+        return "application/json"
     if extension in {".md", ".markdown"} and content_type == "text/plain":
         return "text/markdown"
     if extension in {".heic", ".heif"} and content_type in {"image/heic", "image/heif"}:
@@ -129,6 +131,36 @@ def validate_attachment(file_name: str, content_type: str, data: bytes) -> tuple
             data[:65536].decode("utf-8-sig")
         except UnicodeDecodeError as exc:
             raise AttachmentValidationError("Text files must be UTF-8 encoded.") from exc
+    return clean_name, normalized
+
+
+def validate_batch_document(file_name: str, content_type: str, data: bytes, max_bytes: int) -> tuple[str, str]:
+    """Apply the same signature/OOXML policy to the batch-specific document set."""
+    clean_name = safe_file_name(file_name)
+    extension = PurePath(clean_name).suffix.lower()
+    raw_type = content_type.lower().split(";", 1)[0].strip()
+    normalized = _normalize_content_type(raw_type, extension)
+    allowed = DOCUMENT_CONTENT_TYPES | {"application/json"}
+    expected = EXTENSION_CONTENT_TYPES.get(extension)
+    if not expected or normalized not in allowed or raw_type not in expected:
+        raise AttachmentValidationError("File extension and content type do not match or are unsupported.")
+    if not data:
+        raise AttachmentValidationError("The uploaded file is empty.")
+    if len(data) > max_bytes:
+        raise AttachmentValidationError(f"File exceeds the {max_bytes // (1024 * 1024)} MB limit.")
+    if normalized == "application/pdf" and not data.startswith(b"%PDF-"):
+        raise AttachmentValidationError("Invalid PDF signature.")
+    if normalized.startswith("application/vnd.openxmlformats"):
+        _validate_ooxml(data, normalized)
+    elif normalized in {"text/plain", "text/markdown", "text/csv", "application/json"}:
+        if b"\x00" in data[:8192]:
+            raise AttachmentValidationError("Text files cannot contain binary data.")
+        try:
+            decoded = data.decode("utf-8-sig")
+            if normalized == "application/json":
+                json.loads(decoded)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise AttachmentValidationError("Text and JSON files must be valid UTF-8 content.") from exc
     return clean_name, normalized
 
 

@@ -26,6 +26,8 @@ export type ChatAttachment = ChatAttachmentSnapshot & {
   extracted_text_preview: string
   vision_summary: string
   ocr_text: string
+  vision_error?: string
+  vision_source?: 'bytes' | 'gcs_uri' | 'none'
   expires_at: string | null
   promoted_file_id: null
   created_at: string | null

@@ -51,6 +51,14 @@ type Props = {
 
 type ChatWithPreview = Chat & { preview: string }
 
+export function batchFileStatusLabel(file: BatchFile): string {
+  if (file.overlay_status === 'ready' && file.index_status === 'failed') return 'Ready for immediate use · Durable indexing failed'
+  if (file.overlay_status === 'failed' && ['pending', 'indexing'].includes(file.index_status)) return 'Immediate preview failed · Durable indexing running'
+  if (file.overlay_status === 'retiring') return 'Indexed · Immediate overlay retained temporarily'
+  if (file.overlay_status === 'ready') return 'Ready for immediate use · Indexing for durable search'
+  return file.index_status === 'indexed' ? 'Indexed' : ''
+}
+
 export function MaterialsTab({
   batchId,
   files,
@@ -414,7 +422,10 @@ export function MaterialsTab({
                           </div>
                           <div className="mt-1">
                             <IndexStatusBadge status={f.index_status} />
-                            {['uploading', 'indexing', 'deleting'].includes(f.index_status) && (
+                            <p className="mt-1 text-xs font-medium text-slate-600">
+                              {batchFileStatusLabel(f)}
+                            </p>
+                            {['uploading', 'pending', 'indexing', 'deleting'].includes(f.index_status) && (
                               <p className="text-xs text-slate-500 mt-1 animate-pulse">
                                 {f.index_message || 'Indexing in progress...'}
                               </p>
@@ -424,6 +435,7 @@ export function MaterialsTab({
                                 {f.index_error}
                               </p>
                             )}
+                            {f.overlay_warning && <p className="mt-1 break-words text-xs text-amber-700">{f.overlay_warning}</p>}
                           </div>
                           {f.created_at && (
                             <span className="flex items-center gap-1 text-xs text-slate-400 mt-1">

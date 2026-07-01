@@ -25,7 +25,9 @@ ALLOWED_CONTENT_TYPES = frozenset(
         "text/markdown",
         "application/json",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         "application/msword",
+        "text/csv",
     }
 )
 MAX_FILE_SIZE_MB = 50

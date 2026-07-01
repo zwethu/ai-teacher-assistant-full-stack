@@ -35,7 +35,9 @@ from utils.gcs import (
     safe_file_name,
     signed_read_url,
     upload_bytes,
+    delete_blob,
 )
+from services.document_extraction import extract_document
 
 logger = logging.getLogger(__name__)
 ATTACHMENTS_SUBCOLLECTION = "attachments"
@@ -79,6 +81,8 @@ def attachment_to_model(doc_id: str, data: dict[str, Any]) -> ChatAttachment:
         extracted_text_preview=str(data.get("extracted_text_preview") or ""),
         vision_summary=str(data.get("vision_summary") or ""),
         ocr_text=str(data.get("ocr_text") or ""),
+        vision_error=str(data.get("vision_error") or ""),
+        vision_source=str(data.get("vision_source") or "none"),  # type: ignore[arg-type]
         expires_at=_iso(data.get("expires_at")),
         promoted_file_id=None,
         promotion_allowed=False,
@@ -231,28 +235,33 @@ def _thumbnail_bytes(data: bytes) -> bytes:
         return output.getvalue()
 
 
-def _vision_context(gcs_path: str, content_type: str) -> tuple[str, str, str]:
+def _vision_context(data: bytes, gcs_path: str, content_type: str) -> tuple[str, str, str, str, str]:
     model = (os.getenv("ATTACHMENT_VISION_MODEL") or "").strip()
     project = (os.getenv("GOOGLE_CLOUD_PROJECT") or "").strip()
     if not model or not project:
-        return "skipped", "", ""
-    try:
-        from google import genai
-        from google.genai import types
-        client = genai.Client(vertexai=True, project=project, location=os.getenv("GOOGLE_CLOUD_LOCATION") or "global")
-        response = client.models.generate_content(
-            model=model,
-            contents=[
-                types.Part.from_uri(file_uri=gcs_path, mime_type=content_type),
-                "Return strict JSON with string fields vision_summary and ocr_text. Describe the image accurately and transcribe visible text. Do not add other fields.",
-            ],
-            config=types.GenerateContentConfig(response_mime_type="application/json"),
-        )
-        parsed = json.loads(response.text or "{}")
-        return "ready", str(parsed.get("vision_summary") or "")[:6000], str(parsed.get("ocr_text") or "")[:6000]
-    except Exception as exc:
-        logger.warning("Attachment vision processing failed: %s", exc)
-        return "failed", "", ""
+        return "skipped", "", "", "Vision processing is not configured.", "none"
+    errors: list[str] = []
+    for source in ("bytes", "gcs_uri"):
+        try:
+            from google import genai
+            from google.genai import types
+            client = genai.Client(vertexai=True, project=project, location=os.getenv("GOOGLE_CLOUD_LOCATION") or "global")
+            media = (
+                types.Part.from_bytes(data=data, mime_type=content_type)
+                if source == "bytes"
+                else types.Part.from_uri(file_uri=gcs_path, mime_type=content_type)
+            )
+            response = client.models.generate_content(
+                model=model,
+                contents=[media, "Return strict JSON with string fields vision_summary and ocr_text. Describe the image accurately and transcribe visible text. Do not add other fields."],
+                config=types.GenerateContentConfig(response_mime_type="application/json"),
+            )
+            parsed = json.loads(response.text or "{}")
+            return "ready", str(parsed.get("vision_summary") or "")[:6000], str(parsed.get("ocr_text") or "")[:6000], "", source
+        except Exception as exc:
+            logger.warning("Attachment vision failed source=%s: %s", source, exc)
+            errors.append(f"{source}: {type(exc).__name__}")
+    return "failed", "", "", "; ".join(errors)[:300], "none"
 
 
 def _chat_storage_bytes(batch_id: str, chat_id: str) -> int:
@@ -276,9 +285,11 @@ def create_chat_attachment(
     extracted_preview = ""
     vision_summary = ""
     ocr_text = ""
+    vision_error = ""
+    vision_source = "none"
     if kind == "document":
         try:
-            extracted_preview = _extract_document(data, normalized_type).strip()[:MAX_EXTRACTED_PREVIEW_CHARS]
+            extracted_preview = extract_document(data, normalized_type, MAX_EXTRACTED_PREVIEW_CHARS).text.strip()
             parse_status = "ready"
         except Exception as exc:
             logger.warning("Attachment extraction failed for %s: %s", clean_name, exc)
@@ -289,7 +300,7 @@ def create_chat_attachment(
             thumbnail_gcs_path = upload_bytes(thumb_path, _thumbnail_bytes(data), "image/jpeg")
         except Exception as exc:
             logger.warning("Thumbnail generation failed for %s: %s", clean_name, exc)
-        vision_status, vision_summary, ocr_text = _vision_context(gcs_path, normalized_type)
+        vision_status, vision_summary, ocr_text, vision_error, vision_source = _vision_context(data, gcs_path, normalized_type)
 
     expires_at = datetime.now(timezone.utc) + timedelta(days=ATTACHMENT_RETENTION_DAYS)
     payload = {
@@ -301,6 +312,7 @@ def create_chat_attachment(
         "parse_status": parse_status, "vision_status": vision_status,
         "extracted_text_path": None, "extracted_text_preview": extracted_preview,
         "vision_summary": vision_summary, "ocr_text": ocr_text, "expires_at": expires_at,
+        "vision_error": vision_error, "vision_source": vision_source,
         "promoted_file_id": None, "created_at": SERVER_TIMESTAMP, "updated_at": SERVER_TIMESTAMP,
     }
     ref = attachment_ref(batch_id, chat_id, attachment_id)
@@ -325,3 +337,47 @@ def get_attachment_url(batch_id: str, chat_id: str, attachment_id: str, lecturer
         return None
     path = attachment.thumbnail_gcs_path if thumbnail else attachment.gcs_path
     return signed_read_url(path) if path else None
+
+
+def delete_attachment_record(batch_id: str, chat_id: str, attachment_id: str, lecturer_id: str | None = None, require_unsent: bool = False) -> str:
+    """Delete GCS objects then the Firestore record; return deleted/not_found/sent/storage_failed."""
+    ref = attachment_ref(batch_id, chat_id, attachment_id)
+    snap = ref.get()
+    if not snap.exists:
+        return "not_found"
+    data = snap.to_dict() or {}
+    if lecturer_id and data.get("lecturer_id") != lecturer_id:
+        return "not_found"
+    if require_unsent and data.get("message_id"):
+        return "sent"
+    paths = [data.get("gcs_path"), data.get("thumbnail_gcs_path"), data.get("extracted_text_path")]
+    if not all(delete_blob(str(path)) for path in paths if path):
+        return "storage_failed"
+    ref.delete()
+    return "deleted"
+
+
+def delete_all_chat_attachments(batch_id: str, chat_id: str) -> None:
+    for doc in _chat_ref(batch_id, chat_id).collection(ATTACHMENTS_SUBCOLLECTION).stream():
+        delete_attachment_record(batch_id, chat_id, doc.id)
+
+
+def cleanup_expired_attachments(limit: int = 100) -> int:
+    db = get_firestore()
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=ATTACHMENT_RETENTION_DAYS)
+    docs = db.collection_group(ATTACHMENTS_SUBCOLLECTION).where("expires_at", "<=", now).limit(limit).stream()
+    cleaned = 0
+    for doc in docs:
+        data = doc.to_dict() or {}
+        if data.get("scope") != "chat":
+            continue
+        chat_snap = doc.reference.parent.parent.get()
+        chat_data = chat_snap.to_dict() or {}
+        updated = chat_data.get("updated_at")
+        if updated and updated > cutoff:
+            doc.reference.update({"expires_at": updated + timedelta(days=ATTACHMENT_RETENTION_DAYS), "updated_at": SERVER_TIMESTAMP})
+            continue
+        if delete_attachment_record(str(data.get("batch_id") or ""), str(data.get("chat_id") or ""), doc.id) in {"deleted", "not_found"}:
+            cleaned += 1
+    return cleaned

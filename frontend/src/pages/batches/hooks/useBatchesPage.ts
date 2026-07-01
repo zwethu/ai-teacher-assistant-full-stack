@@ -173,9 +173,9 @@ export function useBatchesPage() {
   const syncStuckFiles = useCallback(async () => {
     if (!selectedBatch) return
     const now = Date.now()
-    const transitional: IndexStatus[] = ['uploading', 'indexing', 'deleting']
+    const transitional: IndexStatus[] = ['uploading', 'pending', 'indexing', 'deleting']
     const stuck = files.filter((file) => {
-      if (!transitional.includes(file.index_status)) return false
+      if (!transitional.includes(file.index_status) && file.overlay_status !== 'retiring') return false
       const timestamp = file.updated_at || file.created_at
       if (!timestamp) return true
       return now - new Date(timestamp).getTime() > 60_000
@@ -223,8 +223,8 @@ export function useBatchesPage() {
 
   useEffect(() => {
     if (pollingRef.current) clearInterval(pollingRef.current)
-    const transitional: IndexStatus[] = ['uploading', 'indexing', 'deleting']
-    const needsPolling = files.some((f) => transitional.includes(f.index_status))
+    const transitional: IndexStatus[] = ['uploading', 'pending', 'indexing', 'deleting']
+    const needsPolling = files.some((f) => transitional.includes(f.index_status) || f.overlay_status === 'retiring')
     if (!needsPolling || !selectedBatch) return
     pollingRef.current = setInterval(() => {
       void refreshFiles({ silent: true })

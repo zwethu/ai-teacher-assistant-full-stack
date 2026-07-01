@@ -163,9 +163,9 @@ export function ChatInput({
                 )}
                 <div className="min-w-0">
                   <p className="truncate text-xs font-medium text-slate-700">{attachment.file_name}</p>
-                  <p className="text-[11px] text-slate-400">
+                  <p className="text-[11px] text-slate-400" title={attachment.attachment_kind === 'image' && attachment.vision_status !== 'ready' ? 'Image analysis is unavailable; the assistant will not guess its contents.' : undefined}>
                     {(attachment.size_bytes / 1024 / 1024).toFixed(1)} MB
-                    {attachment.attachment_kind === 'image' ? ' · chat-only' : ` · ${attachment.parse_status}`}
+                    {attachment.attachment_kind === 'image' ? ` · chat-only · vision ${attachment.vision_status}` : ` · ${attachment.parse_status}`}
                   </p>
                 </div>
                 <button type="button" onClick={() => onRemoveAttachment(attachment.attachment_id)} className="rounded p-1 text-slate-400 hover:bg-slate-100" aria-label={`Remove ${attachment.file_name}`}>

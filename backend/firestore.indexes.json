@@ -1,0 +1,8 @@
+{
+  "indexes": [],
+  "fieldOverrides": [
+    {"collectionGroup": "attachments", "fieldPath": "expires_at", "indexes": [{"order": "ASCENDING", "queryScope": "COLLECTION_GROUP"}]},
+    {"collectionGroup": "files", "fieldPath": "index_status", "indexes": [{"order": "ASCENDING", "queryScope": "COLLECTION_GROUP"}]},
+    {"collectionGroup": "files", "fieldPath": "overlay_status", "indexes": [{"order": "ASCENDING", "queryScope": "COLLECTION_GROUP"}]}
+  ]
+}

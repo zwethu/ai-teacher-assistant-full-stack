@@ -43,7 +43,7 @@ from routers.chats import router as chats_router
 from routers.course_blueprint import router as course_blueprint_router
 from routers.email import router as email_router
 from routers.files import router as files_router
-from services.email_scheduler import shutdown_scheduler, start_scheduler
+from services.maintenance_scheduler import shutdown_scheduler, start_scheduler
 
 _frontend_url = (os.getenv("FRONTEND_URL") or "http://localhost:5173").rstrip("/")
 _cors_origins = list(

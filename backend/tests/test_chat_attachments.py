@@ -2,9 +2,11 @@ import io
 import zipfile
 
 import pytest
+from unittest.mock import MagicMock
 
 from services.agent_gateway import build_chat_attachment_context
-from services.chat_attachment_service import AttachmentValidationError, validate_attachment
+from services.chat_attachment_service import AttachmentValidationError, validate_attachment, _vision_context
+from services.document_extraction import ExtractionResult, ExtractedSegment, chunk_extraction, extract_document
 
 
 def _ooxml(required: str) -> bytes:
@@ -48,3 +50,39 @@ def test_agent_context_is_bounded_and_marks_images_chat_only() -> None:
     assert "cannot be promoted" in context
     assert result["current_chat_attachments_manifest"][0]["chat_only"] is True
 
+
+def test_failed_image_context_explicitly_prevents_guessing() -> None:
+    result = build_chat_attachment_context([{
+        "attachment_id": "a2", "file_name": "unknown.png", "attachment_kind": "image",
+        "content_type": "image/png", "vision_status": "failed",
+    }])
+    assert "Do not infer image content" in result["current_chat_attachment_context"]
+
+
+def test_shared_extraction_and_chunking_are_bounded() -> None:
+    extracted = extract_document(("paragraph " * 50_000).encode(), "text/plain", 300_000)
+    chunks, truncated = chunk_extraction(extracted, max_chunks=3)
+    assert len(chunks) == 3
+    assert all(len(chunk.text) <= 5000 for chunk in chunks)
+    assert truncated is True
+
+
+def test_vision_uses_bytes_first(monkeypatch) -> None:
+    monkeypatch.setenv("ATTACHMENT_VISION_MODEL", "gemini-test")
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "project")
+    response = MagicMock(text='{"vision_summary":"board","ocr_text":"week 1"}')
+    client = MagicMock(); client.models.generate_content.return_value = response
+    monkeypatch.setattr("google.genai.Client", lambda **kwargs: client)
+    result = _vision_context(b"image", "gs://bucket/image.png", "image/png")
+    assert result[:3] == ("ready", "board", "week 1")
+    assert result[4] == "bytes"
+
+
+def test_vision_falls_back_to_gcs(monkeypatch) -> None:
+    monkeypatch.setenv("ATTACHMENT_VISION_MODEL", "gemini-test")
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "project")
+    response = MagicMock(text='{"vision_summary":"fallback","ocr_text":""}')
+    client = MagicMock(); client.models.generate_content.side_effect = [RuntimeError("bytes failed"), response]
+    monkeypatch.setattr("google.genai.Client", lambda **kwargs: client)
+    result = _vision_context(b"image", "gs://bucket/image.png", "image/png")
+    assert result[0] == "ready" and result[1] == "fallback" and result[4] == "gcs_uri"

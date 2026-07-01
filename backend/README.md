@@ -20,6 +20,10 @@ Vertex Gemini model name to enable summary/OCR processing. Native multimodal
 Agent Engine input is intentionally disabled for this release; keep
 `ENABLE_NATIVE_MULTIMODAL_ATTACHMENTS=false`.
 
+Pending course overlays retain chunks for `OVERLAY_RETIRE_GRACE_HOURS` (default
+24, clamped to 1–168). Deploy `firestore.indexes.json` before enabling the
+maintenance scheduler's collection-group cleanup and file recovery queries.
+
 ## Layout
 
 ```

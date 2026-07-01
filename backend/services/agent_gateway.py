@@ -288,6 +288,8 @@ def build_chat_attachment_context(records: list[dict[str, Any]] | None) -> dict[
                 lines.append(f"Vision summary: {item['vision_summary']}")
             if item.get("ocr_text"):
                 lines.append(f"OCR text: {item['ocr_text']}")
+            if str(item.get("vision_status") or "") != "ready":
+                lines.append("Image visual content is unavailable. Do not infer image content from course materials or prior context.")
         elif item.get("extracted_text_preview"):
             lines.append(f"Extracted preview: {item['extracted_text_preview']}")
         block = "\n".join(lines)

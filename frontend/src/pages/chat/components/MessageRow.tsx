@@ -240,8 +240,8 @@ function MessageAttachments({
           )}
           <span className="min-w-0">
             <span className="block truncate text-xs font-medium text-slate-700">{attachment.file_title || attachment.file_name}</span>
-            <span className="block text-[11px] text-slate-400">
-              {attachment.attachment_kind === 'image' ? 'Image · chat-only' : `Document · ${attachment.parse_status}`}
+            <span className="block text-[11px] text-slate-400" title={attachment.attachment_kind === 'image' && attachment.vision_status !== 'ready' ? 'Image analysis was unavailable; the assistant was instructed not to guess its contents.' : undefined}>
+              {attachment.attachment_kind === 'image' ? `Image · chat-only · vision ${attachment.vision_status}` : `Document · ${attachment.parse_status}`}
             </span>
           </span>
         </button>

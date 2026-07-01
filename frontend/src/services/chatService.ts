@@ -109,6 +109,10 @@ export async function getChatAttachmentContent(
   return res.data as Blob
 }
 
+export async function deleteChatAttachment(batchId: string, chatId: string, attachmentId: string): Promise<void> {
+  await api.delete(`/batches/${batchId}/chats/${chatId}/attachments/${attachmentId}`)
+}
+
 export async function generateDocsFromPendingArtifact(
   batchId: string,
   chatId: string,

@@ -70,25 +70,33 @@ def upload_bytes(
     logger.info("Uploaded %s bytes to gs://%s/%s", len(data), bucket_name, blob_path)
     return f"gs://{bucket_name}/{blob_path}"
 
+def download_bytes(gcs_path: str) -> bytes:
+    if not gcs_path.startswith("gs://"): raise ValueError("Invalid GCS path")
+    bucket_name, _, blob_path = gcs_path[5:].partition("/")
+    return _get_client().bucket(bucket_name).blob(blob_path).download_as_bytes()
 
-def delete_blob(gcs_path: str) -> None:
+
+def delete_blob(gcs_path: str) -> bool:
     """Delete a GCS object by gs:// URI. Silently ignores 404."""
     if not gcs_path.startswith("gs://"):
-        return
+        return True
     without_prefix = gcs_path[5:]
     bucket_name, _, blob_path = without_prefix.partition("/")
     if not blob_path:
-        return
+        return True
     try:
         from google.api_core import exceptions as google_exceptions  # type: ignore[import-untyped]
         client = _get_client()
         client.bucket(bucket_name).blob(blob_path).delete()
         logger.info("Deleted gs://%s/%s", bucket_name, blob_path)
+        return True
     except Exception as exc:
         if "404" in str(exc) or "Not Found" in str(exc):
             logger.debug("GCS object already gone: gs://%s/%s", bucket_name, blob_path)
+            return True
         else:
             logger.warning("Failed to delete GCS object %s: %s", gcs_path, exc)
+            return False
 
 
 def signed_read_url(gcs_path: str, expires_minutes: int = 10) -> str:

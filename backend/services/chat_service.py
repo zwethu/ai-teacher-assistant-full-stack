@@ -164,6 +164,8 @@ def delete_chat(batch_id: str, chat_id: str, lecturer_id: str) -> bool:
         return False
     if data.get("hidden"):
         return False
+    from services.chat_attachment_service import delete_all_chat_attachments
+    delete_all_chat_attachments(batch_id, chat_id)
     run_ids: list[str] = []
     for run in _runs_col(batch_id, chat_id).stream():
         run_ids.append(run.id)
@@ -184,6 +186,8 @@ def delete_all_batch_chats(batch_id: str) -> None:
     """Delete all chats and their messages for a batch (used during batch deletion)."""
     col = _chats_col(batch_id)
     for chat_doc in col.stream():
+        from services.chat_attachment_service import delete_all_chat_attachments
+        delete_all_chat_attachments(batch_id, chat_doc.id)
         run_ids: list[str] = []
         for run in _runs_col(batch_id, chat_doc.id).stream():
             run_ids.append(run.id)
@@ -344,7 +348,9 @@ def add_user_message_with_attachments(
         }
         txn.set(msg_ref, doc)
         for ref in refs:
-            txn.update(ref, {"message_id": msg_id, "updated_at": SERVER_TIMESTAMP})
+            from services.attachment_constants import ATTACHMENT_RETENTION_DAYS
+            from datetime import datetime, timedelta, timezone
+            txn.update(ref, {"message_id": msg_id, "expires_at": datetime.now(timezone.utc) + timedelta(days=ATTACHMENT_RETENTION_DAYS), "updated_at": SERVER_TIMESTAMP})
         txn.update(chat_ref, {"updated_at": SERVER_TIMESTAMP})
         return snapshots, records
 

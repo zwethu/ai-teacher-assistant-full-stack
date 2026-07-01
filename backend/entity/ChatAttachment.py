@@ -23,6 +23,8 @@ class ChatAttachment(BaseModel):
     extracted_text_preview: str = ""
     vision_summary: str = ""
     ocr_text: str = ""
+    vision_error: str = ""
+    vision_source: Literal["bytes", "gcs_uri", "none"] = "none"
     expires_at: str | None = None
     promoted_file_id: str | None = None
     promotion_allowed: bool = False

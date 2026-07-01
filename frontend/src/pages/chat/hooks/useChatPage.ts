@@ -24,6 +24,7 @@ import {
   listMessages,
   sendMessage,
   uploadChatAttachment,
+  deleteChatAttachment,
   updateChatTitle,
   type ChatRunRecord,
 } from '../../../services/chatService'
@@ -672,12 +673,17 @@ export function useChatPage() {
     void uploadAttachmentFiles(imageFiles)
   }
 
-  function removePendingAttachment(attachmentId: string) {
-    setPendingAttachments((prev) => {
-      const removed = prev.find((item) => item.attachment_id === attachmentId)
-      if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl)
-      return prev.filter((item) => item.attachment_id !== attachmentId)
-    })
+  async function removePendingAttachment(attachmentId: string) {
+    const removed = pendingAttachments.find((item) => item.attachment_id === attachmentId)
+    if (!removed) return
+    try {
+      await deleteChatAttachment(removed.batch_id, removed.chat_id, attachmentId)
+      if (removed.previewUrl) URL.revokeObjectURL(removed.previewUrl)
+      setPendingAttachments((prev) => prev.filter((item) => item.attachment_id !== attachmentId))
+    } catch (err) {
+      const detail = axios.isAxiosError(err) ? err.response?.data?.detail : ''
+      setAttachmentErrors([`${removed.file_name}: ${typeof detail === 'string' ? detail : 'Could not remove attachment; please retry.'}`])
+    }
   }
 
   async function handleApproveOutline(message: ChatMessage) {

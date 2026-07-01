@@ -38,6 +38,7 @@ from services.chat_attachment_service import (
     create_chat_attachment,
     get_attachment_url,
     get_chat_attachment,
+    delete_attachment_record,
 )
 from services.google_workspace.credentials import (
     GoogleOAuthInvalidError,
@@ -184,6 +185,19 @@ async def get_chat_attachment_content_endpoint(
     if not url:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment content not found")
     return RedirectResponse(url=url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+
+@router.delete("/{chat_id}/attachments/{attachment_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_chat_attachment_endpoint(
+    batch_id: str, chat_id: str, attachment_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> None:
+    result = delete_attachment_record(batch_id, chat_id, attachment_id, current_user["uid"], require_unsent=True)
+    if result == "sent":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Sent attachments cannot be removed.")
+    if result == "storage_failed":
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Attachment storage cleanup failed; please retry.")
+    if result == "not_found":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
 
 @router.get("/{chat_id}/messages", response_model=list[dict])
 async def list_messages_endpoint(

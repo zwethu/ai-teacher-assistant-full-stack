@@ -8,6 +8,10 @@ export function IndexStatusBadge({ status }: { status: IndexStatus }) {
       icon: <Loader2 className="w-3 h-3 animate-spin" />,
       cls: 'bg-sky-50 text-sky-700 border-sky-100',
     },
+    pending: {
+      label: 'Pending', icon: <Loader2 className="w-3 h-3 animate-spin" />,
+      cls: 'bg-sky-50 text-sky-700 border-sky-100',
+    },
     indexing: {
       label: 'Indexing',
       icon: <Loader2 className="w-3 h-3 animate-spin" />,

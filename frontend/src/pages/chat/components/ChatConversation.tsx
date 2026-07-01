@@ -1,11 +1,13 @@
-import { useRef, useState, type RefObject } from 'react'
+import { useEffect, useRef, useState, type RefObject } from 'react'
 import type { ChangeEvent, ClipboardEvent, KeyboardEvent } from 'react'
 import type { ChatMessage } from '../../../entity/Chat'
-import { BookOpen, FileQuestion, FileText, FlaskConical, Image as ImageIcon, Loader2, Paperclip, Send, Sparkles, X } from 'lucide-react'
+import { BookOpen, FileQuestion, FileText, FlaskConical, History, Image as ImageIcon, Loader2, Paperclip, Send, Sparkles, X } from 'lucide-react'
 import { MessageRow, ThinkingIndicator } from './MessageRow'
 import { ConnectorToggles, type ConnectorsState } from './ConnectorToggles'
 import type { RunUiState } from '../runTypes'
 import type { PendingChatAttachment } from '../hooks/useChatPage'
+import type { ChatAttachmentListItem, ChatAttachmentSnapshot } from '../../../entity/Chat'
+import { getChatAttachmentContent, listChatAttachments } from '../../../services/chatService'
 
 export type GenerateMode = 'lesson_plan' | 'lab' | 'assessment'
 
@@ -30,6 +32,8 @@ type Props = {
   onAttachmentFiles: (e: ChangeEvent<HTMLInputElement>) => void
   onRemoveAttachment: (attachmentId: string) => void
   onPaste: (e: ClipboardEvent<HTMLTextAreaElement>) => void
+  batchId?: string
+  chatId?: string
 }
 
 export function ChatInput({
@@ -53,6 +57,8 @@ export function ChatInput({
   onAttachmentFiles,
   onRemoveAttachment,
   onPaste,
+  batchId,
+  chatId,
 }: Props) {
   const [menuOpen, setMenuOpen] = useState(false)
   const attachmentInputRef = useRef<HTMLInputElement>(null)
@@ -176,6 +182,11 @@ export function ChatInput({
           </div>
         )}
         {attachmentErrors.map((error) => <p key={error} className="mb-1 text-xs text-red-600">{error}</p>)}
+        {batchId && chatId && <PreviousAttachments batchId={batchId} chatId={chatId} onReference={(attachment) => {
+          const mention = `Please use the earlier attachment ${attachment.file_name}. Attachment ID: ${attachment.attachment_id}`
+          onInputChange(input.trim() ? `${input.trim()}\n${mention}` : mention)
+          requestAnimationFrame(() => textareaRef.current?.focus())
+        }} />}
         <div className="flex items-end gap-2 p-2 rounded-[28px] bg-white/55 border border-white/60 shadow-[0_8px_32px_rgba(15,23,42,0.08)]">
           <input
             ref={attachmentInputRef}
@@ -225,6 +236,56 @@ export function ChatInput({
   )
 }
 
+function PreviousAttachments({ batchId, chatId, onReference }: { batchId: string; chatId: string; onReference: (attachment: ChatAttachmentListItem) => void }) {
+  const [open, setOpen] = useState(false)
+  const [items, setItems] = useState<ChatAttachmentListItem[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [thumbnails, setThumbnails] = useState<Record<string, string>>({})
+  const thumbnailUrlsRef = useRef<string[]>([])
+
+  useEffect(() => () => thumbnailUrlsRef.current.forEach((url) => URL.revokeObjectURL(url)), [])
+
+  async function toggle() {
+    const next = !open; setOpen(next)
+    if (!next || items.length) return
+    setLoading(true); setError('')
+    try {
+      const data = await listChatAttachments(batchId, chatId)
+      setItems(data)
+      for (const item of data.filter((value) => value.attachment_kind === 'image' && value.thumbnail_available).slice(0, 20)) {
+        try {
+          const blob = await getChatAttachmentContent(batchId, chatId, item.attachment_id, true)
+          const url = URL.createObjectURL(blob); thumbnailUrlsRef.current.push(url)
+          setThumbnails((prev) => ({ ...prev, [item.attachment_id]: url }))
+        } catch { /* metadata remains usable */ }
+      }
+    } catch { setError('Previous attachments are unavailable.') }
+    finally { setLoading(false) }
+  }
+
+  return <div className="relative mb-2">
+    <button type="button" onClick={() => void toggle()} className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white/80 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-white">
+      <History className="h-3.5 w-3.5" /> Previous attachments
+    </button>
+    {open && <div className="absolute bottom-full left-0 z-40 mb-2 max-h-72 w-80 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
+      {loading ? <p className="p-3 text-xs text-slate-500">Loading attachments…</p> : error ? <p className="p-3 text-xs text-red-600">{error}</p> : items.length === 0 ? <p className="p-3 text-xs text-slate-500">No retained attachments in this chat.</p> : items.map((item) => <div key={item.attachment_id} className="flex items-center gap-2 rounded-lg p-2 hover:bg-slate-50">
+        {thumbnails[item.attachment_id] ? <img src={thumbnails[item.attachment_id]} alt="" className="h-9 w-9 rounded object-cover" /> : item.attachment_kind === 'image' ? <ImageIcon className="h-5 w-5 text-sky-600" /> : <FileText className="h-5 w-5 text-emerald-600" />}
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-xs font-medium text-slate-700">{item.file_title || item.file_name}</p>
+          <p className="text-[11px] text-slate-400">
+            {item.attachment_kind === 'image' ? `vision ${item.vision_status}` : item.parse_status}
+            {' · '}{(item.size_bytes / 1024 / 1024).toFixed(1)} MB
+            {' · '}{item.created_at ? new Date(item.created_at).toLocaleDateString() : 'date unavailable'}
+          </p>
+          {item.expires_at && <p className="text-[10px] text-slate-400">Available until {new Date(item.expires_at).toLocaleDateString()}</p>}
+        </div>
+        <button type="button" onClick={() => { onReference(item); setOpen(false) }} className="rounded-md bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-700">Reference</button>
+      </div>)}
+    </div>}
+  </div>
+}
+
 type MessagesPanelProps = {
   batchId?: string
   courseName?: string
@@ -236,6 +297,7 @@ type MessagesPanelProps = {
   messagesEndRef: RefObject<HTMLDivElement | null>
   welcomeContent: React.ReactNode
   onApproveOutline: (message: ChatMessage) => void
+  onAskAboutAttachment: (attachment: ChatAttachmentSnapshot) => void
 }
 
 export function ChatMessagesPanel({
@@ -249,6 +311,7 @@ export function ChatMessagesPanel({
   messagesEndRef,
   welcomeContent,
   onApproveOutline,
+  onAskAboutAttachment,
 }: MessagesPanelProps) {
   const safeMessages = messages.filter(Boolean)
   const completedOutlineRunIds = new Set(
@@ -300,6 +363,7 @@ export function ChatMessagesPanel({
                 approvalCompleted={Boolean(msg.run_id && completedOutlineRunIds.has(msg.run_id))}
                 approvalSuperseded={Boolean(msg.run_id && supersededOutlineRunIds.has(msg.run_id))}
                 courseName={courseName || ''}
+                onAskAboutAttachment={onAskAboutAttachment}
               />
             ))}
             {sending && !safeMessages.some((msg) => msg.pending) && <ThinkingIndicator />}

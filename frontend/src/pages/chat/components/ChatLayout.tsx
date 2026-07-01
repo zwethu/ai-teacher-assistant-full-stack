@@ -36,6 +36,7 @@ type Props = Pick<
   | 'handleAttachmentFiles'
   | 'removePendingAttachment'
   | 'handleComposerPaste'
+  | 'handleAskAboutAttachment'
 >
 
 export function ChatLayout(props: Props) {
@@ -70,6 +71,7 @@ export function ChatLayout(props: Props) {
     handleAttachmentFiles,
     removePendingAttachment,
     handleComposerPaste,
+    handleAskAboutAttachment,
   } = props
 
   const isRouteInvalid = routeHydration === 'invalid'
@@ -117,7 +119,7 @@ export function ChatLayout(props: Props) {
           </main>
         ) : (
           <ChatMessagesPanel
-            batchId={selectedBatch.id}
+            batchId={selectedBatch?.id}
             courseName={selectedBatch.course_name}
             messages={messages}
             messagesLoading={messagesLoading}
@@ -125,6 +127,7 @@ export function ChatLayout(props: Props) {
             showWelcome={showWelcome}
             sending={sending}
             onApproveOutline={handleApproveOutline}
+            onAskAboutAttachment={handleAskAboutAttachment}
             messagesEndRef={messagesEndRef}
             welcomeContent={
               <ChatWelcomeScreen
@@ -164,6 +167,8 @@ export function ChatLayout(props: Props) {
             onAttachmentFiles={handleAttachmentFiles}
             onRemoveAttachment={removePendingAttachment}
             onPaste={handleComposerPaste}
+            batchId={selectedBatch?.id}
+            chatId={activeChat?.chat_id}
           />
         </div>
       </div>

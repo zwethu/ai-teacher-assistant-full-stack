@@ -9,6 +9,7 @@ import logging
 import os
 import uuid
 import zipfile
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import PurePath
 from typing import Any
@@ -361,6 +362,84 @@ def get_chat_attachment(batch_id: str, chat_id: str, attachment_id: str, lecture
     if data.get("lecturer_id") != lecturer_id or data.get("batch_id") != batch_id or data.get("chat_id") != chat_id:
         return None
     return attachment_to_model(snap.id, data)
+
+
+def _is_expired(data: dict[str, Any]) -> bool:
+    expires = data.get("expires_at")
+    if isinstance(expires, str):
+        try: expires = datetime.fromisoformat(expires.replace("Z", "+00:00"))
+        except ValueError: return True
+    return bool(expires and expires <= datetime.now(timezone.utc))
+
+
+def _agent_safe_attachment(doc_id: str, data: dict[str, Any], include_context: bool = True) -> dict[str, Any]:
+    result = {
+        "attachment_id": doc_id, "message_id": str(data.get("message_id") or ""),
+        "file_name": str(data.get("file_name") or ""),
+        "file_title": str(data.get("file_title") or data.get("file_name") or ""),
+        "content_type": str(data.get("content_type") or ""),
+        "size_bytes": int(data.get("size_bytes") or 0),
+        "attachment_kind": str(data.get("attachment_kind") or "other"),
+        "parse_status": str(data.get("parse_status") or "skipped"),
+        "vision_status": str(data.get("vision_status") or "skipped"),
+        "vision_source": str(data.get("vision_source") or "none"),
+        "thumbnail_available": bool(data.get("thumbnail_gcs_path")),
+        "created_at": _iso(data.get("created_at")), "expires_at": _iso(data.get("expires_at")),
+    }
+    if include_context:
+        result.update({
+            "extracted_text_preview": str(data.get("extracted_text_preview") or "")[:MAX_EXTRACTED_PREVIEW_CHARS],
+            "vision_summary": str(data.get("vision_summary") or "")[:6000],
+            "ocr_text": str(data.get("ocr_text") or "")[:6000],
+        })
+    return result
+
+
+def _owned_visible_chat(batch_id: str, chat_id: str, lecturer_id: str) -> bool:
+    snap = _chat_ref(batch_id, chat_id).get(); data = snap.to_dict() or {}
+    return bool(snap.exists and data.get("lecturer_id") == lecturer_id and not data.get("hidden", False))
+
+
+def list_chat_attachments_for_agent(batch_id: str, chat_id: str, lecturer_id: str, limit: int = 50) -> list[dict[str, Any]]:
+    if not _owned_visible_chat(batch_id, chat_id, lecturer_id): return []
+    safe_limit = max(1, min(int(limit), 50)); results: list[dict[str, Any]] = []
+    docs = _chat_ref(batch_id, chat_id).collection(ATTACHMENTS_SUBCOLLECTION).order_by("created_at", direction="DESCENDING").limit(100).stream()
+    for doc in docs:
+        data = doc.to_dict() or {}
+        if data.get("lecturer_id") != lecturer_id or data.get("scope") != "chat" or _is_expired(data): continue
+        results.append(_agent_safe_attachment(doc.id, data, include_context=False))
+        if len(results) >= safe_limit: break
+    return results
+
+
+def get_chat_attachment_for_agent(batch_id: str, chat_id: str, lecturer_id: str, attachment_id: str) -> dict[str, Any] | None:
+    if not _owned_visible_chat(batch_id, chat_id, lecturer_id): return None
+    snap = attachment_ref(batch_id, chat_id, attachment_id).get(); data = snap.to_dict() or {}
+    if not snap.exists or data.get("lecturer_id") != lecturer_id or data.get("scope") != "chat" or _is_expired(data): return None
+    return _agent_safe_attachment(snap.id, data)
+
+
+def search_chat_attachments_for_agent(batch_id: str, chat_id: str, lecturer_id: str, query: str, limit: int = 10) -> dict[str, Any]:
+    if not _owned_visible_chat(batch_id, chat_id, lecturer_id):
+        return {"status": "empty", "query": query[:500], "hits": []}
+    terms = set(re.findall(r"[\w-]{2,}", query.lower())); scored: list[tuple[int, dict[str, Any]]] = []
+    docs = _chat_ref(batch_id, chat_id).collection(ATTACHMENTS_SUBCOLLECTION).order_by("created_at", direction="DESCENDING").limit(100).stream()
+    for doc in docs:
+        data = doc.to_dict() or {}
+        if data.get("lecturer_id") != lecturer_id or data.get("scope") != "chat" or _is_expired(data): continue
+        item = _agent_safe_attachment(doc.id, data, include_context=True)
+        fields = {
+            "file_name": item["file_name"], "file_title": item["file_title"],
+            "extracted_text_preview": item.get("extracted_text_preview", ""),
+            "vision_summary": item.get("vision_summary", ""), "ocr_text": item.get("ocr_text", ""),
+        }
+        matched = [name for name, value in fields.items() if terms & set(re.findall(r"[\w-]{2,}", str(value).lower()))]
+        score = sum(len(terms & set(re.findall(r"[\w-]{2,}", str(value).lower()))) for value in fields.values())
+        if terms and score == 0: continue
+        source = next((str(fields[name]) for name in ("extracted_text_preview", "vision_summary", "ocr_text", "file_title", "file_name") if name in matched and fields[name]), item["file_title"])
+        scored.append((score, {key: item[key] for key in ("attachment_id", "message_id", "file_name", "file_title", "attachment_kind", "content_type", "created_at", "expires_at")} | {"matched_fields": matched, "snippet": source[:1500], "score": score}))
+    hits = [item for _, item in sorted(scored, key=lambda entry: (-entry[0], str(entry[1].get("created_at") or "")), reverse=False)[:max(1, min(limit, 10))]]
+    return {"status": "success" if hits else "empty", "query": query[:500], "hits": hits}
 
 
 def get_attachment_url(batch_id: str, chat_id: str, attachment_id: str, lecturer_id: str, thumbnail: bool) -> str | None:

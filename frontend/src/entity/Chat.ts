@@ -34,6 +34,16 @@ export type ChatAttachment = ChatAttachmentSnapshot & {
   updated_at: string | null
 }
 
+export type ChatAttachmentListItem = Omit<ChatAttachmentSnapshot, 'promotion_allowed'> & {
+  message_id: string
+  vision_source: 'bytes' | 'gcs_uri' | 'none'
+  extracted_text_preview?: string
+  vision_summary?: string
+  ocr_text?: string
+  created_at: string | null
+  expires_at: string | null
+}
+
 export type ChatMessage = {
   message_id: string
   chat_id: string

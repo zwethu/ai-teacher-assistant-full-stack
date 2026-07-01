@@ -5,7 +5,13 @@ import pytest
 from unittest.mock import MagicMock
 
 from services.agent_gateway import build_chat_attachment_context
-from services.chat_attachment_service import AttachmentValidationError, validate_attachment, validate_batch_document, _vision_context
+from services.chat_attachment_service import (
+    AttachmentValidationError,
+    _agent_safe_attachment,
+    _vision_context,
+    validate_attachment,
+    validate_batch_document,
+)
 from services.document_extraction import ExtractionResult, ExtractedSegment, chunk_extraction, extract_document
 
 
@@ -92,3 +98,25 @@ def test_vision_falls_back_to_gcs(monkeypatch) -> None:
     monkeypatch.setattr("google.genai.Client", lambda **kwargs: client)
     result = _vision_context(b"image", "gs://bucket/image.png", "image/png")
     assert result[0] == "ready" and result[1] == "fallback" and result[4] == "gcs_uri"
+
+
+def test_same_chat_dto_excludes_storage_and_internal_errors() -> None:
+    safe = _agent_safe_attachment("a1", {
+        "file_name": "notes.pdf", "content_type": "application/pdf",
+        "attachment_kind": "document", "size_bytes": 42,
+        "gcs_path": "gs://private/original", "thumbnail_gcs_path": "gs://private/thumb",
+        "vision_error": "secret provider failure", "extracted_text_path": "gs://private/text",
+        "extracted_text_preview": "bounded context",
+    }, include_context=False)
+    assert safe["size_bytes"] == 42
+    assert "extracted_text_preview" not in safe
+    assert not ({"gcs_path", "thumbnail_gcs_path", "extracted_text_path", "vision_error"} & safe.keys())
+
+
+def test_attachment_search_route_precedes_dynamic_attachment_route() -> None:
+    from routers.chats import router
+
+    paths = [route.path for route in router.routes]
+    search_index = next(index for index, path in enumerate(paths) if path.endswith("/{chat_id}/attachments/search"))
+    dynamic_index = next(index for index, path in enumerate(paths) if path.endswith("/{chat_id}/attachments/{attachment_id}"))
+    assert search_index < dynamic_index

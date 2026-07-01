@@ -12,7 +12,7 @@ import {
 import axios from 'axios'
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import type { Batch } from '../../../entity/Batch'
-import type { Chat, ChatAttachment, ChatMessage } from '../../../entity/Chat'
+import type { Chat, ChatAttachment, ChatAttachmentSnapshot, ChatMessage } from '../../../entity/Chat'
 import { useAuth } from '../../../hooks/useAuth'
 import { getBatchById, listBatches } from '../../../services/batchService'
 import {
@@ -1124,6 +1124,14 @@ export function useChatPage() {
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`
   }
 
+  function handleAskAboutAttachment(attachment: ChatAttachmentSnapshot) {
+    const text = attachment.attachment_kind === 'image'
+      ? `What is this image about? Attachment ID: ${attachment.attachment_id}`
+      : `Please summarize this file. Attachment ID: ${attachment.attachment_id}`
+    setInput(text)
+    requestAnimationFrame(() => textareaRef.current?.focus())
+  }
+
   function startRename(chat: Chat) {
     setRenamingId(chat.chat_id)
     setRenameValue(chat.title)
@@ -1249,6 +1257,7 @@ export function useChatPage() {
     handleApproveOutline,
     handleInputKeyDown,
     handleTextareaInput,
+    handleAskAboutAttachment,
     startRename,
     commitRename,
     cancelRename,

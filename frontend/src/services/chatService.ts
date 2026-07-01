@@ -1,4 +1,4 @@
-import type { Chat, ChatAttachment, ChatMessage } from '../entity/Chat'
+import type { Chat, ChatAttachment, ChatAttachmentListItem, ChatMessage } from '../entity/Chat'
 import api from '../lib/api'
 import type { LessonPlanExportResult } from './artifactService'
 import type { AgentRunEvent, AgentRunStatus, AgentRunStep } from './agentRunStream'
@@ -111,6 +111,16 @@ export async function getChatAttachmentContent(
 
 export async function deleteChatAttachment(batchId: string, chatId: string, attachmentId: string): Promise<void> {
   await api.delete(`/batches/${batchId}/chats/${chatId}/attachments/${attachmentId}`)
+}
+
+export async function listChatAttachments(batchId: string, chatId: string, limit = 50): Promise<ChatAttachmentListItem[]> {
+  const res = await api.get<ChatAttachmentListItem[]>(`/batches/${batchId}/chats/${chatId}/attachments`, { params: { limit } })
+  return res.data
+}
+
+export async function searchChatAttachments(batchId: string, chatId: string, query: string) {
+  const res = await api.get<{ status: string; query: string; hits: Array<Record<string, unknown>> }>(`/batches/${batchId}/chats/${chatId}/attachments/search`, { params: { q: query } })
+  return res.data
 }
 
 export async function generateDocsFromPendingArtifact(

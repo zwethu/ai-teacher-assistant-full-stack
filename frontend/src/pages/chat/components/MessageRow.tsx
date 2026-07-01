@@ -55,6 +55,7 @@ export function MessageRow({
   approvalCompleted = false,
   approvalSuperseded = false,
   courseName = '',
+  onAskAboutAttachment,
 }: {
   msg?: ChatMessage | null
   run?: RunUiState
@@ -64,6 +65,7 @@ export function MessageRow({
   approvalCompleted?: boolean
   approvalSuperseded?: boolean
   courseName?: string
+  onAskAboutAttachment?: (attachment: ChatAttachmentSnapshot) => void
 }) {
   const [blueprintMode, setBlueprintMode] = useState<'manual' | 'suggested' | 'edit-suggested' | null>(null)
   const [actionsOpen, setActionsOpen] = useState(false)
@@ -104,7 +106,7 @@ export function MessageRow({
               {msg.content}
             </div>
             {batchId && msg.attachments && msg.attachments.length > 0 && (
-              <MessageAttachments batchId={batchId} chatId={msg.chat_id} attachments={msg.attachments} />
+              <MessageAttachments batchId={batchId} chatId={msg.chat_id} attachments={msg.attachments} onAsk={onAskAboutAttachment} />
             )}
           </div>
         ) : (
@@ -179,11 +181,12 @@ export function MessageRow({
 }
 
 function MessageAttachments({
-  batchId, chatId, attachments,
+  batchId, chatId, attachments, onAsk,
 }: {
   batchId: string
   chatId: string
   attachments: ChatAttachmentSnapshot[]
+  onAsk?: (attachment: ChatAttachmentSnapshot) => void
 }) {
   const [urls, setUrls] = useState<Record<string, string>>({})
 
@@ -225,10 +228,8 @@ function MessageAttachments({
   return (
     <div className="mt-2 flex flex-wrap justify-end gap-2">
       {attachments.map((attachment) => (
-        <button
-          type="button"
+        <div
           key={attachment.attachment_id}
-          onClick={() => void viewAttachment(attachment)}
           className="flex max-w-xs items-center gap-2 rounded-xl border border-slate-200 bg-white/85 p-2 text-left shadow-sm hover:bg-white"
         >
           {urls[attachment.attachment_id] ? (
@@ -244,7 +245,11 @@ function MessageAttachments({
               {attachment.attachment_kind === 'image' ? `Image · chat-only · vision ${attachment.vision_status}` : `Document · ${attachment.parse_status}`}
             </span>
           </span>
-        </button>
+          <span className="flex flex-col gap-1">
+            <button type="button" onClick={() => void viewAttachment(attachment)} className="rounded px-1.5 py-0.5 text-[10px] font-medium text-slate-500 hover:bg-slate-100">View</button>
+            <button type="button" onClick={() => onAsk?.(attachment)} className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">{attachment.attachment_kind === 'image' ? 'Ask about image' : 'Ask about file'}</button>
+          </span>
+        </div>
       ))}
     </div>
   )

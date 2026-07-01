@@ -39,6 +39,8 @@ from services.chat_attachment_service import (
     get_attachment_url,
     get_chat_attachment,
     delete_attachment_record,
+    list_chat_attachments_for_agent,
+    search_chat_attachments_for_agent,
 )
 from services.google_workspace.credentials import (
     GoogleOAuthInvalidError,
@@ -163,6 +165,26 @@ async def upload_chat_attachment_endpoint(
         detail = str(exc)
         code = status.HTTP_413_REQUEST_ENTITY_TOO_LARGE if "MB" in detail or "quota" in detail else status.HTTP_422_UNPROCESSABLE_ENTITY
         raise HTTPException(status_code=code, detail=detail) from exc
+
+
+@router.get("/{chat_id}/attachments", response_model=list[dict])
+async def list_chat_attachments_endpoint(
+    batch_id: str, chat_id: str, limit: int = 50,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> list[dict]:
+    if get_chat(batch_id, chat_id, current_user["uid"]) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
+    return list_chat_attachments_for_agent(batch_id, chat_id, current_user["uid"], limit)
+
+
+@router.get("/{chat_id}/attachments/search", response_model=dict)
+async def search_chat_attachments_endpoint(
+    batch_id: str, chat_id: str, q: str, limit: int = 10,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    if get_chat(batch_id, chat_id, current_user["uid"]) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
+    return search_chat_attachments_for_agent(batch_id, chat_id, current_user["uid"], q, limit)
 
 
 @router.get("/{chat_id}/attachments/{attachment_id}", response_model=ChatAttachment)

@@ -38,6 +38,7 @@ export default function Chat() {
         handleAttachmentFiles={state.handleAttachmentFiles}
         removePendingAttachment={state.removePendingAttachment}
         handleComposerPaste={state.handleComposerPaste}
+        handleAskAboutAttachment={state.handleAskAboutAttachment}
       />
     </ChatErrorBoundary>
   )

@@ -40,6 +40,7 @@ import {
 import { emitChatCreated } from '../../../utils/chatEvents'
 import type { RunUiState } from '../runTypes'
 import type { GenerateMode } from '../components/ChatConversation'
+import { buildGenerationRequest } from '../generationRequest'
 
 type ChatLocationState = {
   batchId?: string
@@ -568,18 +569,9 @@ export function useChatPage() {
         if (!generateMode) {
           return sendMessage(batchId, chatId, content, connectors, attachmentIds)
         }
-        const payload = {
-          batch_id: batchId,
-          chat_id: chatId,
-          workflow_type: `${generateMode}.generate`,
-          workflow_stage: 'outline' as const,
-          week: undefined,
-          pending_artifact: true,
-          save_draft: false,
-          message: content,
-          connectors,
-          attachment_ids: attachmentIds,
-        }
+        const payload = buildGenerationRequest(
+          generateMode, batchId, chatId, content, connectors, attachmentIds,
+        )
         const result = generateMode === 'lab'
           ? await generateLab('', payload)
           : generateMode === 'assessment'

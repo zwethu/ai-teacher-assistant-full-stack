@@ -269,6 +269,9 @@ function PreviousAttachments({ batchId, chatId, onReference }: { batchId: string
       <History className="h-3.5 w-3.5" /> Previous attachments
     </button>
     {open && <div className="absolute bottom-full left-0 z-40 mb-2 max-h-72 w-80 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
+      <p className="border-b border-slate-100 px-2 pb-2 text-[10px] leading-4 text-slate-500">
+        References are chat-local and available while retained. Images are chat-only. Documents can be used in chat and generation, but are not saved to Course Space unless uploaded as a Batch file.
+      </p>
       {loading ? <p className="p-3 text-xs text-slate-500">Loading attachments…</p> : error ? <p className="p-3 text-xs text-red-600">{error}</p> : items.length === 0 ? <p className="p-3 text-xs text-slate-500">No retained attachments in this chat.</p> : items.map((item) => <div key={item.attachment_id} className="flex items-center gap-2 rounded-lg p-2 hover:bg-slate-50">
         {thumbnails[item.attachment_id] ? <img src={thumbnails[item.attachment_id]} alt="" className="h-9 w-9 rounded object-cover" /> : item.attachment_kind === 'image' ? <ImageIcon className="h-5 w-5 text-sky-600" /> : <FileText className="h-5 w-5 text-emerald-600" />}
         <div className="min-w-0 flex-1">

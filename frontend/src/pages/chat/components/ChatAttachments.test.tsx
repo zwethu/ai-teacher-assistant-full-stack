@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ChatInput } from './ChatConversation'
+import { MessageRow } from './MessageRow'
 import type { PendingChatAttachment } from '../hooks/useChatPage'
 
 const listChatAttachments = vi.fn()
@@ -68,8 +69,21 @@ describe('chat attachment composer', () => {
     const props = renderInput({ batchId: 'batch-1', chatId: 'chat-1', pendingAttachments: [] })
     fireEvent.click(screen.getByRole('button', { name: /Previous attachments/ }))
     await waitFor(() => expect(screen.getByText('Week one')).toBeTruthy())
+    expect(screen.getByText(/References are chat-local/)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Reference' }))
     expect(props.onInputChange).toHaveBeenCalledWith(expect.stringContaining('Attachment ID: doc-1'))
     expect(screen.queryByText(/gs:\/\//)).toBeNull()
+  })
+
+  it('keeps historical image View and Ask actions separate without promotion', () => {
+    const onAsk = vi.fn()
+    render(<MessageRow batchId="batch-1" onAskAboutAttachment={onAsk} msg={{
+      message_id: 'message-1', chat_id: 'chat-1', role: 'user', content: 'Screenshot',
+      created_at: null, attachments: [imageAttachment],
+    }} />)
+    expect(screen.getByRole('button', { name: 'View' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Ask about image' }))
+    expect(onAsk).toHaveBeenCalledWith(imageAttachment)
+    expect(screen.queryByRole('button', { name: /promot/i })).toBeNull()
   })
 })

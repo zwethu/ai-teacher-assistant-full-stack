@@ -146,6 +146,33 @@ def embed_chat_attachment_chunks(batch_id: str, chat_id: str, attachment_id: str
     if not embeddings_enabled():
         ref.update({"embedding_status": "skipped", "semantic_search_ready": False, "rag_updated_at": SERVER_TIMESTAMP})
         return False
+    docs = [
+        doc
+        for doc in ref.collection("chunks").order_by("chunk_index").limit(get_chat_rag_max_chunks()).stream()
+        if str((doc.to_dict() or {}).get("text") or "").strip()
+    ]
+    if not docs:
+        ref.update({"embedding_status": "skipped", "semantic_search_ready": False, "rag_updated_at": SERVER_TIMESTAMP})
+        return False
+    try:
+        vectors = embed_texts(
+            [str((doc.to_dict() or {}).get("text") or "") for doc in docs],
+            task_type="RETRIEVAL_DOCUMENT",
+        )
+        batch = get_firestore().batch()
+        model = os.getenv("CHAT_FILE_EMBEDDING_MODEL") or "gemini-embedding-001"
+        for doc, vector in zip(docs, vectors):
+            batch.update(doc.reference, {
+                "embedding": Vector(vector), "embedding_status": "ready",
+                "embedding_model": model, "embedding_dimensions": embedding_dimensions(),
+                "updated_at": SERVER_TIMESTAMP,
+            })
+        batch.commit()
+        ref.update({"embedding_status": "ready", "semantic_search_ready": True, "rag_error": "", "rag_updated_at": SERVER_TIMESTAMP})
+        return True
+    except Exception as exc:
+        ref.update({"embedding_status": "failed", "semantic_search_ready": False, "rag_error": f"Embedding failed: {type(exc).__name__}"[:500], "rag_updated_at": SERVER_TIMESTAMP})
+        return False
 
 
 def enrich_chat_attachment(batch_id: str, chat_id: str, attachment_id: str) -> None:
@@ -213,15 +240,3 @@ def recover_chat_file_rag(limit: int = 10) -> int:
             if processed >= limit:
                 return processed
     return processed
-    docs = list(ref.collection("chunks").order_by("chunk_index").limit(get_chat_rag_max_chunks()).stream())
-    try:
-        vectors = embed_texts([(doc.to_dict() or {}).get("text", "") for doc in docs])
-        batch = get_firestore().batch(); model = os.getenv("CHAT_FILE_EMBEDDING_MODEL") or "gemini-embedding-001"
-        for doc, vector in zip(docs, vectors):
-            batch.update(doc.reference, {"embedding": Vector(vector), "embedding_status": "ready", "embedding_model": model, "embedding_dimensions": embedding_dimensions(), "updated_at": SERVER_TIMESTAMP})
-        batch.commit()
-        ref.update({"embedding_status": "ready", "semantic_search_ready": True, "rag_updated_at": SERVER_TIMESTAMP})
-        return True
-    except Exception as exc:
-        ref.update({"embedding_status": "failed", "semantic_search_ready": False, "rag_error": f"Embedding failed: {type(exc).__name__}"[:500], "rag_updated_at": SERVER_TIMESTAMP})
-        return False

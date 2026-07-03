@@ -16,7 +16,7 @@ from services.document_extraction import ExtractionResult, ExtractedSegment, chu
 from services.attachment_constants import get_chat_attachment_retention_days
 from services.chat_document_ocr import should_run_ocr
 from services.chat_vector_search import search_chat_attachment_chunks
-from services.chat_file_rag_service import build_chat_attachment_chunks
+from services.chat_file_rag_service import build_chat_attachment_chunks, embed_chat_attachment_chunks
 
 
 def _ooxml(required: str) -> bytes:
@@ -196,3 +196,37 @@ def test_chat_rag_builder_writes_bounded_safe_chunks(monkeypatch) -> None:
         assert len(payload["text"]) <= 5000
         assert not ({"gcs_path", "bytes", "embedding"} & payload.keys())
     write_batch.commit.assert_called_once()
+
+
+def test_chat_chunk_embedding_success_filters_empty_chunks(monkeypatch) -> None:
+    populated = MagicMock(); populated.to_dict.return_value = {"text": "searchable chunk"}
+    empty = MagicMock(); empty.to_dict.return_value = {"text": ""}
+    ref = MagicMock()
+    ref.collection.return_value.order_by.return_value.limit.return_value.stream.return_value = [populated, empty]
+    db = MagicMock(); write_batch = MagicMock(); db.batch.return_value = write_batch
+    monkeypatch.setattr("services.chat_file_rag_service._attachment_ref", lambda *_: ref)
+    monkeypatch.setattr("services.chat_file_rag_service.get_firestore", lambda: db)
+    monkeypatch.setattr("services.chat_file_rag_service.embeddings_enabled", lambda: True)
+    embed = MagicMock(return_value=[[0.1, 0.2]])
+    monkeypatch.setattr("services.chat_file_rag_service.embed_texts", embed)
+    assert embed_chat_attachment_chunks("b1", "c1", "a1") is True
+    embed.assert_called_once_with(["searchable chunk"], task_type="RETRIEVAL_DOCUMENT")
+    write_batch.update.assert_called_once()
+    write_batch.commit.assert_called_once()
+    assert ref.update.call_args.args[0]["semantic_search_ready"] is True
+
+
+def test_chat_chunk_embedding_empty_and_failure_states(monkeypatch) -> None:
+    ref = MagicMock()
+    ref.collection.return_value.order_by.return_value.limit.return_value.stream.return_value = []
+    monkeypatch.setattr("services.chat_file_rag_service._attachment_ref", lambda *_: ref)
+    monkeypatch.setattr("services.chat_file_rag_service.embeddings_enabled", lambda: True)
+    assert embed_chat_attachment_chunks("b1", "c1", "empty") is False
+    assert ref.update.call_args.args[0]["embedding_status"] == "skipped"
+
+    doc = MagicMock(); doc.to_dict.return_value = {"text": "chunk"}
+    ref.collection.return_value.order_by.return_value.limit.return_value.stream.return_value = [doc]
+    monkeypatch.setattr("services.chat_file_rag_service.embed_texts", MagicMock(side_effect=RuntimeError("provider")))
+    assert embed_chat_attachment_chunks("b1", "c1", "failed") is False
+    assert ref.update.call_args.args[0]["embedding_status"] == "failed"
+    assert ref.update.call_args.args[0]["semantic_search_ready"] is False

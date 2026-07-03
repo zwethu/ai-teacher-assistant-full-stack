@@ -13,6 +13,10 @@ from services.chat_attachment_service import (
     validate_batch_document,
 )
 from services.document_extraction import ExtractionResult, ExtractedSegment, chunk_extraction, extract_document
+from services.attachment_constants import get_chat_attachment_retention_days
+from services.chat_document_ocr import should_run_ocr
+from services.chat_vector_search import search_chat_attachment_chunks
+from services.chat_file_rag_service import build_chat_attachment_chunks
 
 
 def _ooxml(required: str) -> bytes:
@@ -120,3 +124,75 @@ def test_attachment_search_route_precedes_dynamic_attachment_route() -> None:
     search_index = next(index for index, path in enumerate(paths) if path.endswith("/{chat_id}/attachments/search"))
     dynamic_index = next(index for index, path in enumerate(paths) if path.endswith("/{chat_id}/attachments/{attachment_id}"))
     assert search_index < dynamic_index
+
+
+def test_chat_attachment_retention_is_configurable_and_clamped(monkeypatch) -> None:
+    monkeypatch.delenv("CHAT_ATTACHMENT_RETENTION_DAYS", raising=False)
+    assert get_chat_attachment_retention_days() == 7
+    monkeypatch.setenv("CHAT_ATTACHMENT_RETENTION_DAYS", "0")
+    assert get_chat_attachment_retention_days() == 1
+    monkeypatch.setenv("CHAT_ATTACHMENT_RETENTION_DAYS", "99")
+    assert get_chat_attachment_retention_days() == 30
+
+
+def test_chat_rag_chunking_reaches_beyond_preview_limit() -> None:
+    text = "first section " * 1000 + " uniquely-retrievable-tail " * 1000
+    extracted = extract_document(text.encode(), "text/plain", 500_000)
+    chunks, truncated = chunk_extraction(extracted, target_chars=3500, overlap_chars=750, max_chunks=150)
+    assert any("uniquely-retrievable-tail" in chunk.text for chunk in chunks)
+    assert sum(len(chunk.text) for chunk in chunks) > 12_000
+    assert truncated is False
+
+
+def test_pdf_ocr_gate_is_low_text_only() -> None:
+    assert should_run_ocr("application/pdf", "short", page_count=2) is True
+    assert should_run_ocr("application/pdf", "x" * 1000, page_count=2) is False
+    assert should_run_ocr("text/plain", "", page_count=1) is False
+
+
+def test_chat_chunk_search_uses_safe_lexical_fallback(monkeypatch) -> None:
+    chat_snap = MagicMock(exists=True); chat_snap.to_dict.return_value = {"lecturer_id": "l1"}
+    chat_ref = MagicMock(); chat_ref.get.return_value = chat_snap
+    attachment_snap = MagicMock(exists=True); attachment_snap.to_dict.return_value = {"lecturer_id": "l1", "scope": "chat"}
+    chat_ref.collection.return_value.document.return_value.get.return_value = attachment_snap
+    db = MagicMock(); db.collection.return_value.document.return_value.collection.return_value.document.return_value = chat_ref
+    query = MagicMock(); query.where.return_value = query; query.limit.return_value = query
+    chunk = MagicMock(); chunk.to_dict.return_value = {
+        "attachment_id": "a1", "file_name": "long.pdf", "file_title": "Long notes",
+        "attachment_kind": "document", "content_type": "application/pdf", "chunk_index": 9,
+        "text": "This section explains a uniquely retrievable concept.",
+        "gcs_path": "gs://private/path", "embedding": [0.1],
+    }
+    query.stream.return_value = [chunk]; db.collection_group.return_value = query
+    monkeypatch.setenv("CHAT_FILE_EMBEDDINGS_ENABLED", "false")
+    monkeypatch.setattr("services.chat_vector_search.get_firestore", lambda: db)
+    result = search_chat_attachment_chunks("b1", "c1", "l1", "retrievable concept")
+    assert result["status"] == "success"
+    assert result["retrieval_mode"] == "lexical"
+    assert "gcs_path" not in result["hits"][0]
+    assert "embedding" not in result["hits"][0]
+
+
+def test_chat_rag_builder_writes_bounded_safe_chunks(monkeypatch) -> None:
+    attachment = {
+        "attachment_id": "a1", "batch_id": "b1", "chat_id": "c1", "lecturer_id": "l1",
+        "scope": "chat", "attachment_kind": "document", "content_type": "text/plain",
+        "file_name": "long.txt", "file_title": "Long", "expires_at": None,
+    }
+    snap = MagicMock(exists=True); snap.to_dict.return_value = attachment
+    ref = MagicMock(); ref.get.return_value = snap
+    chunks = MagicMock(); chunks.limit.return_value.stream.return_value = []
+    ref.collection.return_value = chunks
+    db = MagicMock(); write_batch = MagicMock(); db.batch.return_value = write_batch
+    monkeypatch.setenv("CHAT_FILE_RAG_ENABLED", "true")
+    monkeypatch.setenv("CHAT_FILE_RAG_MAX_CHUNKS", "3")
+    monkeypatch.setattr("services.chat_file_rag_service._attachment_ref", lambda *_: ref)
+    monkeypatch.setattr("services.chat_file_rag_service.get_firestore", lambda: db)
+    result = build_chat_attachment_chunks("b1", "c1", "a1", "l1", file_bytes=("searchable content " * 2000).encode())
+    assert result["chunk_count"] == 3
+    assert write_batch.set.call_count == 3
+    for call in write_batch.set.call_args_list:
+        payload = call.args[1]
+        assert len(payload["text"]) <= 5000
+        assert not ({"gcs_path", "bytes", "embedding"} & payload.keys())
+    write_batch.commit.assert_called_once()

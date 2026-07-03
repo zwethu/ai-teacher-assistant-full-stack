@@ -1,5 +1,18 @@
 export type AttachmentKind = 'document' | 'image' | 'other'
 export type AttachmentStatus = 'pending' | 'ready' | 'failed' | 'skipped'
+export type RagStatus = 'pending' | 'ready' | 'partial' | 'failed' | 'skipped'
+export type OcrStatus = 'not_needed' | 'pending' | 'ready' | 'failed' | 'skipped'
+
+export type ChatAttachmentRagState = {
+  rag_status: RagStatus
+  chunk_status: AttachmentStatus
+  embedding_status: AttachmentStatus
+  semantic_search_ready: boolean
+  chunk_count: number
+  indexed_chars: number
+  ocr_status: OcrStatus
+  rag_updated_at: string | null
+}
 
 export type ChatAttachmentSnapshot = {
   attachment_id: string
@@ -14,15 +27,12 @@ export type ChatAttachmentSnapshot = {
   promotion_allowed: false
 }
 
-export type ChatAttachment = ChatAttachmentSnapshot & {
+export type ChatAttachment = ChatAttachmentSnapshot & ChatAttachmentRagState & {
   batch_id: string
   chat_id: string
   message_id: string | null
   lecturer_id: string
-  gcs_path: string
-  thumbnail_gcs_path: string | null
   scope: 'chat'
-  extracted_text_path: null
   extracted_text_preview: string
   vision_summary: string
   ocr_text: string
@@ -34,7 +44,7 @@ export type ChatAttachment = ChatAttachmentSnapshot & {
   updated_at: string | null
 }
 
-export type ChatAttachmentListItem = Omit<ChatAttachmentSnapshot, 'promotion_allowed'> & {
+export type ChatAttachmentListItem = Omit<ChatAttachmentSnapshot, 'promotion_allowed'> & ChatAttachmentRagState & {
   message_id: string
   vision_source: 'bytes' | 'gcs_uri' | 'none'
   extracted_text_preview?: string

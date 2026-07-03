@@ -19,7 +19,6 @@ from google.cloud.firestore import SERVER_TIMESTAMP
 from entity.ChatAttachment import ChatAttachment
 from services.attachment_constants import (
     ALLOWED_CONTENT_TYPES,
-    ATTACHMENT_RETENTION_DAYS,
     DOCUMENT_CONTENT_TYPES,
     EXTENSION_CONTENT_TYPES,
     IMAGE_CONTENT_TYPES,
@@ -28,6 +27,7 @@ from services.attachment_constants import (
     MAX_EXTRACTED_PREVIEW_CHARS,
     MAX_IMAGE_BYTES,
     THUMBNAIL_MAX_SIZE,
+    get_chat_attachment_retention_days,
 )
 from utils.firestore_client import get_firestore
 from utils.gcs import (
@@ -72,13 +72,10 @@ def attachment_to_model(doc_id: str, data: dict[str, Any]) -> ChatAttachment:
         file_title=str(data.get("file_title") or data.get("file_name") or ""),
         content_type=str(data.get("content_type") or "application/octet-stream"),
         size_bytes=int(data.get("size_bytes") or 0),
-        gcs_path=str(data.get("gcs_path") or ""),
-        thumbnail_gcs_path=str(data["thumbnail_gcs_path"]) if data.get("thumbnail_gcs_path") else None,
         scope="chat",
         attachment_kind=kind if kind in {"document", "image", "other"} else "other",  # type: ignore[arg-type]
         parse_status=str(data.get("parse_status") or "pending"),  # type: ignore[arg-type]
         vision_status=str(data.get("vision_status") or "skipped"),  # type: ignore[arg-type]
-        extracted_text_path=None,
         extracted_text_preview=str(data.get("extracted_text_preview") or ""),
         vision_summary=str(data.get("vision_summary") or ""),
         ocr_text=str(data.get("ocr_text") or ""),
@@ -88,6 +85,14 @@ def attachment_to_model(doc_id: str, data: dict[str, Any]) -> ChatAttachment:
         promoted_file_id=None,
         promotion_allowed=False,
         thumbnail_available=bool(data.get("thumbnail_gcs_path")),
+        rag_status=str(data.get("rag_status") or "skipped"),  # type: ignore[arg-type]
+        chunk_status=str(data.get("chunk_status") or "skipped"),  # type: ignore[arg-type]
+        embedding_status=str(data.get("embedding_status") or "skipped"),  # type: ignore[arg-type]
+        semantic_search_ready=bool(data.get("semantic_search_ready", False)),
+        chunk_count=int(data.get("chunk_count") or 0),
+        indexed_chars=int(data.get("indexed_chars") or 0),
+        ocr_status=str(data.get("ocr_status") or "not_needed"),  # type: ignore[arg-type]
+        rag_updated_at=_iso(data.get("rag_updated_at")),
         created_at=_iso(data.get("created_at")),
         updated_at=_iso(data.get("updated_at")),
     )
@@ -320,7 +325,8 @@ def create_chat_attachment(
     ocr_text = ""
     vision_error = ""
     vision_source = "none"
-    if kind == "document":
+    from services.chat_file_rag_service import rag_enabled
+    if kind == "document" and not rag_enabled():
         try:
             extracted_preview = extract_document(data, normalized_type, MAX_EXTRACTED_PREVIEW_CHARS).text.strip()
             parse_status = "ready"
@@ -335,7 +341,7 @@ def create_chat_attachment(
             logger.warning("Thumbnail generation failed for %s: %s", clean_name, exc)
         vision_status, vision_summary, ocr_text, vision_error, vision_source = _vision_context(data, gcs_path, normalized_type)
 
-    expires_at = datetime.now(timezone.utc) + timedelta(days=ATTACHMENT_RETENTION_DAYS)
+    expires_at = datetime.now(timezone.utc) + timedelta(days=get_chat_attachment_retention_days())
     payload = {
         "attachment_id": attachment_id, "batch_id": batch_id, "chat_id": chat_id,
         "message_id": None, "lecturer_id": lecturer_id, "file_name": clean_name,
@@ -347,9 +353,18 @@ def create_chat_attachment(
         "vision_summary": vision_summary, "ocr_text": ocr_text, "expires_at": expires_at,
         "vision_error": vision_error, "vision_source": vision_source,
         "promoted_file_id": None, "created_at": SERVER_TIMESTAMP, "updated_at": SERVER_TIMESTAMP,
+        "rag_status": "pending" if rag_enabled() else "skipped",
+        "chunk_status": "pending" if rag_enabled() else "skipped",
+        "embedding_status": "pending" if rag_enabled() and os.getenv("CHAT_FILE_EMBEDDINGS_ENABLED", "false").lower() == "true" else "skipped",
+        "semantic_search_ready": False, "chunk_count": 0, "indexed_chars": 0,
+        "ocr_status": "pending" if rag_enabled() and normalized_type == "application/pdf" and os.getenv("CHAT_FILE_OCR_ENABLED", "false").lower() == "true" else ("skipped" if normalized_type == "application/pdf" else "not_needed"),
+        "rag_error": "", "rag_updated_at": SERVER_TIMESTAMP,
     }
     ref = attachment_ref(batch_id, chat_id, attachment_id)
     ref.set(payload)
+    if rag_enabled():
+        from services.chat_file_rag_service import build_chat_attachment_chunks
+        build_chat_attachment_chunks(batch_id, chat_id, attachment_id, lecturer_id, file_bytes=data)
     snap = ref.get()
     return attachment_to_model(attachment_id, snap.to_dict() or payload)
 
@@ -384,6 +399,14 @@ def _agent_safe_attachment(doc_id: str, data: dict[str, Any], include_context: b
         "vision_status": str(data.get("vision_status") or "skipped"),
         "vision_source": str(data.get("vision_source") or "none"),
         "thumbnail_available": bool(data.get("thumbnail_gcs_path")),
+        "rag_status": str(data.get("rag_status") or "skipped"),
+        "chunk_status": str(data.get("chunk_status") or "skipped"),
+        "embedding_status": str(data.get("embedding_status") or "skipped"),
+        "semantic_search_ready": bool(data.get("semantic_search_ready", False)),
+        "chunk_count": int(data.get("chunk_count") or 0),
+        "indexed_chars": int(data.get("indexed_chars") or 0),
+        "ocr_status": str(data.get("ocr_status") or "not_needed"),
+        "rag_updated_at": _iso(data.get("rag_updated_at")),
         "created_at": _iso(data.get("created_at")), "expires_at": _iso(data.get("expires_at")),
     }
     if include_context:
@@ -420,6 +443,10 @@ def get_chat_attachment_for_agent(batch_id: str, chat_id: str, lecturer_id: str,
 
 
 def search_chat_attachments_for_agent(batch_id: str, chat_id: str, lecturer_id: str, query: str, limit: int = 10) -> dict[str, Any]:
+    from services.chat_vector_search import search_chat_attachment_chunks
+    rag = search_chat_attachment_chunks(batch_id, chat_id, lecturer_id, query, max_results=limit)
+    if rag.get("hits"):
+        return rag
     if not _owned_visible_chat(batch_id, chat_id, lecturer_id):
         return {"status": "empty", "query": query[:500], "hits": []}
     terms = set(re.findall(r"[\w-]{2,}", query.lower())); scored: list[tuple[int, dict[str, Any]]] = []
@@ -439,14 +466,14 @@ def search_chat_attachments_for_agent(batch_id: str, chat_id: str, lecturer_id: 
         source = next((str(fields[name]) for name in ("extracted_text_preview", "vision_summary", "ocr_text", "file_title", "file_name") if name in matched and fields[name]), item["file_title"])
         scored.append((score, {key: item[key] for key in ("attachment_id", "message_id", "file_name", "file_title", "attachment_kind", "content_type", "created_at", "expires_at")} | {"matched_fields": matched, "snippet": source[:1500], "score": score}))
     hits = [item for _, item in sorted(scored, key=lambda entry: (-entry[0], str(entry[1].get("created_at") or "")), reverse=False)[:max(1, min(limit, 10))]]
-    return {"status": "success" if hits else "empty", "query": query[:500], "hits": hits}
+    return {"status": "success" if hits else "empty", "query": query[:500], "hits": hits, "retrieval_mode": "lexical"}
 
 
 def get_attachment_url(batch_id: str, chat_id: str, attachment_id: str, lecturer_id: str, thumbnail: bool) -> str | None:
-    attachment = get_chat_attachment(batch_id, chat_id, attachment_id, lecturer_id)
-    if attachment is None:
+    snap = attachment_ref(batch_id, chat_id, attachment_id).get(); data = snap.to_dict() or {}
+    if not snap.exists or data.get("lecturer_id") != lecturer_id or data.get("batch_id") != batch_id or data.get("chat_id") != chat_id or _is_expired(data):
         return None
-    path = attachment.thumbnail_gcs_path if thumbnail else attachment.gcs_path
+    path = data.get("thumbnail_gcs_path") if thumbnail else data.get("gcs_path")
     return signed_read_url(path) if path else None
 
 
@@ -464,6 +491,9 @@ def delete_attachment_record(batch_id: str, chat_id: str, attachment_id: str, le
     paths = [data.get("gcs_path"), data.get("thumbnail_gcs_path"), data.get("extracted_text_path")]
     if not all(delete_blob(str(path)) for path in paths if path):
         return "storage_failed"
+    from services.chat_file_rag_service import delete_attachment_chunks
+    if not delete_attachment_chunks(batch_id, chat_id, attachment_id):
+        return "storage_failed"
     ref.delete()
     return "deleted"
 
@@ -476,7 +506,8 @@ def delete_all_chat_attachments(batch_id: str, chat_id: str) -> None:
 def cleanup_expired_attachments(limit: int = 100) -> int:
     db = get_firestore()
     now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(days=ATTACHMENT_RETENTION_DAYS)
+    retention_days = get_chat_attachment_retention_days()
+    cutoff = now - timedelta(days=retention_days)
     docs = db.collection_group(ATTACHMENTS_SUBCOLLECTION).where("expires_at", "<=", now).limit(limit).stream()
     cleaned = 0
     for doc in docs:
@@ -487,7 +518,14 @@ def cleanup_expired_attachments(limit: int = 100) -> int:
         chat_data = chat_snap.to_dict() or {}
         updated = chat_data.get("updated_at")
         if updated and updated > cutoff:
-            doc.reference.update({"expires_at": updated + timedelta(days=ATTACHMENT_RETENTION_DAYS), "updated_at": SERVER_TIMESTAMP})
+            expires_at = updated + timedelta(days=retention_days)
+            from services.chat_file_rag_service import update_attachment_chunks_expiry
+            try:
+                update_attachment_chunks_expiry(str(data.get("batch_id") or ""), str(data.get("chat_id") or ""), doc.id, expires_at)
+            except Exception:
+                logger.exception("Failed to extend attachment chunk retention attachment_id=%s", doc.id)
+                continue
+            doc.reference.update({"expires_at": expires_at, "updated_at": SERVER_TIMESTAMP})
             continue
         if delete_attachment_record(str(data.get("batch_id") or ""), str(data.get("chat_id") or ""), doc.id) in {"deleted", "not_found"}:
             cleaned += 1

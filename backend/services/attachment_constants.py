@@ -1,4 +1,6 @@
-"""Chat attachment MIME types, extensions, and bounded MVP limits."""
+"""Chat attachment MIME types, extensions, and bounded limits."""
+
+import os
 
 DOCUMENT_CONTENT_TYPES = frozenset({
     "application/pdf",
@@ -39,7 +41,26 @@ MAX_CHAT_ATTACHMENT_BYTES = 100 * 1024 * 1024
 MAX_EXTRACTED_PREVIEW_CHARS = 12_000
 MAX_AGENT_ATTACHMENT_CONTEXT_CHARS = 30_000
 MAX_AGENT_CONTEXT_PER_ATTACHMENT_CHARS = 8_000
-ATTACHMENT_RETENTION_DAYS = 30
 THUMBNAIL_MAX_SIZE = (768, 768)
 
 NATIVE_MULTIMODAL_ENV = "ENABLE_NATIVE_MULTIMODAL_ATTACHMENTS"
+
+
+def _bounded_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(value, maximum))
+
+
+def get_chat_attachment_retention_days() -> int:
+    return _bounded_int("CHAT_ATTACHMENT_RETENTION_DAYS", 7, 1, 30)
+
+
+def get_chat_rag_max_extracted_chars() -> int:
+    return _bounded_int("CHAT_FILE_RAG_MAX_EXTRACTED_CHARS", 500_000, 12_000, 1_000_000)
+
+
+def get_chat_rag_max_chunks() -> int:
+    return _bounded_int("CHAT_FILE_RAG_MAX_CHUNKS", 150, 1, 150)

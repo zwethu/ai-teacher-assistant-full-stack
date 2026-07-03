@@ -20,6 +20,7 @@ import {
   deleteChat,
   getChat,
   getChatRun,
+  getChatAttachmentRagStatus,
   listChats,
   listMessages,
   sendMessage,
@@ -173,6 +174,30 @@ export function useChatPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const renameInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    const batchId = selectedBatch?.id
+    const chatId = activeChat?.chat_id
+    const transitional = pendingAttachments.filter((item) =>
+      item.rag_status === 'pending' || item.chunk_status === 'pending' ||
+      item.embedding_status === 'pending' || item.ocr_status === 'pending')
+    if (!batchId || !chatId || transitional.length === 0) return
+    let cancelled = false
+    const refresh = async () => {
+      const updates = await Promise.all(transitional.map(async (item) => {
+        try { return await getChatAttachmentRagStatus(batchId, chatId, item.attachment_id) }
+        catch { return null }
+      }))
+      if (cancelled) return
+      setPendingAttachments((current) => current.map((item) => {
+        const update = updates.find((value) => value?.attachment_id === item.attachment_id)
+        return update ? { ...item, ...update } : item
+      }))
+    }
+    const timer = window.setInterval(() => void refresh(), 2500)
+    void refresh()
+    return () => { cancelled = true; window.clearInterval(timer) }
+  }, [selectedBatch?.id, activeChat?.chat_id, pendingAttachments.map((item) => `${item.attachment_id}:${item.rag_status}:${item.embedding_status}:${item.ocr_status}`).join('|')])
 
   const [connectors, setConnectors] = useState<ConnectorsState>({
     web_search: true,

@@ -13,13 +13,10 @@ class ChatAttachment(BaseModel):
     file_title: str
     content_type: str
     size_bytes: int
-    gcs_path: str
-    thumbnail_gcs_path: str | None = None
     scope: Literal["chat"] = "chat"
     attachment_kind: Literal["document", "image", "other"]
     parse_status: Literal["pending", "ready", "failed", "skipped"] = "pending"
     vision_status: Literal["pending", "ready", "failed", "skipped"] = "skipped"
-    extracted_text_path: str | None = None
     extracted_text_preview: str = ""
     vision_summary: str = ""
     ocr_text: str = ""
@@ -29,5 +26,13 @@ class ChatAttachment(BaseModel):
     promoted_file_id: str | None = None
     promotion_allowed: bool = False
     thumbnail_available: bool = False
+    rag_status: Literal["pending", "ready", "partial", "failed", "skipped"] = "skipped"
+    chunk_status: Literal["pending", "ready", "failed", "skipped"] = "skipped"
+    embedding_status: Literal["pending", "ready", "failed", "skipped"] = "skipped"
+    semantic_search_ready: bool = False
+    chunk_count: int = 0
+    indexed_chars: int = 0
+    ocr_status: Literal["not_needed", "pending", "ready", "failed", "skipped"] = "not_needed"
+    rag_updated_at: str | None = None
     created_at: str | None = None
     updated_at: str | None = None

@@ -1,8 +1,32 @@
 {
-  "indexes": [],
+  "indexes": [
+    {
+      "collectionGroup": "chunks",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        {"fieldPath": "batch_id", "order": "ASCENDING"},
+        {"fieldPath": "chat_id", "order": "ASCENDING"},
+        {"fieldPath": "lecturer_id", "order": "ASCENDING"},
+        {"fieldPath": "expires_at", "order": "ASCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "chunks",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        {"fieldPath": "batch_id", "order": "ASCENDING"},
+        {"fieldPath": "chat_id", "order": "ASCENDING"},
+        {"fieldPath": "lecturer_id", "order": "ASCENDING"},
+        {"fieldPath": "attachment_id", "order": "ASCENDING"},
+        {"fieldPath": "expires_at", "order": "ASCENDING"}
+      ]
+    }
+  ],
   "fieldOverrides": [
     {"collectionGroup": "attachments", "fieldPath": "expires_at", "indexes": [{"order": "ASCENDING", "queryScope": "COLLECTION_GROUP"}]},
     {"collectionGroup": "files", "fieldPath": "index_status", "indexes": [{"order": "ASCENDING", "queryScope": "COLLECTION_GROUP"}]},
-    {"collectionGroup": "files", "fieldPath": "overlay_status", "indexes": [{"order": "ASCENDING", "queryScope": "COLLECTION_GROUP"}]}
+    {"collectionGroup": "files", "fieldPath": "overlay_status", "indexes": [{"order": "ASCENDING", "queryScope": "COLLECTION_GROUP"}]},
+    {"collectionGroup": "attachments", "fieldPath": "embedding_status", "indexes": [{"order": "ASCENDING", "queryScope": "COLLECTION_GROUP"}]},
+    {"collectionGroup": "attachments", "fieldPath": "ocr_status", "indexes": [{"order": "ASCENDING", "queryScope": "COLLECTION_GROUP"}]}
   ]
 }

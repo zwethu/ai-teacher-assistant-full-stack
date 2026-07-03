@@ -83,6 +83,19 @@ export function ChatInput({
           ? 'Describe the assessment preview you want, e.g. Week 3 mixed quiz, 10 questions...'
         : 'Message your teaching assistant...'
 
+  const attachmentStatus = (attachment: PendingChatAttachment) => {
+    if (attachment.attachment_kind === 'image') {
+      const vision = attachment.vision_status === 'ready' ? 'vision ready' : 'vision unavailable'
+      return `chat-only · ${vision}${attachment.rag_status === 'ready' || attachment.rag_status === 'partial' ? ' · searchable by summary' : ''}`
+    }
+    if (attachment.ocr_status === 'pending') return 'OCR running'
+    if (attachment.chunk_status === 'pending') return 'indexing for this chat'
+    if (attachment.rag_status === 'failed') return 'file text unavailable'
+    if (attachment.semantic_search_ready) return 'semantic search ready'
+    if (attachment.rag_status === 'ready' || attachment.rag_status === 'partial') return 'searchable in this chat'
+    return attachment.parse_status === 'ready' ? 'text extracted' : attachment.parse_status
+  }
+
   return (
     <footer
       className={`relative z-10 px-4 pb-5 pt-2 bg-gradient-to-t from-white/60 via-white/30 to-transparent backdrop-blur-sm flex-shrink-0 transition-opacity ${
@@ -171,7 +184,7 @@ export function ChatInput({
                   <p className="truncate text-xs font-medium text-slate-700">{attachment.file_name}</p>
                   <p className="text-[11px] text-slate-400" title={attachment.attachment_kind === 'image' && attachment.vision_status !== 'ready' ? 'Image analysis is unavailable; the assistant will not guess its contents.' : undefined}>
                     {(attachment.size_bytes / 1024 / 1024).toFixed(1)} MB
-                    {attachment.attachment_kind === 'image' ? ` · chat-only · vision ${attachment.vision_status}` : ` · ${attachment.parse_status}`}
+                    {' · '}{attachmentStatus(attachment)}
                   </p>
                 </div>
                 <button type="button" onClick={() => onRemoveAttachment(attachment.attachment_id)} className="rounded p-1 text-slate-400 hover:bg-slate-100" aria-label={`Remove ${attachment.file_name}`}>
@@ -270,14 +283,14 @@ function PreviousAttachments({ batchId, chatId, onReference }: { batchId: string
     </button>
     {open && <div className="absolute bottom-full left-0 z-40 mb-2 max-h-72 w-80 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
       <p className="border-b border-slate-100 px-2 pb-2 text-[10px] leading-4 text-slate-500">
-        References are chat-local and available while retained. Images are chat-only. Documents can be used in chat and generation, but are not saved to Course Space unless uploaded as a Batch file.
+        Temporary files are searchable in this chat for up to 7 days. They are not saved to Course Space. Images remain chat-only.
       </p>
       {loading ? <p className="p-3 text-xs text-slate-500">Loading attachments…</p> : error ? <p className="p-3 text-xs text-red-600">{error}</p> : items.length === 0 ? <p className="p-3 text-xs text-slate-500">No retained attachments in this chat.</p> : items.map((item) => <div key={item.attachment_id} className="flex items-center gap-2 rounded-lg p-2 hover:bg-slate-50">
         {thumbnails[item.attachment_id] ? <img src={thumbnails[item.attachment_id]} alt="" className="h-9 w-9 rounded object-cover" /> : item.attachment_kind === 'image' ? <ImageIcon className="h-5 w-5 text-sky-600" /> : <FileText className="h-5 w-5 text-emerald-600" />}
         <div className="min-w-0 flex-1">
           <p className="truncate text-xs font-medium text-slate-700">{item.file_title || item.file_name}</p>
           <p className="text-[11px] text-slate-400">
-            {item.attachment_kind === 'image' ? `vision ${item.vision_status}` : item.parse_status}
+            {item.attachment_kind === 'image' ? `vision ${item.vision_status}${item.rag_status === 'ready' || item.rag_status === 'partial' ? ' · searchable by summary' : ''}` : item.semantic_search_ready ? 'semantic search ready' : item.chunk_status === 'pending' ? 'indexing for this chat' : item.rag_status === 'ready' || item.rag_status === 'partial' ? 'searchable in this chat' : item.parse_status}
             {' · '}{(item.size_bytes / 1024 / 1024).toFixed(1)} MB
             {' · '}{item.created_at ? new Date(item.created_at).toLocaleDateString() : 'date unavailable'}
           </p>

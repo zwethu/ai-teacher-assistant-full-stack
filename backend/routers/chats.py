@@ -147,6 +147,7 @@ async def get_chat_endpoint(
 async def upload_chat_attachment_endpoint(
     batch_id: str,
     chat_id: str,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     file_title: str = Form(""),
     current_user: CurrentUser = Depends(get_current_user),
@@ -156,11 +157,15 @@ async def upload_chat_attachment_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
     data = await file.read()
     try:
-        return create_chat_attachment(
+        attachment = create_chat_attachment(
             batch_id=batch_id, chat_id=chat_id, lecturer_id=lecturer_id,
             file_name=file.filename or "upload", file_title=file_title,
             content_type=file.content_type or "application/octet-stream", data=data,
         )
+        if attachment.embedding_status == "pending" or attachment.ocr_status == "pending":
+            from services.chat_file_rag_service import enrich_chat_attachment
+            background_tasks.add_task(enrich_chat_attachment, batch_id, chat_id, attachment.attachment_id)
+        return attachment
     except AttachmentValidationError as exc:
         detail = str(exc)
         code = status.HTTP_413_REQUEST_ENTITY_TOO_LARGE if "MB" in detail or "quota" in detail else status.HTTP_422_UNPROCESSABLE_ENTITY
@@ -179,12 +184,30 @@ async def list_chat_attachments_endpoint(
 
 @router.get("/{chat_id}/attachments/search", response_model=dict)
 async def search_chat_attachments_endpoint(
-    batch_id: str, chat_id: str, q: str, limit: int = 10,
+    batch_id: str, chat_id: str, q: str, limit: int = 10, attachment_id: str | None = None,
     current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     if get_chat(batch_id, chat_id, current_user["uid"]) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
+    if attachment_id:
+        from services.chat_vector_search import search_chat_attachment_chunks
+        return search_chat_attachment_chunks(batch_id, chat_id, current_user["uid"], q, [attachment_id], limit)
     return search_chat_attachments_for_agent(batch_id, chat_id, current_user["uid"], q, limit)
+
+
+@router.get("/{chat_id}/attachments/{attachment_id}/rag-status", response_model=dict)
+async def get_chat_attachment_rag_status_endpoint(
+    batch_id: str, chat_id: str, attachment_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    attachment = get_chat_attachment(batch_id, chat_id, attachment_id, current_user["uid"])
+    if attachment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+    return attachment.model_dump(include={
+        "attachment_id", "rag_status", "chunk_status", "embedding_status",
+        "semantic_search_ready", "chunk_count", "indexed_chars", "ocr_status",
+        "expires_at", "rag_updated_at",
+    })
 
 
 @router.get("/{chat_id}/attachments/{attachment_id}", response_model=ChatAttachment)

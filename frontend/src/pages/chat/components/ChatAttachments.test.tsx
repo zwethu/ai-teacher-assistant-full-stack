@@ -19,12 +19,15 @@ afterEach(() => cleanup())
 const imageAttachment: PendingChatAttachment = {
   attachment_id: 'image-1', batch_id: 'batch-1', chat_id: 'chat-1', message_id: null,
   lecturer_id: 'lecturer-1', file_name: 'board.png', file_title: 'board.png',
-  content_type: 'image/png', size_bytes: 1000, gcs_path: 'gs://bucket/board.png',
-  thumbnail_gcs_path: 'gs://bucket/thumb.jpg', scope: 'chat', attachment_kind: 'image',
-  parse_status: 'skipped', vision_status: 'ready', extracted_text_path: null,
+  content_type: 'image/png', size_bytes: 1000,
+  scope: 'chat', attachment_kind: 'image',
+  parse_status: 'skipped', vision_status: 'ready',
   extracted_text_preview: '', vision_summary: 'A whiteboard', ocr_text: 'Week 1',
   expires_at: null, promoted_file_id: null, promotion_allowed: false,
   thumbnail_available: true, created_at: null, updated_at: null,
+  rag_status: 'ready', chunk_status: 'ready', embedding_status: 'skipped',
+  semantic_search_ready: false, chunk_count: 1, indexed_chars: 20,
+  ocr_status: 'not_needed', rag_updated_at: null,
 }
 
 function renderInput(overrides: Partial<ComponentProps<typeof ChatInput>> = {}) {
@@ -65,13 +68,22 @@ describe('chat attachment composer', () => {
       attachment_kind: 'document', parse_status: 'ready', vision_status: 'skipped',
       vision_source: 'none', thumbnail_available: false, created_at: '2026-01-01T00:00:00Z',
       expires_at: '2026-02-01T00:00:00Z',
+      rag_status: 'ready', chunk_status: 'ready', embedding_status: 'skipped',
+      semantic_search_ready: false, chunk_count: 2, indexed_chars: 2048,
+      ocr_status: 'not_needed', rag_updated_at: '2026-01-01T00:00:00Z',
     }])
     const props = renderInput({ batchId: 'batch-1', chatId: 'chat-1', pendingAttachments: [] })
     fireEvent.click(screen.getByRole('button', { name: /Previous attachments/ }))
     await waitFor(() => expect(screen.getByText('Week one')).toBeTruthy())
-    expect(screen.getByText(/References are chat-local/)).toBeTruthy()
+    expect(screen.getByText(/searchable in this chat for up to 7 days/)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Reference' }))
     expect(props.onInputChange).toHaveBeenCalledWith(expect.stringContaining('Attachment ID: doc-1'))
+    expect(screen.queryByText(/gs:\/\//)).toBeNull()
+  })
+
+  it('shows temporary RAG lifecycle states without storage paths', () => {
+    renderInput({ pendingAttachments: [{ ...imageAttachment, attachment_kind: 'document', file_name: 'long.pdf', rag_status: 'pending', chunk_status: 'pending', vision_status: 'skipped' }] })
+    expect(screen.getByText(/indexing for this chat/)).toBeTruthy()
     expect(screen.queryByText(/gs:\/\//)).toBeNull()
   })
 

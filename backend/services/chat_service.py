@@ -348,13 +348,22 @@ def add_user_message_with_attachments(
         }
         txn.set(msg_ref, doc)
         for ref in refs:
-            from services.attachment_constants import ATTACHMENT_RETENTION_DAYS
+            from services.attachment_constants import get_chat_attachment_retention_days
             from datetime import datetime, timedelta, timezone
-            txn.update(ref, {"message_id": msg_id, "expires_at": datetime.now(timezone.utc) + timedelta(days=ATTACHMENT_RETENTION_DAYS), "updated_at": SERVER_TIMESTAMP})
+            txn.update(ref, {"message_id": msg_id, "expires_at": datetime.now(timezone.utc) + timedelta(days=get_chat_attachment_retention_days()), "updated_at": SERVER_TIMESTAMP})
         txn.update(chat_ref, {"updated_at": SERVER_TIMESTAMP})
         return snapshots, records
 
     snapshots, records = _commit(transaction)
+    from services.attachment_constants import get_chat_attachment_retention_days
+    from services.chat_file_rag_service import update_attachment_chunks_expiry
+    from datetime import datetime, timedelta, timezone
+    chunk_expiry = datetime.now(timezone.utc) + timedelta(days=get_chat_attachment_retention_days())
+    for attachment_id in ids:
+        try:
+            update_attachment_chunks_expiry(batch_id, chat_id, attachment_id, chunk_expiry, msg_id)
+        except Exception:
+            logger.exception("Failed to propagate attachment chunk association attachment_id=%s", attachment_id)
     return {
         "message_id": msg_id, "chat_id": chat_id, "role": "user", "content": content,
         "run_id": run_id, "attachments": snapshots,

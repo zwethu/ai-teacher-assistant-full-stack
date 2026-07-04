@@ -128,3 +128,45 @@ def delete_prefix(lecturer_id: str, batch_id: str) -> int:
             logger.warning("Failed to delete blob %s: %s", blob.name, exc)
     logger.info("Deleted %d objects under gs://%s/%s", len(blobs), bucket_name, prefix)
     return len(blobs)
+
+
+def blob_exists(gcs_path: str) -> bool:
+    """Return True if a gs:// object exists. Malformed paths return False."""
+    if not gcs_path.startswith("gs://"):
+        return False
+    bucket_name, _, blob_path = gcs_path[5:].partition("/")
+    if not blob_path:
+        return False
+    try:
+        return _get_client().bucket(bucket_name).blob(blob_path).exists()
+    except Exception as exc:
+        logger.warning("blob_exists check failed for %s: %s", gcs_path, exc)
+        return False
+
+
+def list_chat_attachment_object_uris(limit: int = 200) -> list[tuple[str, tuple[str, str, str]]]:
+    """List primary chat-attachment objects and parse their (batch, chat, attachment) ids.
+
+    Path shape: lecturers/{l}/batches/{b}/chats/{c}/attachments/{a}/{file}. Skips
+    thumbnails and derived extracted-text blobs (reconciliation keys off the doc's
+    primary object). Bounded by `limit` distinct attachment prefixes.
+    """
+    bucket_name = _get_bucket_name()
+    client = _get_client()
+    seen: dict[str, tuple[str, tuple[str, str, str]]] = {}
+    for blob in client.list_blobs(bucket_name, prefix="lecturers/"):
+        parts = blob.name.split("/")
+        # lecturers/{l}/batches/{b}/chats/{c}/attachments/{a}/{file...}
+        #    [0]    [1]  [2]    [3] [4]  [5] [6]        [7]  [8]
+        if len(parts) < 9 or parts[2] != "batches" or parts[4] != "chats" or parts[6] != "attachments":
+            continue
+        file_component = parts[8]
+        if file_component in {"thumbnail.jpg", "extracted_text.txt"}:
+            continue
+        batch_id, chat_id, attachment_id = parts[3], parts[5], parts[7]
+        if attachment_id in seen:
+            continue
+        seen[attachment_id] = (f"gs://{bucket_name}/{blob.name}", (batch_id, chat_id, attachment_id))
+        if len(seen) >= limit:
+            break
+    return list(seen.values())

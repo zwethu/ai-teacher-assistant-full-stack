@@ -36,6 +36,7 @@ from services.attachment_constants import (
     THUMBNAIL_MAX_SIZE,
     TOKENS_PER_PDF_PAGE,
     get_chat_attachment_retention_days,
+    get_unsent_attachment_grace_hours,
 )
 from utils.firestore_client import get_firestore
 from utils.gcs import (
@@ -403,7 +404,8 @@ def create_chat_attachment(
         _release_chat_storage(batch_id, chat_id, len(data))
         raise
 
-    expires_at = datetime.now(timezone.utc) + timedelta(days=get_chat_attachment_retention_days())
+    # Unsent grace TTL; reset to the full retention window on message association.
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=get_unsent_attachment_grace_hours())
     payload = {
         "attachment_id": attachment_id, "batch_id": batch_id, "chat_id": chat_id,
         "message_id": None, "lecturer_id": lecturer_id, "file_name": clean_name,
@@ -647,29 +649,84 @@ def delete_all_chat_attachments(batch_id: str, chat_id: str) -> None:
 
 
 def cleanup_expired_attachments(limit: int = 100) -> int:
+    """Hard-TTL reaper: delete every chat attachment past its expires_at.
+
+    No sliding extension — an unsent file dies 24h after upload, a sent file
+    dies 7 days after message association, regardless of chat activity. Long-term
+    storage is Course Space promotion, not chat retention.
+    """
     db = get_firestore()
     now = datetime.now(timezone.utc)
-    retention_days = get_chat_attachment_retention_days()
-    cutoff = now - timedelta(days=retention_days)
     docs = db.collection_group(ATTACHMENTS_SUBCOLLECTION).where("expires_at", "<=", now).limit(limit).stream()
     cleaned = 0
     for doc in docs:
         data = doc.to_dict() or {}
         if data.get("scope") != "chat":
             continue
-        chat_snap = doc.reference.parent.parent.get()
-        chat_data = chat_snap.to_dict() or {}
-        updated = chat_data.get("updated_at")
-        if updated and updated > cutoff:
-            expires_at = updated + timedelta(days=retention_days)
-            from services.chat_file_rag_service import update_attachment_chunks_expiry
-            try:
-                update_attachment_chunks_expiry(str(data.get("batch_id") or ""), str(data.get("chat_id") or ""), doc.id, expires_at)
-            except Exception:
-                logger.exception("Failed to extend attachment chunk retention attachment_id=%s", doc.id)
-                continue
-            doc.reference.update({"expires_at": expires_at, "updated_at": SERVER_TIMESTAMP})
-            continue
         if delete_attachment_record(str(data.get("batch_id") or ""), str(data.get("chat_id") or ""), doc.id) in {"deleted", "not_found"}:
             cleaned += 1
     return cleaned
+
+
+def reconcile_orphaned_attachments(limit: int = 200, dry_run: bool = True) -> dict[str, Any]:
+    """Weekly sweep for dangling state in both directions.
+
+    docs_without_blobs: Firestore attachment docs whose GCS object is gone
+      (e.g. a delete that failed mid-way) — the doc is removed.
+    blobs_without_docs: GCS objects under the chat-attachment prefix with no
+      backing Firestore doc — the object is removed.
+
+    dry_run=True (default) only reports; flip to False to act. Always logs counts.
+    """
+    from utils.gcs import blob_exists, list_chat_attachment_object_uris
+
+    db = get_firestore()
+    result: dict[str, Any] = {
+        "dry_run": dry_run, "docs_without_blobs": [], "blobs_without_docs": [],
+        "docs_deleted": 0, "blobs_deleted": 0,
+    }
+
+    # Direction 1: docs whose primary object is missing.
+    for doc in db.collection_group(ATTACHMENTS_SUBCOLLECTION).limit(limit).stream():
+        data = doc.to_dict() or {}
+        if data.get("scope") != "chat":
+            continue
+        gcs_path = str(data.get("gcs_path") or "")
+        if not gcs_path or blob_exists(gcs_path):
+            continue
+        result["docs_without_blobs"].append(doc.id)
+        if not dry_run and delete_attachment_record(
+            str(data.get("batch_id") or ""), str(data.get("chat_id") or ""), doc.id
+        ) in {"deleted", "not_found"}:
+            result["docs_deleted"] += 1
+
+    # Direction 2: objects with no backing doc (bounded scan).
+    for uri, ids in list_chat_attachment_object_uris(limit=limit):
+        batch_id, chat_id, attachment_id = ids
+        snap = attachment_ref(batch_id, chat_id, attachment_id).get()
+        if snap.exists:
+            continue
+        result["blobs_without_docs"].append(uri)
+        if not dry_run:
+            from utils.gcs import delete_blob
+            if delete_blob(uri):
+                result["blobs_deleted"] += 1
+
+    logger.info(
+        "attachment reconciliation dry_run=%s docs_without_blobs=%d blobs_without_docs=%d "
+        "docs_deleted=%d blobs_deleted=%d",
+        dry_run, len(result["docs_without_blobs"]), len(result["blobs_without_docs"]),
+        result["docs_deleted"], result["blobs_deleted"],
+    )
+    return result
+
+
+def run_attachment_reconciliation() -> dict[str, Any]:
+    """Scheduler entrypoint. Dry-run by default; set CHAT_ATTACHMENT_RECONCILE_ENFORCE=true
+    to actually delete orphans once the dry-run output has been reviewed."""
+    enforce = os.getenv("CHAT_ATTACHMENT_RECONCILE_ENFORCE", "false").strip().lower() == "true"
+    try:
+        return reconcile_orphaned_attachments(dry_run=not enforce)
+    except Exception:
+        logger.exception("attachment reconciliation failed")
+        return {"dry_run": not enforce, "error": True}

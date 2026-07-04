@@ -66,7 +66,13 @@ def _bounded_int(name: str, default: int, minimum: int, maximum: int) -> int:
 
 
 def get_chat_attachment_retention_days() -> int:
+    """Hard TTL for a SENT attachment, measured from message association."""
     return _bounded_int("CHAT_ATTACHMENT_RETENTION_DAYS", 7, 1, 30)
+
+
+def get_unsent_attachment_grace_hours() -> int:
+    """Hard TTL for an UNSENT attachment (uploaded, never attached to a message)."""
+    return _bounded_int("CHAT_UNSENT_ATTACHMENT_GRACE_HOURS", 24, 1, 168)
 
 
 def get_chat_rag_max_extracted_chars() -> int:

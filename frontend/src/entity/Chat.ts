@@ -3,7 +3,8 @@ export type AttachmentStatus = 'pending' | 'ready' | 'failed' | 'skipped'
 export type RagStatus = 'pending' | 'ready' | 'partial' | 'failed' | 'skipped'
 export type OcrStatus = 'not_needed' | 'pending' | 'ready' | 'failed' | 'skipped'
 // Native-first lifecycle status (single source of truth for readiness).
-export type AttachmentProcessingStatus = 'processing' | 'ready' | 'failed'
+// too_large: exceeds the per-file native-read ceiling; cannot be sent.
+export type AttachmentProcessingStatus = 'processing' | 'ready' | 'failed' | 'too_large'
 
 export type ChatAttachmentRagState = {
   rag_status: RagStatus

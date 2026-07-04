@@ -84,6 +84,7 @@ export function ChatInput({
         : 'Message your teaching assistant...'
 
   const attachmentStatus = (attachment: PendingChatAttachment) => {
+    if (attachment.status === 'too_large') return 'too large — add to Course Space'
     if (attachment.status === 'processing') return 'processing…'
     if (attachment.status === 'failed') return 'processing failed'
     if (attachment.attachment_kind === 'image') {
@@ -91,6 +92,10 @@ export function ChatInput({
     }
     return 'ready'
   }
+
+  const hasBlockingAttachment = pendingAttachments.some(
+    (attachment) => attachment.status === 'too_large' || attachment.status === 'failed',
+  )
 
   return (
     <footer
@@ -194,6 +199,9 @@ export function ChatInput({
         {pendingAttachments.some((attachment) => attachment.status === 'processing') && (
           <p className="mb-1 text-xs text-slate-500">Some attachments are still processing — you can send now, and the assistant may note a file isn't ready yet.</p>
         )}
+        {hasBlockingAttachment && (
+          <p className="mb-1 text-xs text-amber-600">Remove the flagged attachment to send. Large files belong in Course Space, where they’re indexed for retrieval.</p>
+        )}
         {batchId && chatId && <PreviousAttachments batchId={batchId} chatId={chatId} onReference={(attachment) => {
           const mention = `Please use the earlier attachment ${attachment.file_name}. Attachment ID: ${attachment.attachment_id}`
           onInputChange(input.trim() ? `${input.trim()}\n${mention}` : mention)
@@ -233,7 +241,7 @@ export function ChatInput({
           <button
             type="button"
             onClick={onSend}
-            disabled={(!input.trim() && pendingAttachments.length === 0) || disabled || sending || attachmentsUploading}
+            disabled={(!input.trim() && pendingAttachments.length === 0) || disabled || sending || attachmentsUploading || hasBlockingAttachment}
             className="flex-shrink-0 inline-flex items-center justify-center w-10 h-10 mb-0.5 mr-1 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-600/25 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
             aria-label="Send message"
           >

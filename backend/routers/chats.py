@@ -35,6 +35,7 @@ from services.chat_service import (
 )
 from entity.ChatAttachment import ChatAttachment
 from services.chat_attachment_service import (
+    AttachmentTooLargeError,
     AttachmentValidationError,
     create_chat_attachment,
     get_attachment_url,
@@ -171,6 +172,8 @@ async def upload_chat_attachment_endpoint(
                 process_chat_attachment, batch_id, chat_id, attachment.attachment_id, data
             )
         return attachment
+    except AttachmentTooLargeError as exc:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
     except AttachmentValidationError as exc:
         detail = str(exc)
         code = status.HTTP_413_REQUEST_ENTITY_TOO_LARGE if "MB" in detail or "quota" in detail else status.HTTP_422_UNPROCESSABLE_ENTITY

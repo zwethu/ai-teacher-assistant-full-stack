@@ -90,6 +90,13 @@ describe('chat attachment composer', () => {
     expect(screen.queryByText(/gs:\/\//)).toBeNull()
   })
 
+  it('flags an oversize file and blocks sending it', () => {
+    renderInput({ pendingAttachments: [{ ...imageAttachment, attachment_kind: 'document', file_name: 'huge.pdf', status: 'too_large', vision_status: 'skipped' }] })
+    expect(screen.getByText(/too large — add to Course Space/)).toBeTruthy()
+    expect(screen.getByText(/Remove the flagged attachment/)).toBeTruthy()
+    expect((screen.getByRole('button', { name: 'Send message' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
   it('keeps historical image View and Ask actions separate without promotion', () => {
     const onAsk = vi.fn()
     render(<MessageRow batchId="batch-1" onAskAboutAttachment={onAsk} msg={{

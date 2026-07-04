@@ -34,8 +34,13 @@ from services.attachment_constants import (
     THUMBNAIL_MAX_SIZE,
     TOKENS_PER_PDF_PAGE,
     get_chat_attachment_retention_days,
+    get_max_native_read_tokens,
     get_unsent_attachment_grace_hours,
 )
+
+# Document types whose native-read token cost can be estimated cheaply at upload
+# (page count / char count) without full extraction — enables an early 413.
+_UPLOAD_SIZEABLE_TYPES = frozenset({"application/pdf", "text/plain", "text/markdown", "text/csv"})
 from utils.firestore_client import get_firestore
 from utils.gcs import (
     chat_attachment_blob_path,
@@ -53,6 +58,17 @@ ATTACHMENTS_SUBCOLLECTION = "attachments"
 
 class AttachmentValidationError(ValueError):
     pass
+
+
+class AttachmentTooLargeError(AttachmentValidationError):
+    """The file is too large for native chat reading — steer it to Course Space."""
+    pass
+
+
+TOO_LARGE_FOR_CHAT_MESSAGE = (
+    "This file is too large to use in chat. Add it to the batch's Course Space, "
+    "where large documents are indexed for retrieval."
+)
 
 
 def _chat_ref(batch_id: str, chat_id: str):
@@ -338,6 +354,12 @@ def create_chat_attachment(
     process_chat_attachment as a background task.
     """
     clean_name, normalized_type = validate_attachment(file_name, content_type, data)
+    # Fail fast on files we can size cheaply (PDF page count, text length); Office
+    # files are sized after background extraction (they flip to status=too_large).
+    if normalized_type in _UPLOAD_SIZEABLE_TYPES:
+        early_estimate = _estimate_document_tokens(data, normalized_type, len(data))
+        if early_estimate > get_max_native_read_tokens():
+            raise AttachmentTooLargeError(TOO_LARGE_FOR_CHAT_MESSAGE)
     digest = _content_sha256(data)
     duplicate = _find_reusable_duplicate(batch_id, chat_id, lecturer_id, digest)
     if duplicate is not None:
@@ -424,9 +446,13 @@ def process_chat_attachment(batch_id: str, chat_id: str, attachment_id: str, dat
                 updates["extracted_text_path"] = upload_bytes(
                     text_blob_path, full_text.encode("utf-8"), "text/plain"
                 )
+            token_estimate = _estimate_document_tokens(data, content_type, len(full_text))
+            # Office files are sized here (couldn't be sized cheaply at upload).
+            over_limit = token_estimate > get_max_native_read_tokens()
             updates.update({
-                "token_estimate": _estimate_document_tokens(data, content_type, len(full_text)),
-                "parse_status": "ready", "status": "ready",
+                "token_estimate": token_estimate,
+                "parse_status": "ready",
+                "status": "too_large" if over_limit else "ready",
             })
     except Exception as exc:
         logger.warning("Attachment processing failed attachment_id=%s: %s", attachment_id, exc)

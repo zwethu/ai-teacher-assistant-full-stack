@@ -49,6 +49,12 @@ IMAGE_TOKEN_ESTIMATE = 1_290       # ~5 tiles x 258; conservative flat estimate
 CHARS_PER_TOKEN = 4                # text-like estimation divisor
 MAX_FULL_EXTRACT_CHARS = 500_000   # bound for full-text extraction of docx/pptx
 
+# Per-file native-read ceiling. Cost/quality guard, NOT a model context limit
+# (Gemini handles ~1M). Keep in step with the agent's NATIVE_READ_MAX_TOKENS.
+# Files over this are unusable in chat and are steered to Course Space instead.
+def get_max_native_read_tokens() -> int:
+    return _bounded_int("CHAT_ATTACHMENT_MAX_NATIVE_TOKENS", 60_000, 1_000, 900_000)
+
 # MIME types Gemini accepts natively via fileData (gs:// URI). DOCX/PPTX are
 # not natively readable — they are extracted to a text blob at processing time
 # and the manifest points at that derived artifact instead.

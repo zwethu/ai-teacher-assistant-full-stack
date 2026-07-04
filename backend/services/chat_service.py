@@ -334,6 +334,11 @@ def add_user_message_with_attachments(
                 raise PermissionError("Attachment not found or access denied")
             if data.get("message_id"):
                 raise ValueError("An attachment has already been sent.")
+            if data.get("status") == "too_large":
+                raise ValueError(
+                    f"'{data.get('file_name') or 'A file'}' is too large to use in chat. "
+                    "Remove it, or add it to the batch's Course Space."
+                )
             records.append(data)
 
         if sum(1 for item in records if item.get("attachment_kind") == "image") > MAX_IMAGES_PER_MESSAGE:

@@ -1,8 +1,6 @@
 import logging
 from datetime import datetime, timezone
 
-from apscheduler.schedulers.background import BackgroundScheduler
-
 from services.gmail_service import GmailSendError, send_email
 from utils.firestore_client import get_firestore
 
@@ -11,32 +9,9 @@ logger = logging.getLogger(__name__)
 USERS_COLLECTION = "users"
 EMAILS_COLLECTION = "emails"
 
-_scheduler: BackgroundScheduler | None = None
-
-
-def start_scheduler() -> None:
-    """Start the background job that sends due scheduled emails."""
-    global _scheduler
-    if _scheduler is not None and _scheduler.running:
-        return
-
-    _scheduler = BackgroundScheduler()
-    _scheduler.add_job(
-        check_and_send_emails,
-        trigger="interval",
-        minutes=2,
-    )
-    _scheduler.start()
-    logger.info("Email scheduler started (interval: 2 minutes)")
-
-
-def shutdown_scheduler() -> None:
-    """Stop the background email scheduler."""
-    global _scheduler
-    if _scheduler is not None and _scheduler.running:
-        _scheduler.shutdown(wait=False)
-        logger.info("Email scheduler stopped")
-    _scheduler = None
+# NOTE: the scheduling of check_and_send_emails is owned by maintenance_scheduler
+# (local dev, APScheduler) or Cloud Scheduler -> /tasks/cron/send-emails (prod).
+# The previous standalone APScheduler here was dead code and has been removed.
 
 
 def check_and_send_emails() -> None:

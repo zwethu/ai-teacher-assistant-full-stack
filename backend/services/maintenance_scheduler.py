@@ -14,7 +14,13 @@ logger = logging.getLogger(__name__)
 _scheduler: BackgroundScheduler | None = None
 
 def start_scheduler() -> None:
+    """Local-dev cron. In production (CLOUD_TASKS_ENABLED=true) Cloud Scheduler drives
+    the /tasks/cron/* endpoints instead, so the in-process scheduler stays off."""
     global _scheduler
+    from services.cloud_tasks import cloud_tasks_enabled
+    if cloud_tasks_enabled():
+        logger.info("Cloud Tasks enabled — cron handled by Cloud Scheduler; APScheduler not started")
+        return
     if _scheduler and _scheduler.running: return
     _scheduler = BackgroundScheduler()
     _scheduler.add_job(check_and_send_emails, "interval", minutes=2, id="scheduled-emails", max_instances=1)

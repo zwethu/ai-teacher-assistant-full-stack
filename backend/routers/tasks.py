@@ -71,6 +71,26 @@ async def _handle_attachment_watchdog(_payload: dict[str, Any]) -> None:
     await asyncio.to_thread(run_attachment_watchdog)
 
 
+async def _handle_cron_send_emails(_payload: dict[str, Any]) -> None:
+    from services.email_scheduler import check_and_send_emails
+    await asyncio.to_thread(check_and_send_emails)
+
+
+async def _handle_cron_cleanup_attachments(_payload: dict[str, Any]) -> None:
+    from services.chat_attachment_service import cleanup_expired_attachments
+    await asyncio.to_thread(cleanup_expired_attachments)
+
+
+async def _handle_cron_reconcile_attachments(_payload: dict[str, Any]) -> None:
+    from services.chat_attachment_service import run_attachment_reconciliation
+    await asyncio.to_thread(run_attachment_reconciliation)
+
+
+async def _handle_cron_recover_files(_payload: dict[str, Any]) -> None:
+    from services.file_service import recover_batch_files
+    await asyncio.to_thread(recover_batch_files)
+
+
 async def _handle_index_file(payload: dict[str, Any]) -> None:
     from services.file_service import run_index_file_task
 
@@ -107,6 +127,26 @@ async def attachment_watchdog_task(request: Request, _: None = Depends(verify_ta
     await _handle_attachment_watchdog({})
 
 
+@router.post("/cron/send-emails", status_code=status.HTTP_204_NO_CONTENT)
+async def cron_send_emails(request: Request, _: None = Depends(verify_task_caller)) -> None:
+    await _handle_cron_send_emails({})
+
+
+@router.post("/cron/cleanup-attachments", status_code=status.HTTP_204_NO_CONTENT)
+async def cron_cleanup_attachments(request: Request, _: None = Depends(verify_task_caller)) -> None:
+    await _handle_cron_cleanup_attachments({})
+
+
+@router.post("/cron/reconcile-attachments", status_code=status.HTTP_204_NO_CONTENT)
+async def cron_reconcile_attachments(request: Request, _: None = Depends(verify_task_caller)) -> None:
+    await _handle_cron_reconcile_attachments({})
+
+
+@router.post("/cron/recover-files", status_code=status.HTTP_204_NO_CONTENT)
+async def cron_recover_files(request: Request, _: None = Depends(verify_task_caller)) -> None:
+    await _handle_cron_recover_files({})
+
+
 @router.post("/index-file", status_code=status.HTTP_204_NO_CONTENT)
 async def index_file_task(request: Request, _: None = Depends(verify_task_caller)) -> None:
     await _handle_index_file(await request.json())
@@ -122,3 +162,7 @@ register_local_handler("/tasks/run-agent", _handle_run_agent)
 register_local_handler("/tasks/cron/attachment-watchdog", _handle_attachment_watchdog)
 register_local_handler("/tasks/index-file", _handle_index_file)
 register_local_handler("/tasks/check-indexing", _handle_check_indexing)
+register_local_handler("/tasks/cron/send-emails", _handle_cron_send_emails)
+register_local_handler("/tasks/cron/cleanup-attachments", _handle_cron_cleanup_attachments)
+register_local_handler("/tasks/cron/reconcile-attachments", _handle_cron_reconcile_attachments)
+register_local_handler("/tasks/cron/recover-files", _handle_cron_recover_files)

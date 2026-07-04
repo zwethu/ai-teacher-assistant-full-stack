@@ -42,7 +42,6 @@ from services.chat_attachment_service import (
     delete_attachment_record,
     list_chat_attachments_for_agent,
     process_chat_attachment,
-    search_chat_attachments_for_agent,
 )
 from services.google_workspace.credentials import (
     GoogleOAuthInvalidError,
@@ -186,19 +185,6 @@ async def list_chat_attachments_endpoint(
     if get_chat(batch_id, chat_id, current_user["uid"]) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
     return list_chat_attachments_for_agent(batch_id, chat_id, current_user["uid"], limit)
-
-
-@router.get("/{chat_id}/attachments/search", response_model=dict)
-async def search_chat_attachments_endpoint(
-    batch_id: str, chat_id: str, q: str, limit: int = 10, attachment_id: str | None = None,
-    current_user: CurrentUser = Depends(get_current_user),
-) -> dict:
-    if get_chat(batch_id, chat_id, current_user["uid"]) is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
-    if attachment_id:
-        from services.chat_vector_search import search_chat_attachment_chunks
-        return search_chat_attachment_chunks(batch_id, chat_id, current_user["uid"], q, [attachment_id], limit)
-    return search_chat_attachments_for_agent(batch_id, chat_id, current_user["uid"], q, limit)
 
 
 @router.get("/{chat_id}/attachments/{attachment_id}/rag-status", response_model=dict)

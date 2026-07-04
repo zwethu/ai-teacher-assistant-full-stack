@@ -118,11 +118,6 @@ export async function listChatAttachments(batchId: string, chatId: string, limit
   return res.data
 }
 
-export async function searchChatAttachments(batchId: string, chatId: string, query: string) {
-  const res = await api.get<{ status: string; query: string; hits: Array<Record<string, unknown>> }>(`/batches/${batchId}/chats/${chatId}/attachments/search`, { params: { q: query } })
-  return res.data
-}
-
 export async function getChatAttachmentRagStatus(batchId: string, chatId: string, attachmentId: string): Promise<ChatAttachmentStatusUpdate> {
   const res = await api.get<ChatAttachmentStatusUpdate>(`/batches/${batchId}/chats/${chatId}/attachments/${attachmentId}/rag-status`)
   return res.data

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import csv
 import hashlib
 import io
 import json
@@ -11,7 +10,6 @@ import math
 import os
 import uuid
 import zipfile
-import re
 from datetime import datetime, timedelta, timezone
 from pathlib import PurePath
 from typing import Any
@@ -223,56 +221,6 @@ def _validate_image(data: bytes, content_type: str) -> None:
             image.verify()
     except (UnidentifiedImageError, OSError) as exc:
         raise AttachmentValidationError("The image is malformed or unsupported.") from exc
-
-
-def _extract_document(data: bytes, content_type: str) -> str:
-    limit = MAX_EXTRACTED_PREVIEW_CHARS
-    if content_type == "application/pdf":
-        from pypdf import PdfReader
-        parts: list[str] = []
-        size = 0
-        for page in PdfReader(io.BytesIO(data)).pages:
-            text = page.extract_text() or ""
-            parts.append(text)
-            size += len(text)
-            if size >= limit:
-                break
-        return "\n\n".join(parts)[:limit]
-    if "wordprocessingml" in content_type:
-        from docx import Document
-        doc = Document(io.BytesIO(data))
-        parts: list[str] = []
-        size = 0
-        for paragraph in doc.paragraphs:
-            parts.append(paragraph.text)
-            size += len(paragraph.text)
-            if size >= limit:
-                break
-        return "\n".join(parts)[:limit]
-    if "presentationml" in content_type:
-        from pptx import Presentation
-        presentation = Presentation(io.BytesIO(data))
-        lines: list[str] = []
-        for slide in presentation.slides:
-            for shape in slide.shapes:
-                if hasattr(shape, "text") and shape.text:
-                    lines.append(shape.text)
-                    if sum(len(line) for line in lines) >= limit:
-                        return "\n".join(lines)[:limit]
-        return "\n".join(lines)[:limit]
-    text = data[: max(limit * 4, limit)].decode("utf-8-sig", errors="ignore")
-    if content_type == "text/csv":
-        rows = csv.reader(io.StringIO(text))
-        output: list[str] = []
-        size = 0
-        for row in rows:
-            line = " | ".join(cell.strip() for cell in row)
-            output.append(line)
-            size += len(line)
-            if size >= limit:
-                break
-        return "\n".join(output)[:limit]
-    return text[:limit]
 
 
 def _thumbnail_bytes(data: bytes) -> bytes:
@@ -586,33 +534,6 @@ def get_chat_attachment_for_agent(batch_id: str, chat_id: str, lecturer_id: str,
     return _agent_safe_attachment(snap.id, data)
 
 
-def search_chat_attachments_for_agent(batch_id: str, chat_id: str, lecturer_id: str, query: str, limit: int = 10) -> dict[str, Any]:
-    from services.chat_vector_search import search_chat_attachment_chunks
-    rag = search_chat_attachment_chunks(batch_id, chat_id, lecturer_id, query, max_results=limit)
-    if rag.get("hits"):
-        return rag
-    if not _owned_visible_chat(batch_id, chat_id, lecturer_id):
-        return {"status": "empty", "query": query[:500], "hits": []}
-    terms = set(re.findall(r"[\w-]{2,}", query.lower())); scored: list[tuple[int, dict[str, Any]]] = []
-    docs = _chat_ref(batch_id, chat_id).collection(ATTACHMENTS_SUBCOLLECTION).order_by("created_at", direction="DESCENDING").limit(100).stream()
-    for doc in docs:
-        data = doc.to_dict() or {}
-        if data.get("lecturer_id") != lecturer_id or data.get("scope") != "chat" or _is_expired(data): continue
-        item = _agent_safe_attachment(doc.id, data, include_context=True)
-        fields = {
-            "file_name": item["file_name"], "file_title": item["file_title"],
-            "extracted_text_preview": item.get("extracted_text_preview", ""),
-            "vision_summary": item.get("vision_summary", ""), "ocr_text": item.get("ocr_text", ""),
-        }
-        matched = [name for name, value in fields.items() if terms & set(re.findall(r"[\w-]{2,}", str(value).lower()))]
-        score = sum(len(terms & set(re.findall(r"[\w-]{2,}", str(value).lower()))) for value in fields.values())
-        if terms and score == 0: continue
-        source = next((str(fields[name]) for name in ("extracted_text_preview", "vision_summary", "ocr_text", "file_title", "file_name") if name in matched and fields[name]), item["file_title"])
-        scored.append((score, {key: item[key] for key in ("attachment_id", "message_id", "file_name", "file_title", "attachment_kind", "content_type", "created_at", "expires_at")} | {"matched_fields": matched, "snippet": source[:1500], "score": score}))
-    hits = [item for _, item in sorted(scored, key=lambda entry: (-entry[0], str(entry[1].get("created_at") or "")), reverse=False)[:max(1, min(limit, 10))]]
-    return {"status": "success" if hits else "empty", "query": query[:500], "hits": hits, "retrieval_mode": "lexical"}
-
-
 def get_attachment_url(batch_id: str, chat_id: str, attachment_id: str, lecturer_id: str, thumbnail: bool) -> str | None:
     snap = attachment_ref(batch_id, chat_id, attachment_id).get(); data = snap.to_dict() or {}
     if not snap.exists or data.get("lecturer_id") != lecturer_id or data.get("batch_id") != batch_id or data.get("chat_id") != chat_id or _is_expired(data):
@@ -634,9 +555,6 @@ def delete_attachment_record(batch_id: str, chat_id: str, attachment_id: str, le
         return "sent"
     paths = [data.get("gcs_path"), data.get("thumbnail_gcs_path"), data.get("extracted_text_path")]
     if not all(delete_blob(str(path)) for path in paths if path):
-        return "storage_failed"
-    from services.chat_file_rag_service import delete_attachment_chunks
-    if not delete_attachment_chunks(batch_id, chat_id, attachment_id):
         return "storage_failed"
     ref.delete()
     _release_chat_storage(batch_id, chat_id, int(data.get("size_bytes") or 0))

@@ -2,6 +2,8 @@ export type AttachmentKind = 'document' | 'image' | 'other'
 export type AttachmentStatus = 'pending' | 'ready' | 'failed' | 'skipped'
 export type RagStatus = 'pending' | 'ready' | 'partial' | 'failed' | 'skipped'
 export type OcrStatus = 'not_needed' | 'pending' | 'ready' | 'failed' | 'skipped'
+// Native-first lifecycle status (single source of truth for readiness).
+export type AttachmentProcessingStatus = 'processing' | 'ready' | 'failed'
 
 export type ChatAttachmentRagState = {
   rag_status: RagStatus
@@ -21,10 +23,22 @@ export type ChatAttachmentSnapshot = {
   content_type: string
   size_bytes: number
   attachment_kind: AttachmentKind
+  status: AttachmentProcessingStatus
+  token_estimate: number
   parse_status: AttachmentStatus
   vision_status: AttachmentStatus
   thumbnail_available: boolean
   promotion_allowed: false
+}
+
+// Shape returned by the rag-status poll endpoint (native-first fields first).
+export type ChatAttachmentStatusUpdate = ChatAttachmentRagState & {
+  attachment_id: string
+  expires_at: string | null
+  status: AttachmentProcessingStatus
+  parse_status: AttachmentStatus
+  vision_status: AttachmentStatus
+  token_estimate: number
 }
 
 export type ChatAttachment = ChatAttachmentSnapshot & ChatAttachmentRagState & {

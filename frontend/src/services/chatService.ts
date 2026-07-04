@@ -1,4 +1,4 @@
-import type { Chat, ChatAttachment, ChatAttachmentListItem, ChatAttachmentRagState, ChatMessage } from '../entity/Chat'
+import type { Chat, ChatAttachment, ChatAttachmentListItem, ChatAttachmentStatusUpdate, ChatMessage } from '../entity/Chat'
 import api from '../lib/api'
 import type { LessonPlanExportResult } from './artifactService'
 import type { AgentRunEvent, AgentRunStatus, AgentRunStep } from './agentRunStream'
@@ -123,8 +123,8 @@ export async function searchChatAttachments(batchId: string, chatId: string, que
   return res.data
 }
 
-export async function getChatAttachmentRagStatus(batchId: string, chatId: string, attachmentId: string): Promise<ChatAttachmentRagState & { attachment_id: string; expires_at: string | null }> {
-  const res = await api.get<ChatAttachmentRagState & { attachment_id: string; expires_at: string | null }>(`/batches/${batchId}/chats/${chatId}/attachments/${attachmentId}/rag-status`)
+export async function getChatAttachmentRagStatus(batchId: string, chatId: string, attachmentId: string): Promise<ChatAttachmentStatusUpdate> {
+  const res = await api.get<ChatAttachmentStatusUpdate>(`/batches/${batchId}/chats/${chatId}/attachments/${attachmentId}/rag-status`)
   return res.data
 }
 

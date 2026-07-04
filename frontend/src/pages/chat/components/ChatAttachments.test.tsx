@@ -21,6 +21,7 @@ const imageAttachment: PendingChatAttachment = {
   lecturer_id: 'lecturer-1', file_name: 'board.png', file_title: 'board.png',
   content_type: 'image/png', size_bytes: 1000,
   scope: 'chat', attachment_kind: 'image',
+  status: 'ready', token_estimate: 1290,
   parse_status: 'skipped', vision_status: 'ready',
   extracted_text_preview: '', vision_summary: 'A whiteboard', ocr_text: 'Week 1',
   expires_at: null, promoted_file_id: null, promotion_allowed: false,
@@ -65,7 +66,8 @@ describe('chat attachment composer', () => {
     listChatAttachments.mockResolvedValueOnce([{
       attachment_id: 'doc-1', message_id: 'message-1', file_name: 'week-one.pdf',
       file_title: 'Week one', content_type: 'application/pdf', size_bytes: 2048,
-      attachment_kind: 'document', parse_status: 'ready', vision_status: 'skipped',
+      attachment_kind: 'document', status: 'ready', token_estimate: 516,
+      parse_status: 'ready', vision_status: 'skipped',
       vision_source: 'none', thumbnail_available: false, created_at: '2026-01-01T00:00:00Z',
       expires_at: '2026-02-01T00:00:00Z',
       rag_status: 'ready', chunk_status: 'ready', embedding_status: 'skipped',
@@ -75,15 +77,16 @@ describe('chat attachment composer', () => {
     const props = renderInput({ batchId: 'batch-1', chatId: 'chat-1', pendingAttachments: [] })
     fireEvent.click(screen.getByRole('button', { name: /Previous attachments/ }))
     await waitFor(() => expect(screen.getByText('Week one')).toBeTruthy())
-    expect(screen.getByText(/searchable in this chat for up to 7 days/)).toBeTruthy()
+    expect(screen.getByText(/available in this chat for 7 days/)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Reference' }))
     expect(props.onInputChange).toHaveBeenCalledWith(expect.stringContaining('Attachment ID: doc-1'))
     expect(screen.queryByText(/gs:\/\//)).toBeNull()
   })
 
-  it('shows temporary RAG lifecycle states without storage paths', () => {
-    renderInput({ pendingAttachments: [{ ...imageAttachment, attachment_kind: 'document', file_name: 'long.pdf', rag_status: 'pending', chunk_status: 'pending', vision_status: 'skipped' }] })
-    expect(screen.getByText(/indexing for this chat/)).toBeTruthy()
+  it('shows native processing state without storage paths', () => {
+    renderInput({ pendingAttachments: [{ ...imageAttachment, attachment_kind: 'document', file_name: 'long.pdf', status: 'processing', vision_status: 'skipped' }] })
+    expect(screen.getByText(/processing…/)).toBeTruthy()
+    expect(screen.getByText(/still processing/)).toBeTruthy()
     expect(screen.queryByText(/gs:\/\//)).toBeNull()
   })
 

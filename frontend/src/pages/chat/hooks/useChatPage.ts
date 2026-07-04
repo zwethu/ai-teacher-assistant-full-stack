@@ -174,13 +174,15 @@ export function useChatPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const renameInputRef = useRef<HTMLInputElement>(null)
+  // Latest pending (uploaded-but-unsent) attachments, for unmount cleanup.
+  const pendingAttachmentsRef = useRef<PendingChatAttachment[]>([])
+  useEffect(() => { pendingAttachmentsRef.current = pendingAttachments }, [pendingAttachments])
 
   useEffect(() => {
     const batchId = selectedBatch?.id
     const chatId = activeChat?.chat_id
-    const transitional = pendingAttachments.filter((item) =>
-      item.rag_status === 'pending' || item.chunk_status === 'pending' ||
-      item.embedding_status === 'pending' || item.ocr_status === 'pending')
+    // Native-first: readiness is the single `status` field.
+    const transitional = pendingAttachments.filter((item) => item.status === 'processing')
     if (!batchId || !chatId || transitional.length === 0) return
     let cancelled = false
     const refresh = async () => {
@@ -197,7 +199,7 @@ export function useChatPage() {
     const timer = window.setInterval(() => void refresh(), 2500)
     void refresh()
     return () => { cancelled = true; window.clearInterval(timer) }
-  }, [selectedBatch?.id, activeChat?.chat_id, pendingAttachments.map((item) => `${item.attachment_id}:${item.rag_status}:${item.embedding_status}:${item.ocr_status}`).join('|')])
+  }, [selectedBatch?.id, activeChat?.chat_id, pendingAttachments.map((item) => `${item.attachment_id}:${item.status}`).join('|')])
 
   const [connectors, setConnectors] = useState<ConnectorsState>({
     web_search: true,
@@ -538,6 +540,12 @@ export function useChatPage() {
       if (scrollFrameRef.current !== null) {
         window.cancelAnimationFrame(scrollFrameRef.current)
       }
+      // Reap uploaded-but-unsent attachments so abandoning the composer does
+      // not orphan GCS objects + Firestore docs (fire-and-forget).
+      pendingAttachmentsRef.current.forEach((item) => {
+        if (item.previewUrl) URL.revokeObjectURL(item.previewUrl)
+        void deleteChatAttachment(item.batch_id, item.chat_id, item.attachment_id).catch(() => {})
+      })
     }
   }, [])
 

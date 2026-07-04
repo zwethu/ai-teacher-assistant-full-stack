@@ -84,16 +84,12 @@ export function ChatInput({
         : 'Message your teaching assistant...'
 
   const attachmentStatus = (attachment: PendingChatAttachment) => {
+    if (attachment.status === 'processing') return 'processing…'
+    if (attachment.status === 'failed') return 'processing failed'
     if (attachment.attachment_kind === 'image') {
-      const vision = attachment.vision_status === 'ready' ? 'vision ready' : 'vision unavailable'
-      return `chat-only · ${vision}${attachment.rag_status === 'ready' || attachment.rag_status === 'partial' ? ' · searchable by summary' : ''}`
+      return `chat-only · ${attachment.vision_status === 'ready' ? 'vision ready' : 'ready'}`
     }
-    if (attachment.ocr_status === 'pending') return 'OCR running'
-    if (attachment.chunk_status === 'pending') return 'indexing for this chat'
-    if (attachment.rag_status === 'failed') return 'file text unavailable'
-    if (attachment.semantic_search_ready) return 'semantic search ready'
-    if (attachment.rag_status === 'ready' || attachment.rag_status === 'partial') return 'searchable in this chat'
-    return attachment.parse_status === 'ready' ? 'text extracted' : attachment.parse_status
+    return 'ready'
   }
 
   return (
@@ -195,6 +191,9 @@ export function ChatInput({
           </div>
         )}
         {attachmentErrors.map((error) => <p key={error} className="mb-1 text-xs text-red-600">{error}</p>)}
+        {pendingAttachments.some((attachment) => attachment.status === 'processing') && (
+          <p className="mb-1 text-xs text-slate-500">Some attachments are still processing — you can send now, and the assistant may note a file isn't ready yet.</p>
+        )}
         {batchId && chatId && <PreviousAttachments batchId={batchId} chatId={chatId} onReference={(attachment) => {
           const mention = `Please use the earlier attachment ${attachment.file_name}. Attachment ID: ${attachment.attachment_id}`
           onInputChange(input.trim() ? `${input.trim()}\n${mention}` : mention)
@@ -283,14 +282,14 @@ function PreviousAttachments({ batchId, chatId, onReference }: { batchId: string
     </button>
     {open && <div className="absolute bottom-full left-0 z-40 mb-2 max-h-72 w-80 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
       <p className="border-b border-slate-100 px-2 pb-2 text-[10px] leading-4 text-slate-500">
-        Temporary files are searchable in this chat for up to 7 days. They are not saved to Course Space. Images remain chat-only.
+        Chat files are available in this chat for 7 days, then removed. They are not saved to Course Space. To keep a file, add it to the batch's Course Space. Images remain chat-only.
       </p>
       {loading ? <p className="p-3 text-xs text-slate-500">Loading attachments…</p> : error ? <p className="p-3 text-xs text-red-600">{error}</p> : items.length === 0 ? <p className="p-3 text-xs text-slate-500">No retained attachments in this chat.</p> : items.map((item) => <div key={item.attachment_id} className="flex items-center gap-2 rounded-lg p-2 hover:bg-slate-50">
         {thumbnails[item.attachment_id] ? <img src={thumbnails[item.attachment_id]} alt="" className="h-9 w-9 rounded object-cover" /> : item.attachment_kind === 'image' ? <ImageIcon className="h-5 w-5 text-sky-600" /> : <FileText className="h-5 w-5 text-emerald-600" />}
         <div className="min-w-0 flex-1">
           <p className="truncate text-xs font-medium text-slate-700">{item.file_title || item.file_name}</p>
           <p className="text-[11px] text-slate-400">
-            {item.attachment_kind === 'image' ? `vision ${item.vision_status}${item.rag_status === 'ready' || item.rag_status === 'partial' ? ' · searchable by summary' : ''}` : item.semantic_search_ready ? 'semantic search ready' : item.chunk_status === 'pending' ? 'indexing for this chat' : item.rag_status === 'ready' || item.rag_status === 'partial' ? 'searchable in this chat' : item.parse_status}
+            {item.attachment_kind === 'image' ? `chat-only · vision ${item.vision_status === 'ready' ? 'ready' : item.vision_status}` : item.status === 'processing' ? 'processing…' : item.status === 'failed' ? 'processing failed' : 'ready'}
             {' · '}{(item.size_bytes / 1024 / 1024).toFixed(1)} MB
             {' · '}{item.created_at ? new Date(item.created_at).toLocaleDateString() : 'date unavailable'}
           </p>

@@ -35,9 +35,19 @@ function eventRowId(event: AgentRunEvent): string {
   if (event.kind === 'process') {
     return `process:${event.phase || event.title || event.summary}`
   }
-  if (event.kind === 'retrieval') return `retrieval:${event.phase || event.event_id}`
+  if (event.kind === 'retrieval') {
+    // Group all reads/analyses of one file into a single row.
+    if ((event.event_type || '').startsWith('attachment.')) {
+      return `attachment:${event.summary || event.title || event.event_id}`
+    }
+    return `retrieval:${event.phase || event.event_id}`
+  }
   if (event.kind === 'artifact') return `artifact:${event.phase || event.event_id}`
   return `error:${event.phase || event.event_id}`
+}
+
+function isAttachmentEvent(event: AgentRunEvent): boolean {
+  return (event.event_type || '').startsWith('attachment.')
 }
 
 function eventKind(event: AgentRunEvent): NormalizedRunRow['kind'] {
@@ -50,6 +60,12 @@ function eventKind(event: AgentRunEvent): NormalizedRunRow['kind'] {
 
 function eventTitle(event: AgentRunEvent): string {
   if (event.kind === 'tool') return `Tool: ${event.tool_name || event.title || 'tool'}`
+  if (isAttachmentEvent(event)) {
+    const file = event.summary || 'attachment'
+    if ((event.event_type || '').startsWith('attachment.vision')) return `Analyzing image: ${file}`
+    if ((event.event_type || '') === 'attachment.read_refused') return `Attachment skipped: ${file}`
+    return `Reading attachment: ${file}`
+  }
   if (event.kind === 'retrieval') return `Retrieval: ${event.summary || event.title || 'Sources'}`
   if (event.kind === 'artifact') return `Artifact: ${event.title || event.summary || 'Output'}`
   if (event.kind === 'error') return `Error: ${event.title || event.summary || 'Something went wrong'}`

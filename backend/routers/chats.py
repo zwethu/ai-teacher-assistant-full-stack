@@ -42,8 +42,8 @@ from services.chat_attachment_service import (
     get_chat_attachment,
     delete_attachment_record,
     list_chat_attachments_for_agent,
-    process_chat_attachment,
 )
+from services.cloud_tasks import QUEUE_ATTACHMENTS, enqueue
 from services.google_workspace.credentials import (
     GoogleOAuthInvalidError,
     GoogleOAuthRequiredError,
@@ -167,9 +167,13 @@ async def upload_chat_attachment_endpoint(
             content_type=file.content_type or "application/octet-stream", data=data,
         )
         if attachment.status == "processing":
-            # Sync task -> Starlette runs it in its threadpool.
-            background_tasks.add_task(
-                process_chat_attachment, batch_id, chat_id, attachment.attachment_id, data
+            # Durable processing via Cloud Tasks (local: inline via BackgroundTasks).
+            # The handler re-fetches bytes from GCS — no in-memory payload crosses
+            # the request boundary.
+            enqueue(
+                QUEUE_ATTACHMENTS, "/tasks/process-attachment",
+                {"batch_id": batch_id, "chat_id": chat_id, "attachment_id": attachment.attachment_id},
+                background_tasks=background_tasks,
             )
         return attachment
     except AttachmentTooLargeError as exc:

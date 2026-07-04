@@ -27,6 +27,7 @@ dependencies = [
     "pillow-heif",
     "google-genai",
     "google-cloud-documentai",
+    "google-cloud-tasks",
 ]
 
 [build-system]

@@ -45,6 +45,7 @@ from utils.firestore_client import get_firestore
 from utils.gcs import (
     chat_attachment_blob_path,
     chat_attachment_thumbnail_path,
+    download_bytes,
     safe_file_name,
     signed_read_url,
     upload_bytes,
@@ -401,8 +402,12 @@ def create_chat_attachment(
     return attachment_to_model(attachment_id, snap.to_dict() or payload)
 
 
-def process_chat_attachment(batch_id: str, chat_id: str, attachment_id: str, data: bytes) -> None:
-    """Background derivative processing; transitions status processing -> ready|failed.
+def process_chat_attachment(batch_id: str, chat_id: str, attachment_id: str) -> None:
+    """Background derivative processing; transitions status processing -> ready|failed|too_large.
+
+    Runs as a Cloud Task (or inline locally): fetches the stored bytes from GCS
+    itself so no in-memory payload is carried across the request boundary.
+    Idempotent — a retried delivery on an already-terminal doc is a no-op.
 
     Documents: text extraction (preview + full-text blob for non-native types)
     and token estimate. Images: thumbnail + vision summary (vision failure does
@@ -414,11 +419,15 @@ def process_chat_attachment(batch_id: str, chat_id: str, attachment_id: str, dat
     if not snap.exists:
         logger.warning("process_chat_attachment: doc missing attachment_id=%s", attachment_id)
         return
+    if str(doc.get("status") or "") != "processing":
+        # Already ready/failed/too_large — a duplicate task delivery. No-op.
+        return
     kind = str(doc.get("attachment_kind") or "document")
     content_type = str(doc.get("content_type") or "application/octet-stream")
     lecturer_id = str(doc.get("lecturer_id") or "")
     updates: dict[str, Any] = {"updated_at": SERVER_TIMESTAMP}
     try:
+        data = download_bytes(str(doc.get("gcs_path") or ""))
         if kind == "image":
             try:
                 thumb_path = chat_attachment_thumbnail_path(lecturer_id, batch_id, chat_id, attachment_id)

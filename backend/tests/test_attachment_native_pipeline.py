@@ -129,7 +129,7 @@ def test_quota_reservation_increments_counter(monkeypatch):
 # Background processing: status transitions
 # ---------------------------------------------------------------------------
 
-def _processing_doc(monkeypatch, doc_data):
+def _processing_doc(monkeypatch, doc_data, data=b"x"):
     db = MagicMock()
     ref = (
         db.collection.return_value.document.return_value
@@ -140,6 +140,8 @@ def _processing_doc(monkeypatch, doc_data):
     snap.exists = True
     snap.to_dict.return_value = doc_data
     monkeypatch.setattr("services.chat_attachment_service.get_firestore", lambda: db)
+    # process_chat_attachment now re-fetches bytes from GCS itself.
+    monkeypatch.setattr("services.chat_attachment_service.download_bytes", lambda *a, **k: data)
     return ref
 
 
@@ -147,8 +149,8 @@ def test_process_text_document_becomes_ready(monkeypatch):
     ref = _processing_doc(monkeypatch, {
         "attachment_kind": "document", "content_type": "text/plain",
         "lecturer_id": "l1", "gcs_path": "gs://b/x.txt", "status": "processing",
-    })
-    process_chat_attachment("b1", "c1", "att-1", b"some plain text content here")
+    }, data=b"some plain text content here")
+    process_chat_attachment("b1", "c1", "att-1")
     updates = ref.update.call_args[0][0]
     assert updates["status"] == "ready"
     assert updates["parse_status"] == "ready"
@@ -170,7 +172,7 @@ def test_process_docx_uploads_extracted_text_blob(monkeypatch):
         uploaded["path"], uploaded["content_type"] = path, content_type
         return f"gs://bucket/{path}"
     monkeypatch.setattr("services.chat_attachment_service.upload_bytes", fake_upload)
-    process_chat_attachment("b1", "c1", "att-1", b"PK-docx-bytes")
+    process_chat_attachment("b1", "c1", "att-1")
     updates = ref.update.call_args[0][0]
     assert updates["status"] == "ready"
     assert updates["extracted_text_path"].startswith("gs://")
@@ -185,7 +187,7 @@ def test_process_failure_marks_failed(monkeypatch):
     def boom(*args, **kwargs):
         raise RuntimeError("extraction exploded")
     monkeypatch.setattr("services.chat_attachment_service.extract_document", boom)
-    process_chat_attachment("b1", "c1", "att-1", b"%PDF-broken")
+    process_chat_attachment("b1", "c1", "att-1")
     updates = ref.update.call_args[0][0]
     assert updates["status"] == "failed"
     assert updates["parse_status"] == "failed"
@@ -202,7 +204,7 @@ def test_process_image_sets_token_estimate_and_ready(monkeypatch):
         "services.chat_attachment_service._vision_context",
         lambda *a, **k: ("ready", "summary", "ocr", "", "bytes"),
     )
-    process_chat_attachment("b1", "c1", "att-1", b"png-bytes")
+    process_chat_attachment("b1", "c1", "att-1")
     updates = ref.update.call_args[0][0]
     assert updates["status"] == "ready"
     assert updates["token_estimate"] == IMAGE_TOKEN_ESTIMATE
@@ -220,7 +222,7 @@ def test_process_image_vision_failure_still_ready(monkeypatch):
         "services.chat_attachment_service._vision_context",
         lambda *a, **k: ("failed", "", "", "bytes: Boom", "none"),
     )
-    process_chat_attachment("b1", "c1", "att-1", b"png-bytes")
+    process_chat_attachment("b1", "c1", "att-1")
     updates = ref.update.call_args[0][0]
     assert updates["status"] == "ready"  # vision is best-effort on the native path
     assert updates["vision_status"] == "failed"

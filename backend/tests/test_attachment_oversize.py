@@ -67,11 +67,12 @@ def test_office_over_limit_flips_to_too_large_status(monkeypatch):
     }
     monkeypatch.setattr(svc, "get_firestore", lambda: MagicMock())
     monkeypatch.setattr(svc, "attachment_ref", lambda *a: ref)
-    extraction = MagicMock(); extraction.text = "huge document body"
+    monkeypatch.setattr(svc, "download_bytes", lambda *a, **k: b"PK-docx")
+    extraction = MagicMock(); extraction.text ="huge document body"
     monkeypatch.setattr(svc, "extract_document", lambda *a, **k: extraction)
     monkeypatch.setattr(svc, "upload_bytes", lambda *a, **k: "gs://b/extracted.txt")
     monkeypatch.setattr(svc, "_estimate_document_tokens", lambda *a, **k: 250_000)
-    svc.process_chat_attachment("b1", "c1", "att-1", b"PK-docx")
+    svc.process_chat_attachment("b1", "c1", "att-1")
     updates = ref.update.call_args[0][0]
     assert updates["status"] == "too_large"
     assert updates["token_estimate"] == 250_000
@@ -87,11 +88,12 @@ def test_office_under_limit_is_ready(monkeypatch):
     }
     monkeypatch.setattr(svc, "get_firestore", lambda: MagicMock())
     monkeypatch.setattr(svc, "attachment_ref", lambda *a: ref)
-    extraction = MagicMock(); extraction.text = "small doc"
+    monkeypatch.setattr(svc, "download_bytes", lambda *a, **k: b"PK-docx")
+    extraction = MagicMock(); extraction.text ="small doc"
     monkeypatch.setattr(svc, "extract_document", lambda *a, **k: extraction)
     monkeypatch.setattr(svc, "upload_bytes", lambda *a, **k: "gs://b/extracted.txt")
     monkeypatch.setattr(svc, "_estimate_document_tokens", lambda *a, **k: 3_000)
-    svc.process_chat_attachment("b1", "c1", "att-1", b"PK-docx")
+    svc.process_chat_attachment("b1", "c1", "att-1")
     assert ref.update.call_args[0][0]["status"] == "ready"
 
 

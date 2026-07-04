@@ -69,6 +69,9 @@ app.include_router(course_blueprint_router)
 app.include_router(email_router, prefix="", tags=["email"])
 app.include_router(agent_router, prefix="/agent", tags=["agent"])
 
+from routers.tasks import router as tasks_router  # noqa: E402
+app.include_router(tasks_router)
+
 
 @app.on_event("startup")
 async def on_startup() -> None:

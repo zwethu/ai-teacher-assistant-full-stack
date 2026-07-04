@@ -1,5 +1,6 @@
 """Chat and message endpoints for batch-scoped conversations."""
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
@@ -40,6 +41,7 @@ from services.chat_attachment_service import (
     get_chat_attachment,
     delete_attachment_record,
     list_chat_attachments_for_agent,
+    process_chat_attachment,
     search_chat_attachments_for_agent,
 )
 from services.google_workspace.credentials import (
@@ -157,14 +159,18 @@ async def upload_chat_attachment_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
     data = await file.read()
     try:
-        attachment = create_chat_attachment(
+        # Fast path off the event loop: validate + store + doc(status=processing).
+        attachment = await asyncio.to_thread(
+            create_chat_attachment,
             batch_id=batch_id, chat_id=chat_id, lecturer_id=lecturer_id,
             file_name=file.filename or "upload", file_title=file_title,
             content_type=file.content_type or "application/octet-stream", data=data,
         )
-        if attachment.embedding_status == "pending" or attachment.ocr_status == "pending":
-            from services.chat_file_rag_service import enrich_chat_attachment
-            background_tasks.add_task(enrich_chat_attachment, batch_id, chat_id, attachment.attachment_id)
+        if attachment.status == "processing":
+            # Sync task -> Starlette runs it in its threadpool.
+            background_tasks.add_task(
+                process_chat_attachment, batch_id, chat_id, attachment.attachment_id, data
+            )
         return attachment
     except AttachmentValidationError as exc:
         detail = str(exc)
@@ -204,7 +210,8 @@ async def get_chat_attachment_rag_status_endpoint(
     if attachment is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
     return attachment.model_dump(include={
-        "attachment_id", "rag_status", "chunk_status", "embedding_status",
+        "attachment_id", "status", "parse_status", "vision_status", "token_estimate",
+        "rag_status", "chunk_status", "embedding_status",
         "semantic_search_ready", "chunk_count", "indexed_chars", "ocr_status",
         "expires_at", "rag_updated_at",
     })

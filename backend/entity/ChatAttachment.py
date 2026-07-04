@@ -15,6 +15,9 @@ class ChatAttachment(BaseModel):
     size_bytes: int
     scope: Literal["chat"] = "chat"
     attachment_kind: Literal["document", "image", "other"]
+    status: Literal["processing", "ready", "failed"] = "processing"
+    content_sha256: str = ""
+    token_estimate: int = 0
     parse_status: Literal["pending", "ready", "failed", "skipped"] = "pending"
     vision_status: Literal["pending", "ready", "failed", "skipped"] = "skipped"
     extracted_text_preview: str = ""

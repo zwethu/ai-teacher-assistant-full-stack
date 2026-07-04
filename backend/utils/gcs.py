@@ -77,13 +77,15 @@ def download_bytes(gcs_path: str) -> bytes:
 
 
 def delete_blob(gcs_path: str) -> bool:
-    """Delete a GCS object by gs:// URI. Silently ignores 404."""
+    """Delete a GCS object by gs:// URI. 404 counts as success; malformed paths fail loudly."""
     if not gcs_path.startswith("gs://"):
-        return True
+        logger.warning("delete_blob: refusing malformed (non-gs://) path: %r", gcs_path[:200])
+        return False
     without_prefix = gcs_path[5:]
     bucket_name, _, blob_path = without_prefix.partition("/")
     if not blob_path:
-        return True
+        logger.warning("delete_blob: refusing gs:// path without object component: %r", gcs_path[:200])
+        return False
     try:
         from google.api_core import exceptions as google_exceptions  # type: ignore[import-untyped]
         client = _get_client()

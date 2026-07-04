@@ -43,7 +43,18 @@ MAX_AGENT_ATTACHMENT_CONTEXT_CHARS = 30_000
 MAX_AGENT_CONTEXT_PER_ATTACHMENT_CHARS = 8_000
 THUMBNAIL_MAX_SIZE = (768, 768)
 
-NATIVE_MULTIMODAL_ENV = "ENABLE_NATIVE_MULTIMODAL_ATTACHMENTS"
+# Native-read token estimation (Gemini document/vision accounting).
+TOKENS_PER_PDF_PAGE = 258          # flat per-page cost for native PDF input
+IMAGE_TOKEN_ESTIMATE = 1_290       # ~5 tiles x 258; conservative flat estimate
+CHARS_PER_TOKEN = 4                # text-like estimation divisor
+MAX_FULL_EXTRACT_CHARS = 500_000   # bound for full-text extraction of docx/pptx
+
+# MIME types Gemini accepts natively via fileData (gs:// URI). DOCX/PPTX are
+# not natively readable — they are extracted to a text blob at processing time
+# and the manifest points at that derived artifact instead.
+NATIVE_READABLE_CONTENT_TYPES = frozenset({
+    "application/pdf", "text/plain", "text/markdown", "text/csv",
+}) | IMAGE_CONTENT_TYPES
 
 
 def _bounded_int(name: str, default: int, minimum: int, maximum: int) -> int:

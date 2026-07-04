@@ -28,8 +28,10 @@ Frontend reads:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import os
 import re
 import uuid
 from typing import Any
@@ -203,6 +205,12 @@ async def start_chat_run(
     )
 
     # --- 5. Build trusted session state for the agent ---
+    # Give just-uploaded attachments a brief window to finish processing so the
+    # manifest carries status=ready when possible (leftovers stay "processing").
+    if attachment_records:
+        attachment_records = await _await_attachment_processing(
+            attachment_records, batch_id=batch_id, chat_id=chat_id, lecturer_id=lecturer_id,
+        )
     session_state = _build_session_state(
         run_id=run_id,
         chat_id=chat_id,
@@ -254,64 +262,157 @@ async def start_chat_run(
 # Session state builder
 # ---------------------------------------------------------------------------
 
-def build_chat_attachment_context(records: list[dict[str, Any]] | None) -> dict[str, Any]:
-    """Return bounded, text-only trusted attachment state for the current run."""
+def _legacy_attachment_context_enabled() -> bool:
+    """Compat window: legacy 30k text blob until the native agent path is verified."""
+    return (os.getenv("CHAT_ATTACHMENT_LEGACY_CONTEXT") or "true").strip().lower() != "false"
+
+
+def _manifest_entry(item: dict[str, Any], current_ids: set[str]) -> dict[str, Any]:
+    """One trusted manifest entry. gcs_uri is consumed by agent TOOL CODE only —
+    session_context never renders the manifest into prompts."""
+    attachment_id = str(item.get("attachment_id") or "")
+    kind = str(item.get("attachment_kind") or "other")
+    native_uri = str(item.get("extracted_text_path") or "") or str(item.get("gcs_path") or "")
+    native_mime = "text/plain" if item.get("extracted_text_path") else str(item.get("content_type") or "")
+    return {
+        "attachment_id": attachment_id,
+        "message_id": str(item.get("message_id") or ""),
+        "file_name": str(item.get("file_name") or "attachment"),
+        "file_title": str(item.get("file_title") or item.get("file_name") or ""),
+        "attachment_kind": kind,
+        "content_type": str(item.get("content_type") or ""),
+        "status": str(item.get("status") or "processing"),
+        "gcs_uri": native_uri,
+        "native_mime_type": native_mime,
+        "raw_gcs_uri": str(item.get("gcs_path") or ""),
+        "token_estimate": int(item.get("token_estimate") or 0),
+        "expires_at": item.get("expires_at").isoformat() if hasattr(item.get("expires_at"), "isoformat") else (str(item.get("expires_at")) if item.get("expires_at") else None),
+        "is_current_message": attachment_id in current_ids,
+        "chat_only": kind == "image",
+        "parse_status": str(item.get("parse_status") or "skipped"),
+        "vision_status": str(item.get("vision_status") or "skipped"),
+        # Cached vision fields keep the image tool's fallback path working.
+        "vision_summary": str(item.get("vision_summary") or "")[:4000] if kind == "image" else "",
+        "ocr_text": str(item.get("ocr_text") or "")[:4000] if kind == "image" else "",
+        "vision_error": str(item.get("vision_error") or "")[:300] if kind == "image" else "",
+        "vision_source": str(item.get("vision_source") or "none") if kind == "image" else "none",
+    }
+
+
+def build_chat_attachment_context(
+    records: list[dict[str, Any]] | None,
+    *,
+    batch_id: str = "",
+    chat_id: str = "",
+    lecturer_id: str = "",
+) -> dict[str, Any]:
+    """Trusted attachment state for the run: manifest (current-message records +
+    retained live chat attachments) and a bounded text context.
+
+    Ownership is validated HERE, once — agent tools consume the manifest and do
+    not re-query Firestore. This is the single trust boundary (design doc §2.2).
+    """
     from services.attachment_constants import (
         MAX_AGENT_ATTACHMENT_CONTEXT_CHARS,
         MAX_AGENT_CONTEXT_PER_ATTACHMENT_CHARS,
     )
 
-    manifest: list[dict[str, Any]] = []
+    current_records = list(records or [])
+    current_ids = {str(item.get("attachment_id") or "") for item in current_records}
+    manifest = [_manifest_entry(item, current_ids) for item in current_records]
+
+    if batch_id and chat_id and lecturer_id:
+        try:
+            from services.chat_attachment_service import list_live_attachment_docs
+            for item in list_live_attachment_docs(batch_id, chat_id, lecturer_id, limit=50):
+                if str(item.get("attachment_id") or "") in current_ids:
+                    continue
+                manifest.append(_manifest_entry(item, current_ids))
+        except Exception:
+            logger.exception("Failed to list retained chat attachments chat_id=%s", chat_id)
+
     blocks: list[str] = []
-    remaining = MAX_AGENT_ATTACHMENT_CONTEXT_CHARS
-    for item in records or []:
-        attachment_id = str(item.get("attachment_id") or "")
-        kind = str(item.get("attachment_kind") or "other")
-        file_name = str(item.get("file_name") or "attachment")
-        manifest.append({
-            "attachment_id": attachment_id,
-            "file_name": file_name,
-            "content_type": str(item.get("content_type") or ""),
-            "attachment_kind": kind,
-            "parse_status": str(item.get("parse_status") or "skipped"),
-            "vision_status": str(item.get("vision_status") or "skipped"),
-            "chat_only": kind == "image",
-            "vision_summary": str(item.get("vision_summary") or "")[:4000] if kind == "image" else "",
-            "ocr_text": str(item.get("ocr_text") or "")[:4000] if kind == "image" else "",
-            "vision_error": str(item.get("vision_error") or "")[:300] if kind == "image" else "",
-            "vision_source": str(item.get("vision_source") or "none") if kind == "image" else "none",
-        })
-        lines = [
-            f"Attachment: {file_name}",
-            f"Attachment ID: {attachment_id}",
-            f"Type: {kind} ({item.get('content_type') or 'unknown'})",
-        ]
-        if kind == "image":
-            lines.append("Scope: chat-only. This image is not saved to Course Space and cannot be promoted.")
-            if item.get("vision_summary"):
-                lines.append(f"Vision summary: {item['vision_summary']}")
-            if item.get("ocr_text"):
-                lines.append(f"OCR text: {item['ocr_text']}")
-            if str(item.get("vision_status") or "") != "ready":
-                lines.append("Image visual content is unavailable. Do not infer image content from course materials or prior context.")
-        elif item.get("extracted_text_preview"):
-            lines.append(f"Extracted preview: {item['extracted_text_preview']}")
-        block = "\n".join(lines)
-        truncated = len(block) > MAX_AGENT_CONTEXT_PER_ATTACHMENT_CHARS
-        block = block[:MAX_AGENT_CONTEXT_PER_ATTACHMENT_CHARS]
-        if truncated:
-            block += "\n[Attachment context truncated]"
-        if len(block) > remaining:
-            if remaining > 80:
-                blocks.append(block[:remaining - 40] + "\n[Total attachment context truncated]")
-            break
-        blocks.append(block)
-        remaining -= len(block) + 2
+    if _legacy_attachment_context_enabled():
+        remaining = MAX_AGENT_ATTACHMENT_CONTEXT_CHARS
+        for item in current_records:
+            kind = str(item.get("attachment_kind") or "other")
+            lines = [
+                f"Attachment: {item.get('file_name') or 'attachment'}",
+                f"Attachment ID: {item.get('attachment_id') or ''}",
+                f"Type: {kind} ({item.get('content_type') or 'unknown'})",
+            ]
+            if kind == "image":
+                lines.append("Scope: chat-only. This image is not saved to Course Space and cannot be promoted.")
+                if item.get("vision_summary"):
+                    lines.append(f"Vision summary: {item['vision_summary']}")
+                if item.get("ocr_text"):
+                    lines.append(f"OCR text: {item['ocr_text']}")
+                if str(item.get("vision_status") or "") != "ready":
+                    lines.append("Image visual content is unavailable. Do not infer image content from course materials or prior context.")
+            elif item.get("extracted_text_preview"):
+                lines.append(f"Extracted preview: {item['extracted_text_preview']}")
+            block = "\n".join(lines)
+            truncated = len(block) > MAX_AGENT_CONTEXT_PER_ATTACHMENT_CHARS
+            block = block[:MAX_AGENT_CONTEXT_PER_ATTACHMENT_CHARS]
+            if truncated:
+                block += "\n[Attachment context truncated]"
+            if len(block) > remaining:
+                if remaining > 80:
+                    blocks.append(block[:remaining - 40] + "\n[Total attachment context truncated]")
+                break
+            blocks.append(block)
+            remaining -= len(block) + 2
+    else:
+        # Native path: one summary line per current-message file; the agent
+        # reads content via read_chat_attachment, not pre-stuffed text.
+        for entry in manifest:
+            if not entry["is_current_message"]:
+                continue
+            blocks.append(
+                f"- {entry['file_name']} ({entry['attachment_kind']}, ~{entry['token_estimate']} tokens, "
+                f"status: {entry['status']}, id: {entry['attachment_id']})"
+            )
+
     return {
-        "current_chat_attachment_ids": [item["attachment_id"] for item in manifest],
+        "current_chat_attachment_ids": [str(item.get("attachment_id") or "") for item in current_records],
         "current_chat_attachments_manifest": manifest,
-        "current_chat_attachment_context": "\n\n".join(blocks),
+        "current_chat_attachment_context": "\n\n".join(blocks) if _legacy_attachment_context_enabled() else "\n".join(blocks),
     }
+
+
+async def _await_attachment_processing(
+    records: list[dict[str, Any]], *, batch_id: str, chat_id: str, lecturer_id: str,
+    timeout_s: float = 3.0, interval_s: float = 0.25,
+) -> list[dict[str, Any]]:
+    """Short-poll current-message attachments still processing before invoking
+    the engine; leftovers enter the manifest as status=processing."""
+    from services.chat_attachment_service import attachment_ref
+
+    pending = [r for r in records if str(r.get("status") or "") == "processing"]
+    if not pending:
+        return records
+    deadline = asyncio.get_event_loop().time() + timeout_s
+    by_id = {str(r.get("attachment_id") or ""): r for r in records}
+    while pending and asyncio.get_event_loop().time() < deadline:
+        await asyncio.sleep(interval_s)
+        still_pending: list[dict[str, Any]] = []
+        for record in pending:
+            attachment_id = str(record.get("attachment_id") or "")
+            try:
+                snap = await asyncio.to_thread(
+                    lambda ref=attachment_ref(batch_id, chat_id, attachment_id): ref.get()
+                )
+                data = snap.to_dict() or {}
+            except Exception:
+                still_pending.append(record)
+                continue
+            if data and str(data.get("status") or "") != "processing":
+                data["attachment_id"] = attachment_id
+                by_id[attachment_id] = data
+            else:
+                still_pending.append(record)
+        pending = still_pending
+    return [by_id[str(r.get("attachment_id") or "")] for r in records]
 
 def _build_session_state(
     *,
@@ -384,9 +485,11 @@ def _build_session_state(
         "course_blueprint_assessment_strategy": "",
         "course_blueprint_lab_strategy": "",
         "course_blueprint_teaching_preferences": {},
-        "enable_native_multimodal_attachments": False,
     }
-    state.update(build_chat_attachment_context(attachment_records))
+    state.update(build_chat_attachment_context(
+        attachment_records,
+        batch_id=batch.batch_id, chat_id=chat_id, lecturer_id=lecturer_id,
+    ))
     if is_generation_workflow(workflow_type):
         state.update(
             build_blueprint_session_context(

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 import logging
+import math
 import os
 import uuid
 import zipfile
@@ -14,19 +16,25 @@ from datetime import datetime, timedelta, timezone
 from pathlib import PurePath
 from typing import Any
 
+from google.cloud import firestore
 from google.cloud.firestore import SERVER_TIMESTAMP
 
 from entity.ChatAttachment import ChatAttachment
 from services.attachment_constants import (
     ALLOWED_CONTENT_TYPES,
+    CHARS_PER_TOKEN,
     DOCUMENT_CONTENT_TYPES,
     EXTENSION_CONTENT_TYPES,
     IMAGE_CONTENT_TYPES,
+    IMAGE_TOKEN_ESTIMATE,
     MAX_CHAT_ATTACHMENT_BYTES,
     MAX_DOCUMENT_BYTES,
     MAX_EXTRACTED_PREVIEW_CHARS,
+    MAX_FULL_EXTRACT_CHARS,
     MAX_IMAGE_BYTES,
+    NATIVE_READABLE_CONTENT_TYPES,
     THUMBNAIL_MAX_SIZE,
+    TOKENS_PER_PDF_PAGE,
     get_chat_attachment_retention_days,
 )
 from utils.firestore_client import get_firestore
@@ -62,6 +70,7 @@ def _iso(value: Any) -> str | None:
 
 def attachment_to_model(doc_id: str, data: dict[str, Any]) -> ChatAttachment:
     kind = str(data.get("attachment_kind") or "other")
+    status = str(data.get("status") or "processing")
     return ChatAttachment(
         attachment_id=doc_id,
         batch_id=str(data.get("batch_id") or ""),
@@ -74,6 +83,9 @@ def attachment_to_model(doc_id: str, data: dict[str, Any]) -> ChatAttachment:
         size_bytes=int(data.get("size_bytes") or 0),
         scope="chat",
         attachment_kind=kind if kind in {"document", "image", "other"} else "other",  # type: ignore[arg-type]
+        status=status if status in {"processing", "ready", "failed"} else "processing",  # type: ignore[arg-type]
+        content_sha256=str(data.get("content_sha256") or ""),
+        token_estimate=int(data.get("token_estimate") or 0),
         parse_status=str(data.get("parse_status") or "pending"),  # type: ignore[arg-type]
         vision_status=str(data.get("vision_status") or "skipped"),  # type: ignore[arg-type]
         extracted_text_preview=str(data.get("extracted_text_preview") or ""),
@@ -302,44 +314,94 @@ def _vision_context(data: bytes, gcs_path: str, content_type: str) -> tuple[str,
     return "failed", "", "", "; ".join(errors)[:300], "none"
 
 
-def _chat_storage_bytes(batch_id: str, chat_id: str) -> int:
-    return sum(int((doc.to_dict() or {}).get("size_bytes") or 0) for doc in _chat_ref(batch_id, chat_id).collection(ATTACHMENTS_SUBCOLLECTION).stream())
+def _content_sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _pdf_page_count(data: bytes) -> int:
+    from pypdf import PdfReader
+    return max(1, len(PdfReader(io.BytesIO(data)).pages))
+
+
+def _estimate_document_tokens(data: bytes, content_type: str, extracted_chars: int) -> int:
+    """Native-read cost estimate: PDFs are billed per page; text-like per char."""
+    if content_type == "application/pdf":
+        try:
+            return _pdf_page_count(data) * TOKENS_PER_PDF_PAGE
+        except Exception:
+            # Signature already validated; fall back to a size-derived guess.
+            return max(TOKENS_PER_PDF_PAGE, (len(data) // 3_000) * TOKENS_PER_PDF_PAGE)
+    return max(1, math.ceil(extracted_chars / CHARS_PER_TOKEN))
+
+
+def _find_reusable_duplicate(batch_id: str, chat_id: str, lecturer_id: str, digest: str) -> ChatAttachment | None:
+    """Return an existing unsent, unexpired attachment with the same content hash."""
+    docs = (
+        _chat_ref(batch_id, chat_id)
+        .collection(ATTACHMENTS_SUBCOLLECTION)
+        .where("content_sha256", "==", digest)
+        .limit(5)
+        .stream()
+    )
+    for doc in docs:
+        data = doc.to_dict() or {}
+        if (
+            data.get("lecturer_id") == lecturer_id
+            and data.get("scope") == "chat"
+            and not data.get("message_id")
+            and not _is_expired(data)
+        ):
+            return attachment_to_model(doc.id, data)
+    return None
+
+
+def _reserve_chat_storage(batch_id: str, chat_id: str, size: int) -> None:
+    """Transactionally reserve quota via a counter on the chat doc (no N-read scan)."""
+    db = get_firestore()
+    chat_ref = _chat_ref(batch_id, chat_id)
+    transaction = db.transaction()
+
+    @firestore.transactional
+    def _commit(txn):
+        snap = chat_ref.get(transaction=txn)
+        current = int((snap.to_dict() or {}).get("attachment_storage_bytes") or 0)
+        if current + size > MAX_CHAT_ATTACHMENT_BYTES:
+            raise AttachmentValidationError("This chat has reached its 100 MB attachment quota.")
+        txn.update(chat_ref, {"attachment_storage_bytes": current + size})
+
+    _commit(transaction)
+
+
+def _release_chat_storage(batch_id: str, chat_id: str, size: int) -> None:
+    try:
+        _chat_ref(batch_id, chat_id).update({"attachment_storage_bytes": firestore.Increment(-size)})
+    except Exception:
+        logger.warning("Failed to release %s bytes of attachment quota chat_id=%s", size, chat_id)
 
 
 def create_chat_attachment(
     *, batch_id: str, chat_id: str, lecturer_id: str, file_name: str,
     file_title: str, content_type: str, data: bytes,
 ) -> ChatAttachment:
+    """Fast path: validate, store, and record with status=processing.
+
+    Heavy derivatives (extraction, thumbnail, vision, token estimate) run in
+    process_chat_attachment as a background task.
+    """
     clean_name, normalized_type = validate_attachment(file_name, content_type, data)
-    if _chat_storage_bytes(batch_id, chat_id) + len(data) > MAX_CHAT_ATTACHMENT_BYTES:
-        raise AttachmentValidationError("This chat has reached its 100 MB attachment quota.")
+    digest = _content_sha256(data)
+    duplicate = _find_reusable_duplicate(batch_id, chat_id, lecturer_id, digest)
+    if duplicate is not None:
+        return duplicate
+    _reserve_chat_storage(batch_id, chat_id, len(data))
     attachment_id = str(uuid.uuid4())
     kind = "image" if normalized_type in IMAGE_CONTENT_TYPES else "document"
-    blob_path = chat_attachment_blob_path(lecturer_id, batch_id, chat_id, attachment_id, clean_name)
-    gcs_path = upload_bytes(blob_path, data, normalized_type)
-    thumbnail_gcs_path: str | None = None
-    parse_status = "skipped" if kind == "image" else "pending"
-    vision_status = "pending" if kind == "image" else "skipped"
-    extracted_preview = ""
-    vision_summary = ""
-    ocr_text = ""
-    vision_error = ""
-    vision_source = "none"
-    from services.chat_file_rag_service import rag_enabled
-    if kind == "document" and not rag_enabled():
-        try:
-            extracted_preview = extract_document(data, normalized_type, MAX_EXTRACTED_PREVIEW_CHARS).text.strip()
-            parse_status = "ready"
-        except Exception as exc:
-            logger.warning("Attachment extraction failed for %s: %s", clean_name, exc)
-            parse_status = "failed"
-    else:
-        try:
-            thumb_path = chat_attachment_thumbnail_path(lecturer_id, batch_id, chat_id, attachment_id)
-            thumbnail_gcs_path = upload_bytes(thumb_path, _thumbnail_bytes(data), "image/jpeg")
-        except Exception as exc:
-            logger.warning("Thumbnail generation failed for %s: %s", clean_name, exc)
-        vision_status, vision_summary, ocr_text, vision_error, vision_source = _vision_context(data, gcs_path, normalized_type)
+    try:
+        blob_path = chat_attachment_blob_path(lecturer_id, batch_id, chat_id, attachment_id, clean_name)
+        gcs_path = upload_bytes(blob_path, data, normalized_type)
+    except Exception:
+        _release_chat_storage(batch_id, chat_id, len(data))
+        raise
 
     expires_at = datetime.now(timezone.utc) + timedelta(days=get_chat_attachment_retention_days())
     payload = {
@@ -347,26 +409,82 @@ def create_chat_attachment(
         "message_id": None, "lecturer_id": lecturer_id, "file_name": clean_name,
         "file_title": (file_title or clean_name).strip() or clean_name,
         "content_type": normalized_type, "size_bytes": len(data), "gcs_path": gcs_path,
-        "thumbnail_gcs_path": thumbnail_gcs_path, "scope": "chat", "attachment_kind": kind,
-        "parse_status": parse_status, "vision_status": vision_status,
-        "extracted_text_path": None, "extracted_text_preview": extracted_preview,
-        "vision_summary": vision_summary, "ocr_text": ocr_text, "expires_at": expires_at,
-        "vision_error": vision_error, "vision_source": vision_source,
+        "thumbnail_gcs_path": None, "scope": "chat", "attachment_kind": kind,
+        "status": "processing", "content_sha256": digest, "token_estimate": 0,
+        "parse_status": "pending" if kind == "document" else "skipped",
+        "vision_status": "pending" if kind == "image" else "skipped",
+        "extracted_text_path": None, "extracted_text_preview": "",
+        "vision_summary": "", "ocr_text": "", "expires_at": expires_at,
+        "vision_error": "", "vision_source": "none",
         "promoted_file_id": None, "created_at": SERVER_TIMESTAMP, "updated_at": SERVER_TIMESTAMP,
-        "rag_status": "pending" if rag_enabled() else "skipped",
-        "chunk_status": "pending" if rag_enabled() else "skipped",
-        "embedding_status": "pending" if rag_enabled() and os.getenv("CHAT_FILE_EMBEDDINGS_ENABLED", "false").lower() == "true" else "skipped",
+        # Native-first path: the chunk/embed/OCR pipeline is never scheduled.
+        "rag_status": "skipped", "chunk_status": "skipped", "embedding_status": "skipped",
         "semantic_search_ready": False, "chunk_count": 0, "indexed_chars": 0,
-        "ocr_status": "pending" if rag_enabled() and normalized_type == "application/pdf" and os.getenv("CHAT_FILE_OCR_ENABLED", "false").lower() == "true" else ("skipped" if normalized_type == "application/pdf" else "not_needed"),
+        "ocr_status": "skipped" if normalized_type == "application/pdf" else "not_needed",
         "rag_error": "", "rag_updated_at": SERVER_TIMESTAMP,
     }
     ref = attachment_ref(batch_id, chat_id, attachment_id)
     ref.set(payload)
-    if rag_enabled():
-        from services.chat_file_rag_service import build_chat_attachment_chunks
-        build_chat_attachment_chunks(batch_id, chat_id, attachment_id, lecturer_id, file_bytes=data)
     snap = ref.get()
     return attachment_to_model(attachment_id, snap.to_dict() or payload)
+
+
+def process_chat_attachment(batch_id: str, chat_id: str, attachment_id: str, data: bytes) -> None:
+    """Background derivative processing; transitions status processing -> ready|failed.
+
+    Documents: text extraction (preview + full-text blob for non-native types)
+    and token estimate. Images: thumbnail + vision summary (vision failure does
+    not fail the attachment; the agent analyzes image bytes at query time).
+    """
+    ref = attachment_ref(batch_id, chat_id, attachment_id)
+    snap = ref.get()
+    doc = snap.to_dict() or {}
+    if not snap.exists:
+        logger.warning("process_chat_attachment: doc missing attachment_id=%s", attachment_id)
+        return
+    kind = str(doc.get("attachment_kind") or "document")
+    content_type = str(doc.get("content_type") or "application/octet-stream")
+    lecturer_id = str(doc.get("lecturer_id") or "")
+    updates: dict[str, Any] = {"updated_at": SERVER_TIMESTAMP}
+    try:
+        if kind == "image":
+            try:
+                thumb_path = chat_attachment_thumbnail_path(lecturer_id, batch_id, chat_id, attachment_id)
+                updates["thumbnail_gcs_path"] = upload_bytes(thumb_path, _thumbnail_bytes(data), "image/jpeg")
+            except Exception as exc:
+                logger.warning("Thumbnail generation failed attachment_id=%s: %s", attachment_id, exc)
+            vision_status, vision_summary, ocr_text, vision_error, vision_source = _vision_context(
+                data, str(doc.get("gcs_path") or ""), content_type
+            )
+            updates.update({
+                "vision_status": vision_status, "vision_summary": vision_summary,
+                "ocr_text": ocr_text, "vision_error": vision_error,
+                "vision_source": vision_source,
+                "token_estimate": IMAGE_TOKEN_ESTIMATE, "status": "ready",
+            })
+        else:
+            full_text = extract_document(data, content_type, MAX_FULL_EXTRACT_CHARS).text.strip()
+            updates["extracted_text_preview"] = full_text[:MAX_EXTRACTED_PREVIEW_CHARS]
+            if content_type not in NATIVE_READABLE_CONTENT_TYPES:
+                # DOCX/PPTX: Gemini cannot read these natively; store the full
+                # extracted text as the native-read artifact.
+                text_blob_path = chat_attachment_blob_path(
+                    lecturer_id, batch_id, chat_id, attachment_id, "extracted_text.txt"
+                )
+                updates["extracted_text_path"] = upload_bytes(
+                    text_blob_path, full_text.encode("utf-8"), "text/plain"
+                )
+            updates.update({
+                "token_estimate": _estimate_document_tokens(data, content_type, len(full_text)),
+                "parse_status": "ready", "status": "ready",
+            })
+    except Exception as exc:
+        logger.warning("Attachment processing failed attachment_id=%s: %s", attachment_id, exc)
+        updates.update({
+            "status": "failed",
+            "parse_status": "failed" if kind == "document" else str(doc.get("parse_status") or "skipped"),
+        })
+    ref.update(updates)
 
 
 def get_chat_attachment(batch_id: str, chat_id: str, attachment_id: str, lecturer_id: str) -> ChatAttachment | None:
@@ -395,6 +513,9 @@ def _agent_safe_attachment(doc_id: str, data: dict[str, Any], include_context: b
         "content_type": str(data.get("content_type") or ""),
         "size_bytes": int(data.get("size_bytes") or 0),
         "attachment_kind": str(data.get("attachment_kind") or "other"),
+        "status": str(data.get("status") or "processing"),
+        "token_estimate": int(data.get("token_estimate") or 0),
+        "preview_only": True,
         "parse_status": str(data.get("parse_status") or "skipped"),
         "vision_status": str(data.get("vision_status") or "skipped"),
         "vision_source": str(data.get("vision_source") or "none"),
@@ -421,6 +542,27 @@ def _agent_safe_attachment(doc_id: str, data: dict[str, Any], include_context: b
 def _owned_visible_chat(batch_id: str, chat_id: str, lecturer_id: str) -> bool:
     snap = _chat_ref(batch_id, chat_id).get(); data = snap.to_dict() or {}
     return bool(snap.exists and data.get("lecturer_id") == lecturer_id and not data.get("hidden", False))
+
+
+def list_live_attachment_docs(batch_id: str, chat_id: str, lecturer_id: str, limit: int = 50) -> list[dict[str, Any]]:
+    """Raw Firestore docs (incl. gcs_path) for the gateway's trusted manifest.
+
+    Internal only — never expose these dicts to HTTP responses or the model.
+    """
+    if not _owned_visible_chat(batch_id, chat_id, lecturer_id):
+        return []
+    safe_limit = max(1, min(int(limit), 50))
+    results: list[dict[str, Any]] = []
+    docs = _chat_ref(batch_id, chat_id).collection(ATTACHMENTS_SUBCOLLECTION).order_by("created_at", direction="DESCENDING").limit(100).stream()
+    for doc in docs:
+        data = doc.to_dict() or {}
+        if data.get("lecturer_id") != lecturer_id or data.get("scope") != "chat" or _is_expired(data):
+            continue
+        data["attachment_id"] = doc.id
+        results.append(data)
+        if len(results) >= safe_limit:
+            break
+    return results
 
 
 def list_chat_attachments_for_agent(batch_id: str, chat_id: str, lecturer_id: str, limit: int = 50) -> list[dict[str, Any]]:
@@ -495,6 +637,7 @@ def delete_attachment_record(batch_id: str, chat_id: str, attachment_id: str, le
     if not delete_attachment_chunks(batch_id, chat_id, attachment_id):
         return "storage_failed"
     ref.delete()
+    _release_chat_storage(batch_id, chat_id, int(data.get("size_bytes") or 0))
     return "deleted"
 
 

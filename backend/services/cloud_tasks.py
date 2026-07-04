@@ -35,18 +35,28 @@ def _service_url() -> str:
 
 
 def _run_local(handler_path: str, payload: dict[str, Any]) -> None:
-    """Run a registered handler in-process (best-effort; logs and swallows errors
-    so a local background task can't crash the worker)."""
+    """Run a registered handler in-process (best-effort; logs and swallows errors so
+    a local background task can't crash the worker). Safe whether or not an event
+    loop is already running in the current thread."""
     import asyncio
 
     fn = _LOCAL_HANDLERS.get(handler_path)
     if fn is None:
         logger.error("cloud_tasks local dispatch: no handler for %s", handler_path)
         return
+
+    async def _guarded() -> None:
+        try:
+            await fn(payload)
+        except Exception:
+            logger.exception("cloud_tasks local handler failed: %s", handler_path)
+
     try:
-        asyncio.run(fn(payload))
-    except Exception:
-        logger.exception("cloud_tasks local handler failed: %s", handler_path)
+        asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.run(_guarded())          # no loop in this thread — run to completion
+    else:
+        asyncio.ensure_future(_guarded())  # already in a loop — schedule concurrently
 
 
 def enqueue(

@@ -472,6 +472,34 @@ def process_chat_attachment(batch_id: str, chat_id: str, attachment_id: str) -> 
     ref.update(updates)
 
 
+def get_attachment_status_and_message(batch_id: str, chat_id: str, attachment_id: str) -> tuple[str, str]:
+    """(status, message_id) for the deferred-run trigger. Empty strings if missing."""
+    data = attachment_ref(batch_id, chat_id, attachment_id).get().to_dict() or {}
+    return str(data.get("status") or ""), str(data.get("message_id") or "")
+
+
+def all_attachments_settled(batch_id: str, chat_id: str, attachment_ids: list[str]) -> bool:
+    """True once none of the given attachments are still 'processing'."""
+    for attachment_id in attachment_ids:
+        data = attachment_ref(batch_id, chat_id, attachment_id).get().to_dict() or {}
+        if str(data.get("status") or "") == "processing":
+            return False
+    return True
+
+
+def fail_stuck_attachment(batch_id: str, chat_id: str, attachment_id: str) -> None:
+    """Watchdog timeout: mark a still-processing attachment failed so a run can proceed."""
+    ref = attachment_ref(batch_id, chat_id, attachment_id)
+    data = ref.get().to_dict() or {}
+    if str(data.get("status") or "") == "processing":
+        ref.update({
+            "status": "failed",
+            "parse_status": "failed",
+            "vision_error": "Processing timed out.",
+            "updated_at": SERVER_TIMESTAMP,
+        })
+
+
 def get_chat_attachment(batch_id: str, chat_id: str, attachment_id: str, lecturer_id: str) -> ChatAttachment | None:
     snap = attachment_ref(batch_id, chat_id, attachment_id).get()
     if not snap.exists:

@@ -58,7 +58,7 @@ type StartRunResult = {
   run_id: string
   chat_id?: string
   rtdb_run_path?: string
-  status: 'running' | 'done' | 'failed'
+  status: 'awaiting_attachments' | 'running' | 'done' | 'failed'
   user_message?: ChatMessage
 }
 

@@ -140,6 +140,86 @@ def mark_agent_run_done(
     )
 
 
+def mark_agent_run_awaiting_attachments(
+    *, batch_id: str, chat_id: str, run_id: str, attachment_ids: list[str], deadline: Any
+) -> None:
+    """Hold a run until its attachments finish processing (deferred-run path)."""
+    _run_ref(batch_id, chat_id, run_id).update(
+        {
+            "status": "awaiting_attachments",
+            "awaiting_attachment_ids": list(attachment_ids),
+            "awaiting_deadline": deadline,
+            "updated_at": SERVER_TIMESTAMP,
+        }
+    )
+    _chat_ref(batch_id, chat_id).update(
+        {"last_run_status": "awaiting_attachments", "updated_at": SERVER_TIMESTAMP}
+    )
+
+
+def stash_run_dispatch(
+    *, batch_id: str, chat_id: str, run_id: str, session_state: dict[str, Any], user_message: str
+) -> None:
+    """Persist the inputs the agent-run task needs so it survives a restart."""
+    _run_ref(batch_id, chat_id, run_id).update(
+        {
+            "dispatch_payload": {"session_state": session_state, "user_message": user_message},
+            "updated_at": SERVER_TIMESTAMP,
+        }
+    )
+
+
+def read_run_doc(*, batch_id: str, chat_id: str, run_id: str) -> dict[str, Any] | None:
+    """Raw run doc (includes fields _run_to_dict does not project: dispatch_payload,
+    awaiting_attachment_ids, awaiting_deadline)."""
+    snap = _run_ref(batch_id, chat_id, run_id).get()
+    return (snap.to_dict() or {}) if snap.exists else None
+
+
+def claim_run_dispatch(*, batch_id: str, chat_id: str, run_id: str) -> bool:
+    """Transactional once-only guard so a duplicate agent-run task can't double-invoke.
+    Returns True for the single caller that should run; flips status to 'running'."""
+    db = get_firestore()
+    run_ref = _run_ref(batch_id, chat_id, run_id)
+    transaction = db.transaction()
+
+    @firestore.transactional
+    def _commit(txn) -> bool:
+        snap = run_ref.get(transaction=txn)
+        data = snap.to_dict() or {}
+        if not snap.exists or data.get("dispatched") or data.get("status") in {"done", "failed"}:
+            return False
+        txn.update(run_ref, {"dispatched": True, "status": "running", "updated_at": SERVER_TIMESTAMP})
+        return True
+
+    return _commit(transaction)
+
+
+def refresh_run_attachment_context(
+    *, batch_id: str, chat_id: str, run_id: str, attachment_context: dict[str, Any]
+) -> None:
+    """Merge refreshed attachment keys into the stashed session_state once files are ready."""
+    run_ref = _run_ref(batch_id, chat_id, run_id)
+    data = run_ref.get().to_dict() or {}
+    payload = data.get("dispatch_payload") or {}
+    session_state = payload.get("session_state") or {}
+    session_state.update(attachment_context)
+    payload["session_state"] = session_state
+    run_ref.update({"dispatch_payload": payload, "updated_at": SERVER_TIMESTAMP})
+
+
+def list_runs_awaiting_attachments(limit: int = 50) -> list[dict[str, Any]]:
+    """Collection-group sweep for the watchdog. Requires a runs.status index."""
+    docs = (
+        get_firestore()
+        .collection_group(RUNS_SUBCOLLECTION)
+        .where("status", "==", "awaiting_attachments")
+        .limit(limit)
+        .stream()
+    )
+    return [doc.to_dict() or {} for doc in docs]
+
+
 def persist_agent_run_timeline(
     *, batch_id: str, chat_id: str, run_id: str, timeline_snapshot: dict[str, Any]
 ) -> None:

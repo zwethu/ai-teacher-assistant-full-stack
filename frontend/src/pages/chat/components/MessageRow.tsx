@@ -76,6 +76,8 @@ export function MessageRow({
   const isFinal = !msg.pending && msg.status !== 'pending'
   const isPending = Boolean(msg.pending || msg.status === 'pending')
   const isFailed = msg.status === 'failed' || run?.status === 'failed'
+  // Run created but held until its attachments finish processing.
+  const isAwaitingAttachments = run?.status === 'awaiting_attachments'
   const shouldUseArtifactCard = isGeneratedArtifactPreviewMessage(msg, isPending)
   const shouldUseOutlineCard = isOutlineApprovalMessage(msg, isPending)
   const assistantIntro = typeof msg.metadata?.assistant_intro === 'string'
@@ -122,8 +124,8 @@ export function MessageRow({
               </div>
             )}
             {savedBlueprint && <p className="mb-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800">Course Blueprint v{savedBlueprint.version} saved.</p>}
-            <RunDetails run={run} isFinal={isFinal} />
-            {run && (
+            {!isAwaitingAttachments && <RunDetails run={run} isFinal={isFinal} />}
+            {run && !isAwaitingAttachments && (
               <div className="mt-2">
                 <ThinkingPanel
                   events={run.events}
@@ -135,6 +137,11 @@ export function MessageRow({
               {isFailed && !msg.content ? (
                 <p className="text-sm text-slate-600">
                   The agent run failed before producing a final response.
+                </p>
+              ) : isAwaitingAttachments && !msg.content ? (
+                <p className="flex items-center gap-2 text-[15px] text-slate-600">
+                  <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin text-emerald-600" />
+                  Processing your file(s)…
                 </p>
               ) : isPending && !msg.content ? (
                 <ThinkingIndicator />

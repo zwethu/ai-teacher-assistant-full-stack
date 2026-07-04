@@ -9,7 +9,8 @@ import {
 import type { ChatMessage } from '../entity/Chat'
 import { rtdb } from '../lib/firebase'
 
-export type AgentRunStatus = 'running' | 'done' | 'failed'
+// awaiting_attachments: run is created but held until its files finish processing.
+export type AgentRunStatus = 'awaiting_attachments' | 'running' | 'done' | 'failed'
 
 export type AgentRunEvent = {
   event_id: string
@@ -111,7 +112,12 @@ export function subscribeAgentRun(
         child(runRef, 'status'),
         (snapshot) => {
           const status = snapshot.val()
-          if (status === 'running' || status === 'done' || status === 'failed') {
+          if (
+            status === 'awaiting_attachments' ||
+            status === 'running' ||
+            status === 'done' ||
+            status === 'failed'
+          ) {
             options.onStatus?.(status)
           }
         },

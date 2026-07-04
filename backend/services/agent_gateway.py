@@ -34,6 +34,7 @@ import logging
 import os
 import re
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -46,8 +47,11 @@ from services.agent_platform_sessions import get_agent_session_state
 from services.agent_artifact_context import build_agent_artifact_manifest
 from services.artifact_sync_service import preflight_sync_artifacts_for_agent_run
 from services.agent_sessions import (
+    claim_run_dispatch,
     create_agent_run_record,
     ensure_chat_agent_session,
+    list_runs_awaiting_attachments,
+    mark_agent_run_awaiting_attachments,
     mark_agent_run_done,
     mark_agent_run_draft_failed,
     mark_agent_run_draft_saved,
@@ -55,6 +59,9 @@ from services.agent_sessions import (
     mark_agent_run_pending_artifact,
     mark_agent_run_outline_ready,
     persist_agent_run_timeline,
+    read_run_doc,
+    refresh_run_attachment_context,
+    stash_run_dispatch,
 )
 from services.artifact_service import (
     content_hash,
@@ -64,7 +71,14 @@ from services.artifact_service import (
     save_quiz_draft_from_session,
 )
 from services.batch_service import get_batch
-from services.chat_service import add_message, add_user_message_with_attachments
+from services.chat_service import add_message, add_user_message_with_attachments, get_message_run_id
+from services.chat_attachment_service import (
+    all_attachments_settled,
+    fail_stuck_attachment,
+    get_attachment_status_and_message,
+    list_live_attachment_docs,
+)
+from services.cloud_tasks import QUEUE_RUNS, enqueue
 from services.course_blueprint_service import (
     build_blueprint_session_context,
     build_blueprint_status_context,
@@ -204,13 +218,7 @@ async def start_chat_run(
         artifact_sync_preflight=artifact_sync_preflight,
     )
 
-    # --- 5. Build trusted session state for the agent ---
-    # Give just-uploaded attachments a brief window to finish processing so the
-    # manifest carries status=ready when possible (leftovers stay "processing").
-    if attachment_records:
-        attachment_records = await _await_attachment_processing(
-            attachment_records, batch_id=batch_id, chat_id=chat_id, lecturer_id=lecturer_id,
-        )
+    # --- 5. Build trusted session state and stash it for the agent-run task ---
     session_state = _build_session_state(
         run_id=run_id,
         chat_id=chat_id,
@@ -231,31 +239,138 @@ async def start_chat_run(
         artifact_sync_preflight=artifact_sync_preflight,
         attachment_records=attachment_records,
     )
-
-    # --- 6. Schedule background agent task ---
-    background_tasks.add_task(
-        _run_agent_background,
-        run_id=run_id,
-        rtdb_run_path=rtdb_run_path,
-        batch_id=batch_id,
-        chat_id=chat_id,
-        agent_session_id=agent_session_id,
-        lecturer_id=lecturer_id,
-        user_message=user_message,
-        session_state=session_state,
+    stash_run_dispatch(
+        batch_id=batch_id, chat_id=chat_id, run_id=run_id,
+        session_state=session_state, user_message=user_message,
     )
+
+    # --- 6. Dispatch now, or defer until attachments finish processing ---
+    pending_ids = [
+        str(a.get("attachment_id") or "")
+        for a in (attachment_records or [])
+        if str(a.get("status") or "") == "processing"
+    ]
+    run_status = "running"
+    if pending_ids:
+        # Deferred run: hold until /tasks/process-attachment reports all ready, or
+        # the watchdog times out at PROCESSING_TIMEOUT. UI shows "Processing your file(s)…".
+        deadline = datetime.now(timezone.utc) + timedelta(minutes=_processing_timeout_minutes())
+        mark_agent_run_awaiting_attachments(
+            batch_id=batch_id, chat_id=chat_id, run_id=run_id,
+            attachment_ids=pending_ids, deadline=deadline,
+        )
+        set_run_status(run_id, "awaiting_attachments")
+        run_status = "awaiting_attachments"
+    else:
+        dispatch_agent_run(batch_id, chat_id, run_id, background_tasks=background_tasks)
 
     # --- 7. Return immediately ---
     logger.info(
-        "gateway run_id=%s chat_id=%s batch_id=%s lecturer_id=%s",
-        run_id, chat_id, batch_id, lecturer_id,
+        "gateway run_id=%s chat_id=%s batch_id=%s lecturer_id=%s status=%s pending_attachments=%d",
+        run_id, chat_id, batch_id, lecturer_id, run_status, len(pending_ids),
     )
     return {
         "user_message": user_msg,
         "run_id": run_id,
         "rtdb_run_path": rtdb_run_path,
-        "status": "running",
+        "status": run_status,
     }
+
+
+def _processing_timeout_minutes() -> int:
+    try:
+        return max(1, min(int(os.getenv("CHAT_ATTACHMENT_PROCESSING_TIMEOUT_MINUTES", "5")), 60))
+    except (TypeError, ValueError):
+        return 5
+
+
+def dispatch_agent_run(batch_id: str, chat_id: str, run_id: str, *, background_tasks=None) -> None:
+    """Enqueue the agent-run task (durable via Cloud Tasks; inline locally)."""
+    enqueue(
+        QUEUE_RUNS, "/tasks/run-agent",
+        {"batch_id": batch_id, "chat_id": chat_id, "run_id": run_id},
+        background_tasks=background_tasks,
+    )
+
+
+async def run_agent_task(batch_id: str, chat_id: str, run_id: str) -> None:
+    """Agent-run task handler: once-only claim, then stream from the stashed payload."""
+    if not claim_run_dispatch(batch_id=batch_id, chat_id=chat_id, run_id=run_id):
+        logger.info("run_agent_task: run_id=%s already dispatched/terminal — skipping", run_id)
+        return
+    set_run_status(run_id, "running")
+    run = read_run_doc(batch_id=batch_id, chat_id=chat_id, run_id=run_id) or {}
+    payload = run.get("dispatch_payload") or {}
+    await _run_agent_background(
+        run_id=run_id,
+        rtdb_run_path=str(run.get("rtdb_run_path") or f"agentRuns/{run_id}"),
+        batch_id=batch_id,
+        chat_id=chat_id,
+        agent_session_id=str(run.get("agent_session_id") or ""),
+        lecturer_id=str(run.get("lecturer_id") or ""),
+        user_message=str(payload.get("user_message") or ""),
+        session_state=payload.get("session_state") or {},
+    )
+
+
+def on_attachment_settled(batch_id: str, chat_id: str, attachment_id: str, *, background_tasks=None) -> None:
+    """Called after an attachment reaches ready/failed/too_large. If it unblocks a
+    deferred run whose files are now all settled, refresh the manifest and dispatch."""
+    _status, message_id = get_attachment_status_and_message(batch_id, chat_id, attachment_id)
+    if not message_id:
+        return  # unsent attachment — no run waiting on it
+    run_id = get_message_run_id(batch_id, chat_id, message_id)
+    if not run_id:
+        return
+    run = read_run_doc(batch_id=batch_id, chat_id=chat_id, run_id=run_id) or {}
+    if run.get("status") != "awaiting_attachments":
+        return
+    awaited = [str(a) for a in (run.get("awaiting_attachment_ids") or [])]
+    if not all_attachments_settled(batch_id, chat_id, awaited):
+        return  # still waiting on siblings
+    _refresh_and_dispatch(batch_id, chat_id, run_id, background_tasks=background_tasks)
+
+
+def _refresh_and_dispatch(batch_id: str, chat_id: str, run_id: str, *, background_tasks=None) -> None:
+    """Rebuild the attachment manifest (files now settled) into the stashed state, dispatch."""
+    run = read_run_doc(batch_id=batch_id, chat_id=chat_id, run_id=run_id) or {}
+    lecturer_id = str(run.get("lecturer_id") or "")
+    records = [
+        item for item in list_live_attachment_docs(batch_id, chat_id, lecturer_id, limit=50)
+        if str(item.get("message_id") or "") and str(item.get("attachment_id") or "") in
+        {str(a) for a in (run.get("awaiting_attachment_ids") or [])}
+    ]
+    attachment_context = build_chat_attachment_context(
+        records, batch_id=batch_id, chat_id=chat_id, lecturer_id=lecturer_id
+    )
+    refresh_run_attachment_context(
+        batch_id=batch_id, chat_id=chat_id, run_id=run_id, attachment_context=attachment_context
+    )
+    dispatch_agent_run(batch_id, chat_id, run_id, background_tasks=background_tasks)
+
+
+def run_attachment_watchdog(limit: int = 50) -> int:
+    """Safety net (Cloud Scheduler): dispatch deferred runs past their deadline,
+    marking any still-processing attachment failed so the run proceeds degraded."""
+    now = datetime.now(timezone.utc)
+    dispatched = 0
+    for run in list_runs_awaiting_attachments(limit=limit):
+        deadline = run.get("awaiting_deadline")
+        if isinstance(deadline, str):
+            try:
+                deadline = datetime.fromisoformat(deadline.replace("Z", "+00:00"))
+            except ValueError:
+                deadline = None
+        if not deadline or deadline > now:
+            continue
+        batch_id = str(run.get("batch_id") or "")
+        chat_id = str(run.get("chat_id") or "")
+        run_id = str(run.get("run_id") or "")
+        for attachment_id in (run.get("awaiting_attachment_ids") or []):
+            fail_stuck_attachment(batch_id, chat_id, str(attachment_id))
+        _refresh_and_dispatch(batch_id, chat_id, run_id)
+        dispatched += 1
+    return dispatched
 
 
 # ---------------------------------------------------------------------------
@@ -379,40 +494,6 @@ def build_chat_attachment_context(
         "current_chat_attachment_context": "\n\n".join(blocks) if _legacy_attachment_context_enabled() else "\n".join(blocks),
     }
 
-
-async def _await_attachment_processing(
-    records: list[dict[str, Any]], *, batch_id: str, chat_id: str, lecturer_id: str,
-    timeout_s: float = 3.0, interval_s: float = 0.25,
-) -> list[dict[str, Any]]:
-    """Short-poll current-message attachments still processing before invoking
-    the engine; leftovers enter the manifest as status=processing."""
-    from services.chat_attachment_service import attachment_ref
-
-    pending = [r for r in records if str(r.get("status") or "") == "processing"]
-    if not pending:
-        return records
-    deadline = asyncio.get_event_loop().time() + timeout_s
-    by_id = {str(r.get("attachment_id") or ""): r for r in records}
-    while pending and asyncio.get_event_loop().time() < deadline:
-        await asyncio.sleep(interval_s)
-        still_pending: list[dict[str, Any]] = []
-        for record in pending:
-            attachment_id = str(record.get("attachment_id") or "")
-            try:
-                snap = await asyncio.to_thread(
-                    lambda ref=attachment_ref(batch_id, chat_id, attachment_id): ref.get()
-                )
-                data = snap.to_dict() or {}
-            except Exception:
-                still_pending.append(record)
-                continue
-            if data and str(data.get("status") or "") != "processing":
-                data["attachment_id"] = attachment_id
-                by_id[attachment_id] = data
-            else:
-                still_pending.append(record)
-        pending = still_pending
-    return [by_id[str(r.get("attachment_id") or "")] for r in records]
 
 def _build_session_state(
     *,

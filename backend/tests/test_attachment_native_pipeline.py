@@ -300,37 +300,6 @@ def test_manifest_legacy_context_preserved_by_default(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Gateway short-poll for processing attachments
-# ---------------------------------------------------------------------------
-
-def test_short_poll_promotes_ready_attachments(monkeypatch):
-    from services.agent_gateway import _await_attachment_processing
-    ready_doc = _current_record(status="ready")
-    ref = MagicMock()
-    ref.get.return_value.to_dict.return_value = ready_doc
-    monkeypatch.setattr("services.chat_attachment_service.attachment_ref", lambda *a: ref)
-    records = [_current_record(status="processing")]
-    result = asyncio.run(_await_attachment_processing(
-        records, batch_id="b1", chat_id="c1", lecturer_id="l1",
-        timeout_s=0.6, interval_s=0.05,
-    ))
-    assert result[0]["status"] == "ready"
-
-
-def test_short_poll_leaves_still_processing(monkeypatch):
-    from services.agent_gateway import _await_attachment_processing
-    ref = MagicMock()
-    ref.get.return_value.to_dict.return_value = _current_record(status="processing")
-    monkeypatch.setattr("services.chat_attachment_service.attachment_ref", lambda *a: ref)
-    records = [_current_record(status="processing")]
-    result = asyncio.run(_await_attachment_processing(
-        records, batch_id="b1", chat_id="c1", lecturer_id="l1",
-        timeout_s=0.2, interval_s=0.05,
-    ))
-    assert result[0]["status"] == "processing"
-
-
-# ---------------------------------------------------------------------------
 # Status endpoint payload + delete_blob honesty
 # ---------------------------------------------------------------------------
 

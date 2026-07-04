@@ -49,16 +49,43 @@ async def verify_task_caller(request: Request) -> None:
 # ---------------------------------------------------------------------------
 
 async def _handle_process_attachment(payload: dict[str, Any]) -> None:
-    await asyncio.to_thread(
-        process_chat_attachment,
+    from services.agent_gateway import on_attachment_settled
+
+    batch_id, chat_id, attachment_id = (
         str(payload["batch_id"]), str(payload["chat_id"]), str(payload["attachment_id"]),
     )
+    await asyncio.to_thread(process_chat_attachment, batch_id, chat_id, attachment_id)
+    # If this attachment was the last one a deferred run was waiting on, dispatch it.
+    await asyncio.to_thread(on_attachment_settled, batch_id, chat_id, attachment_id)
+
+
+async def _handle_run_agent(payload: dict[str, Any]) -> None:
+    from services.agent_gateway import run_agent_task
+
+    await run_agent_task(str(payload["batch_id"]), str(payload["chat_id"]), str(payload["run_id"]))
+
+
+async def _handle_attachment_watchdog(_payload: dict[str, Any]) -> None:
+    from services.agent_gateway import run_attachment_watchdog
+
+    await asyncio.to_thread(run_attachment_watchdog)
 
 
 @router.post("/process-attachment", status_code=status.HTTP_204_NO_CONTENT)
 async def process_attachment_task(request: Request, _: None = Depends(verify_task_caller)) -> None:
-    payload = await request.json()
-    await _handle_process_attachment(payload)
+    await _handle_process_attachment(await request.json())
+
+
+@router.post("/run-agent", status_code=status.HTTP_204_NO_CONTENT)
+async def run_agent_endpoint(request: Request, _: None = Depends(verify_task_caller)) -> None:
+    await _handle_run_agent(await request.json())
+
+
+@router.post("/cron/attachment-watchdog", status_code=status.HTTP_204_NO_CONTENT)
+async def attachment_watchdog_task(request: Request, _: None = Depends(verify_task_caller)) -> None:
+    await _handle_attachment_watchdog({})
 
 
 register_local_handler("/tasks/process-attachment", _handle_process_attachment)
+register_local_handler("/tasks/run-agent", _handle_run_agent)
+register_local_handler("/tasks/cron/attachment-watchdog", _handle_attachment_watchdog)

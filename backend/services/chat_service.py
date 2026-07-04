@@ -36,6 +36,14 @@ def _messages_col(batch_id: str, chat_id: str):
     return _chats_col(batch_id).document(chat_id).collection(MESSAGES_SUBCOLLECTION)
 
 
+def get_message_run_id(batch_id: str, chat_id: str, message_id: str) -> str | None:
+    """The run a message triggered (used to link a settled attachment to its run)."""
+    snap = _messages_col(batch_id, chat_id).document(message_id).get()
+    if not snap.exists:
+        return None
+    return str((snap.to_dict() or {}).get("run_id") or "") or None
+
+
 def _runs_col(batch_id: str, chat_id: str):
     return _chats_col(batch_id).document(chat_id).collection(RUNS_SUBCOLLECTION)
 

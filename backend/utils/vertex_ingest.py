@@ -53,6 +53,68 @@ def _mime_type(file_name: str) -> str:
     return "application/octet-stream"
 
 
+def start_ingest_file(
+    gcs_path: str,
+    lecturer_id: str,
+    batch_id: str,
+    file_title: str,
+    course_name: str = "",
+    batch_name: str = "",
+) -> str:
+    """Upload the JSONL manifest and FIRE Vertex ImportDocuments without waiting.
+
+    Returns the deterministic document ID immediately. Query-visibility is polled
+    separately (get_document) by the check-indexing task — the import LRO completing
+    does not mean the doc is searchable, so there is nothing useful to block on here.
+    """
+    datastore_id = _root_datastore_id()
+    if not datastore_id:
+        raise RuntimeError("VERTEX_ROOT_DATASTORE_ID is not configured — cannot index file.")
+
+    doc_id = _doc_id(lecturer_id, batch_id, gcs_path)
+    file_name = gcs_path.rsplit("/", 1)[-1]
+
+    struct_data: dict[str, Any] = {
+        "lecturer_id": lecturer_id,
+        "batch_id": batch_id,
+        "batch_name": batch_name,
+        "course_name": course_name,
+        "source_type": "teacher_upload",
+        "material_type": file_name.rsplit(".", 1)[-1].lower() if "." in file_name else "unknown",
+        "file_title": file_title or file_name,
+    }
+    manifest = {
+        "id": doc_id,
+        "content": {"mimeType": _mime_type(file_name), "uri": gcs_path},
+        "structData": struct_data,
+    }
+    jsonl_bytes = (json.dumps(manifest) + "\n").encode("utf-8")
+
+    bucket_name = _parse_gcs_bucket(gcs_path)
+    manifest_blob = _manifest_blob_path(lecturer_id, batch_id, doc_id)
+
+    from google.cloud import storage as gcs_lib  # type: ignore[import-untyped]
+    from google.cloud import discoveryengine_v1 as discoveryengine  # type: ignore[import-untyped]
+    from google.cloud.discoveryengine_v1.types import GcsSource, ImportDocumentsRequest  # type: ignore[import-untyped]
+
+    gcs_client = gcs_lib.Client()
+    gcs_client.bucket(bucket_name).blob(manifest_blob).upload_from_string(
+        jsonl_bytes, content_type="application/jsonl"
+    )
+    manifest_uri = f"gs://{bucket_name}/{manifest_blob}"
+    logger.info("Uploaded Vertex manifest to %s", manifest_uri)
+
+    de_client = discoveryengine.DocumentServiceClient()
+    request = ImportDocumentsRequest(
+        parent=_import_parent(datastore_id),
+        gcs_source=GcsSource(input_uris=[manifest_uri], data_schema="document"),
+        reconciliation_mode=ImportDocumentsRequest.ReconciliationMode.INCREMENTAL,
+    )
+    de_client.import_documents(request=request)  # fire LRO; do not block
+    logger.info("Fired Vertex import for %s (doc_id=%s)", gcs_path, doc_id)
+    return doc_id
+
+
 def ingest_file(
     gcs_path: str,
     lecturer_id: str,
@@ -62,10 +124,9 @@ def ingest_file(
     batch_name: str = "",
     on_progress: Callable[[str], None] | None = None,
 ) -> str:
-    """
-    Upload a JSONL manifest and trigger Vertex AI Search ImportDocuments.
-    Returns the document ID on success, raises RuntimeError on failure.
-    """
+    """Legacy blocking ingest (manifest + import + poll up to 1h). Retained for any
+    caller that still needs synchronous completion; the task chain uses
+    start_ingest_file + get_document polling instead."""
     datastore_id = _root_datastore_id()
     if not datastore_id:
         raise RuntimeError(

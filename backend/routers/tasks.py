@@ -71,6 +71,27 @@ async def _handle_attachment_watchdog(_payload: dict[str, Any]) -> None:
     await asyncio.to_thread(run_attachment_watchdog)
 
 
+async def _handle_index_file(payload: dict[str, Any]) -> None:
+    from services.file_service import run_index_file_task
+
+    await asyncio.to_thread(
+        run_index_file_task,
+        str(payload["file_id"]), str(payload["batch_id"]), str(payload["gcs_path"]),
+        str(payload["lecturer_id"]), str(payload["file_title"]),
+        str(payload.get("course_name") or ""), str(payload.get("batch_name") or ""),
+    )
+
+
+async def _handle_check_indexing(payload: dict[str, Any]) -> None:
+    from services.file_service import run_check_indexing_task
+
+    await asyncio.to_thread(
+        run_check_indexing_task,
+        str(payload["file_id"]), str(payload["batch_id"]),
+        str(payload["lecturer_id"]), int(payload.get("attempt") or 0),
+    )
+
+
 @router.post("/process-attachment", status_code=status.HTTP_204_NO_CONTENT)
 async def process_attachment_task(request: Request, _: None = Depends(verify_task_caller)) -> None:
     await _handle_process_attachment(await request.json())
@@ -86,6 +107,18 @@ async def attachment_watchdog_task(request: Request, _: None = Depends(verify_ta
     await _handle_attachment_watchdog({})
 
 
+@router.post("/index-file", status_code=status.HTTP_204_NO_CONTENT)
+async def index_file_task(request: Request, _: None = Depends(verify_task_caller)) -> None:
+    await _handle_index_file(await request.json())
+
+
+@router.post("/check-indexing", status_code=status.HTTP_204_NO_CONTENT)
+async def check_indexing_task(request: Request, _: None = Depends(verify_task_caller)) -> None:
+    await _handle_check_indexing(await request.json())
+
+
 register_local_handler("/tasks/process-attachment", _handle_process_attachment)
 register_local_handler("/tasks/run-agent", _handle_run_agent)
 register_local_handler("/tasks/cron/attachment-watchdog", _handle_attachment_watchdog)
+register_local_handler("/tasks/index-file", _handle_index_file)
+register_local_handler("/tasks/check-indexing", _handle_check_indexing)

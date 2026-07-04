@@ -1,7 +1,6 @@
 """File upload pipeline: GCS → Firestore record → Vertex AI Search indexing."""
 
 import logging
-import threading
 import uuid
 import os
 from datetime import datetime, timedelta, timezone
@@ -13,9 +12,10 @@ from entity.File import BatchFile
 from utils.firestore_client import get_firestore
 from utils.gcs import batch_upload_blob_path, delete_blob, upload_bytes, download_bytes
 from google.cloud import firestore
-from utils.vertex_ingest import delete_document, ingest_file
+from utils.vertex_ingest import delete_document, start_ingest_file
 from utils.vertex_ingest import _doc_id as vertex_doc_id_for_file
 from utils.vertex_ingest import _root_datastore_id
+from services.cloud_tasks import QUEUE_INDEXING, enqueue
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,26 @@ BATCHES_COLLECTION = "batches"
 FILES_SUBCOLLECTION = "files"
 PENDING_RESOURCES_SUBCOLLECTION = "pending_resources"
 TRUNCATION_WARNING = "Only the first portion of this file is available immediately. Full durable indexing is still running."
+
+# Poll cadence + ceiling for the check-indexing task chain (~1h expected window).
+_CHECK_INDEXING_DELAY_SECONDS = 60
+_CHECK_INDEXING_MAX_ATTEMPTS = 90  # ~90 min before handing back to the recovery sweep
+
+
+def get_course_space_max_files() -> int:
+    """Per-batch indexed-file cap (product guardrail; Vertex handles far more)."""
+    try:
+        return max(1, min(int(os.getenv("COURSE_SPACE_MAX_FILES", "50")), 10_000))
+    except (TypeError, ValueError):
+        return 50
+
+
+def count_batch_files(batch_id: str) -> int:
+    return sum(
+        1 for _ in get_firestore()
+        .collection(BATCHES_COLLECTION).document(batch_id)
+        .collection(FILES_SUBCOLLECTION).stream()
+    )
 
 def _iso(value):
     return value.isoformat() if hasattr(value, "isoformat") else (str(value) if value else None)
@@ -127,15 +147,36 @@ def upload_batch_file(
     snap = file_doc.get()
     return _doc_to_model(file_id, snap.to_dict() or {})
 
+def _course_token_estimate(file_bytes: bytes, content_type: str, char_len: int) -> int:
+    from services.attachment_constants import CHARS_PER_TOKEN, TOKENS_PER_PDF_PAGE
+    import io, math
+    if content_type == "application/pdf":
+        try:
+            from pypdf import PdfReader
+            return max(1, len(PdfReader(io.BytesIO(file_bytes)).pages)) * TOKENS_PER_PDF_PAGE
+        except Exception:
+            return max(TOKENS_PER_PDF_PAGE, (len(file_bytes) // 3_000) * TOKENS_PER_PDF_PAGE)
+    return max(1, math.ceil(char_len / CHARS_PER_TOKEN))
+
+
 def build_pending_overlay(file_id: str, batch_id: str, lecturer_id: str, file_name: str, file_title: str, content_type: str, gcs_path: str, file_bytes: bytes) -> None:
     file_ref = _file_ref(batch_id, file_id); resource_ref = _pending_ref(batch_id, file_id)
     try:
         if content_type == "application/msword":
             raise ValueError("Legacy DOC files do not support immediate extraction.")
         from services.document_extraction import extract_document, chunk_extraction
+        from services.attachment_constants import NATIVE_READABLE_CONTENT_TYPES, get_max_native_read_tokens
         result = extract_document(file_bytes, content_type, 300_000)
-        chunks, truncated = chunk_extraction(result)
-        if not chunks:
+        # Native-eligible: Gemini can read the original directly and it fits the budget.
+        # Those are read natively by the agent during the indexing window (full fidelity);
+        # oversized / non-native (docx/pptx) fall back to the lexical chunk overlay.
+        token_estimate = _course_token_estimate(file_bytes, content_type, len(result.text))
+        native_eligible = (
+            content_type in NATIVE_READABLE_CONTENT_TYPES
+            and token_estimate <= get_max_native_read_tokens()
+        )
+        chunks, truncated = ([], False) if native_eligible else chunk_extraction(result)
+        if not native_eligible and not chunks:
             raise ValueError("No extractable text was found.")
         for index, chunk in enumerate(chunks):
             resource_ref.collection("chunks").document(f"{index:04d}").set({
@@ -152,6 +193,9 @@ def build_pending_overlay(file_id: str, batch_id: str, lecturer_id: str, file_na
             "file_id": file_id, "file_name": file_name, "file_title": file_title,
             "content_type": content_type, "gcs_path": gcs_path, "status": "ready",
             "overlay_warning": warning, "chunk_count": len(chunks),
+            "native_eligible": native_eligible, "token_estimate": token_estimate,
+            "native_gcs_uri": gcs_path if native_eligible else "",
+            "native_mime_type": content_type if native_eligible else "",
             "text_preview": result.text[:4000], "created_at": SERVER_TIMESTAMP, "updated_at": SERVER_TIMESTAMP,
         }, merge=True)
         file_ref.update({"overlay_status": "ready", "overlay_warning": warning, "index_message": "Ready for immediate use. Durable indexing is running.", "updated_at": SERVER_TIMESTAMP})
@@ -169,27 +213,20 @@ def enqueue_index_batch_file(
     file_title: str,
     course_name: str = "",
     batch_name: str = "",
+    *,
+    background_tasks=None,
 ) -> None:
-    """Run indexing in a daemon thread so uploads/reloads are not blocked.
-
-    TODO: Move production indexing to Cloud Tasks, a Cloud Run job, or a
-    dedicated worker so it does not rely on process-local daemon threads.
-    """
-    thread = threading.Thread(
-        target=_leased_process_file,
-        kwargs={
-            "file_id": file_id,
-            "batch_id": batch_id,
-            "gcs_path": gcs_path,
-            "lecturer_id": lecturer_id,
-            "file_title": file_title,
-            "course_name": course_name,
-            "batch_name": batch_name,
+    """Queue durable Vertex indexing via Cloud Tasks (local: inline)."""
+    enqueue(
+        QUEUE_INDEXING, "/tasks/index-file",
+        {
+            "file_id": file_id, "batch_id": batch_id, "gcs_path": gcs_path,
+            "lecturer_id": lecturer_id, "file_title": file_title,
+            "course_name": course_name, "batch_name": batch_name,
         },
-        daemon=True,
-        name=f"index-{file_id[:8]}",
+        background_tasks=background_tasks,
     )
-    thread.start()
+
 
 def _claim_recovery(batch_id: str, file_id: str, owner: str, lease_minutes: int = 120) -> bool:
     ref = _file_ref(batch_id, file_id); tx = get_firestore().transaction(); now = datetime.now(timezone.utc)
@@ -207,93 +244,133 @@ def _release_recovery(batch_id: str, file_id: str, owner: str, error: str = "") 
     if data.get("recovery_lease_owner") == owner:
         ref.update({"recovery_lease_owner": "", "recovery_lease_until": None, "last_recovery_error": error[:500], "updated_at": SERVER_TIMESTAMP})
 
-def _leased_process_file(**kwargs) -> None:
-    batch_id = kwargs["batch_id"]; file_id = kwargs["file_id"]; owner = uuid.uuid4().hex
-    if not _claim_recovery(batch_id, file_id, owner): return
-    error = ""
+
+def run_index_file_task(
+    file_id: str, batch_id: str, gcs_path: str, lecturer_id: str,
+    file_title: str, course_name: str = "", batch_name: str = "",
+) -> None:
+    """Cloud Task: fire the Vertex import, then hand off to the check-indexing chain.
+
+    Idempotent — a duplicate delivery that finds the file already past 'pending'/'indexing'
+    (or unable to claim the lease) is a no-op.
+    """
+    file_doc = _file_ref(batch_id, file_id)
+    owner = uuid.uuid4().hex
+    if not _claim_recovery(batch_id, file_id, owner):
+        return
     try:
-        index_batch_file(**kwargs)
+        file_doc.update({"index_status": "indexing", "index_error": "",
+                         "index_message": "Starting document import…", "updated_at": SERVER_TIMESTAMP})
+        doc_id = start_ingest_file(
+            gcs_path=gcs_path, lecturer_id=lecturer_id, batch_id=batch_id,
+            file_title=file_title, course_name=course_name, batch_name=batch_name,
+        )
+        file_doc.update({
+            "vertex_doc_id": doc_id, "index_status": "indexing",
+            "vertex_import_completed_at": SERVER_TIMESTAMP,
+            "index_message": "Waiting for durable index visibility.",
+            "index_error": "", "updated_at": SERVER_TIMESTAMP,
+        })
+        enqueue(
+            QUEUE_INDEXING, "/tasks/check-indexing",
+            {"file_id": file_id, "batch_id": batch_id, "lecturer_id": lecturer_id, "attempt": 0},
+            delay_seconds=_CHECK_INDEXING_DELAY_SECONDS,
+        )
     except Exception as exc:
-        error = str(exc)
-        raise
+        err_msg = str(exc)[:500]
+        logger.warning("Vertex import kickoff failed for file %s: %s", file_id, err_msg)
+        file_doc.update({"index_status": "failed", "index_error": err_msg,
+                         "index_message": "", "updated_at": SERVER_TIMESTAMP})
     finally:
-        _release_recovery(batch_id, file_id, owner, error)
+        _release_recovery(batch_id, file_id, owner)
+
+
+def run_check_indexing_task(file_id: str, batch_id: str, lecturer_id: str, attempt: int = 0) -> None:
+    """Cloud Task: poll Vertex query-visibility; re-enqueue with a delay until visible
+    or the attempt ceiling is hit (then the recovery sweep owns it)."""
+    snap = _file_ref(batch_id, file_id).get()
+    data = snap.to_dict() or {}
+    if not snap.exists or str(data.get("index_status") or "") in {"indexed", "failed", "deleting"}:
+        if str(data.get("index_status") or "") == "indexed":
+            _retire_overlay_if_due(batch_id, file_id)
+        return
+    if _reconcile_visibility(batch_id, file_id, lecturer_id):
+        return  # became visible -> indexed
+    if attempt + 1 >= _CHECK_INDEXING_MAX_ATTEMPTS:
+        _file_ref(batch_id, file_id).update({
+            "index_message": "Indexing is taking longer than usual; it will finish in the background.",
+            "updated_at": SERVER_TIMESTAMP,
+        })
+        return  # hand back to the periodic recovery sweep
+    enqueue(
+        QUEUE_INDEXING, "/tasks/check-indexing",
+        {"file_id": file_id, "batch_id": batch_id, "lecturer_id": lecturer_id, "attempt": attempt + 1},
+        delay_seconds=_CHECK_INDEXING_DELAY_SECONDS,
+    )
+
 
 def recover_batch_files(limit: int = 20) -> int:
+    """Safety-net sweep: re-enqueue stuck files onto the task chain (no threads)."""
     db = get_firestore(); docs = []
     for status_value in ("pending", "indexing"):
         docs.extend(list(db.collection_group(FILES_SUBCOLLECTION).where("index_status", "==", status_value).limit(limit).stream()))
     docs.extend(list(db.collection_group(FILES_SUBCOLLECTION).where("overlay_status", "==", "retiring").limit(limit).stream()))
     processed = 0
     for doc in docs[:limit]:
-        data = doc.to_dict() or {}; batch_id = str(data.get("batch_id") or ""); file_id = doc.id; owner = uuid.uuid4().hex
-        if not batch_id or not _claim_recovery(batch_id, file_id, owner): continue
+        data = doc.to_dict() or {}
+        batch_id = str(data.get("batch_id") or ""); file_id = doc.id
+        lecturer_id = str(data.get("lecturer_id") or "")
+        if not batch_id:
+            continue
         try:
-            if data.get("index_status") == "indexed": _retire_overlay_if_due(batch_id, file_id)
-            elif data.get("vertex_import_completed_at"): _reconcile_visibility(batch_id, file_id, str(data.get("lecturer_id") or ""))
+            if data.get("index_status") == "indexed":
+                _retire_overlay_if_due(batch_id, file_id)
+            elif data.get("vertex_import_completed_at"):
+                # Import already fired — resume visibility polling.
+                enqueue(QUEUE_INDEXING, "/tasks/check-indexing",
+                        {"file_id": file_id, "batch_id": batch_id, "lecturer_id": lecturer_id, "attempt": 0})
             else:
                 if str(data.get("overlay_status") or "missing") == "missing":
-                    build_pending_overlay(file_id, batch_id, str(data.get("lecturer_id") or ""), str(data.get("file_name") or ""), str(data.get("file_title") or ""), str(data.get("content_type") or ""), str(data.get("gcs_path") or ""), download_bytes(str(data.get("gcs_path") or "")))
+                    build_pending_overlay(file_id, batch_id, lecturer_id, str(data.get("file_name") or ""), str(data.get("file_title") or ""), str(data.get("content_type") or ""), str(data.get("gcs_path") or ""), download_bytes(str(data.get("gcs_path") or "")))
                 batch = db.collection(BATCHES_COLLECTION).document(batch_id).get().to_dict() or {}
-                index_batch_file(file_id, batch_id, str(data.get("gcs_path") or ""), str(data.get("lecturer_id") or ""), str(data.get("file_title") or ""), str(batch.get("course_name") or ""), str(batch.get("batch_name") or ""))
-            processed += 1; _release_recovery(batch_id, file_id, owner)
+                enqueue_index_batch_file(file_id, batch_id, str(data.get("gcs_path") or ""), lecturer_id, str(data.get("file_title") or ""), str(batch.get("course_name") or ""), str(batch.get("batch_name") or ""))
+            processed += 1
         except Exception as exc:
-            _release_recovery(batch_id, file_id, owner, str(exc))
+            logger.warning("recover_batch_files: file %s re-enqueue failed: %s", file_id, exc)
     return processed
 
 
-def index_batch_file(
-    file_id: str,
-    batch_id: str,
-    gcs_path: str,
-    lecturer_id: str,
-    file_title: str,
-    course_name: str = "",
-    batch_name: str = "",
-) -> None:
-    """Run Vertex indexing in a background worker and update the Firestore record."""
-    file_doc = _file_ref(batch_id, file_id)
+def build_pending_course_materials_manifest(batch_id: str, lecturer_id: str, limit: int = 20) -> list[dict[str, Any]]:
+    """Trusted manifest of just-uploaded, not-yet-indexed, native-eligible course files.
 
-    def _on_progress(message: str) -> None:
-        try:
-            file_doc.update({"index_message": message, "updated_at": SERVER_TIMESTAMP})
-        except Exception:
-            pass
-
-    try:
-        file_doc.update({"index_status": "indexing", "index_error": "", "updated_at": SERVER_TIMESTAMP})
-        _on_progress("Starting document import…")
-        doc_id = ingest_file(
-            gcs_path=gcs_path,
-            lecturer_id=lecturer_id,
-            batch_id=batch_id,
-            file_title=file_title,
-            course_name=course_name,
-            batch_name=batch_name,
-            on_progress=_on_progress,
-        )
-        file_doc.update(
-            {
-                "vertex_doc_id": doc_id,
-                "index_status": "indexing",
-                "vertex_import_completed_at": SERVER_TIMESTAMP,
-                "index_message": "Waiting for durable index visibility.",
-                "index_error": "",
-                "updated_at": SERVER_TIMESTAMP,
-            }
-        )
-        _reconcile_visibility(batch_id, file_id, lecturer_id)
-    except Exception as exc:
-        err_msg = str(exc)[:500]
-        logger.warning("Vertex indexing failed for file %s: %s", file_id, err_msg)
-        file_doc.update(
-            {
-                "index_status": "failed",
-                "index_error": err_msg,
-                "index_message": "",
-                "updated_at": SERVER_TIMESTAMP,
-            }
-        )
+    Injected into agent session state so the agent can read them natively during the
+    ~1h Vertex indexing window (full fidelity), instead of the lossy lexical overlay.
+    Only native-eligible 'ready' overlays are included; the agent's per-run token budget
+    bounds how many are actually read (the rest wait for indexing).
+    """
+    db = get_firestore()
+    col = db.collection(BATCHES_COLLECTION).document(batch_id).collection(PENDING_RESOURCES_SUBCOLLECTION)
+    manifest: list[dict[str, Any]] = []
+    for doc in col.stream():
+        data = doc.to_dict() or {}
+        if (
+            data.get("lecturer_id") != lecturer_id
+            or data.get("status") != "ready"
+            or not data.get("native_eligible")
+            or not data.get("native_gcs_uri")
+        ):
+            continue
+        manifest.append({
+            "file_id": str(data.get("file_id") or doc.id),
+            "file_title": str(data.get("file_title") or data.get("file_name") or ""),
+            "native_gcs_uri": str(data.get("native_gcs_uri") or ""),
+            "native_mime_type": str(data.get("native_mime_type") or "application/pdf"),
+            "token_estimate": int(data.get("token_estimate") or 0),
+            "status": "ready",
+        })
+        if len(manifest) >= limit:
+            break
+    return manifest
 
 
 def list_batch_files(batch_id: str, lecturer_id: str) -> list[BatchFile]:

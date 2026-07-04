@@ -571,6 +571,15 @@ def _build_session_state(
         attachment_records,
         batch_id=batch.batch_id, chat_id=chat_id, lecturer_id=lecturer_id,
     ))
+    # Interim native-read manifest for just-uploaded course files still indexing.
+    try:
+        from services.file_service import build_pending_course_materials_manifest
+        state["pending_course_materials_manifest"] = build_pending_course_materials_manifest(
+            batch.batch_id, lecturer_id
+        )
+    except Exception:
+        logger.exception("Failed to build pending course materials manifest batch=%s", batch.batch_id)
+        state["pending_course_materials_manifest"] = []
     if is_generation_workflow(workflow_type):
         state.update(
             build_blueprint_session_context(

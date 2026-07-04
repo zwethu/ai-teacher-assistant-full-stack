@@ -1,13 +1,15 @@
 import logging
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 
 from entity.File import BatchFile
 from services.batch_service import get_batch
 from services.file_service import (
+    count_batch_files,
     delete_batch_file,
     enqueue_index_batch_file,
     get_batch_file,
+    get_course_space_max_files,
     list_batch_files,
     sync_index_status,
     upload_batch_file,
@@ -36,6 +38,7 @@ MAX_FILE_SIZE_MB = 50
 @router.post("", response_model=BatchFile, status_code=status.HTTP_201_CREATED)
 async def upload_file_endpoint(
     batch_id: str,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     file_title: str = Form(""),
     current_user: CurrentUser = Depends(get_current_user),
@@ -45,6 +48,16 @@ async def upload_file_endpoint(
     batch = get_batch(batch_id, lecturer_id)
     if batch is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch not found")
+
+    max_files = get_course_space_max_files()
+    if count_batch_files(batch_id) >= max_files:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"This Course Space is at its {max_files}-file limit. Remove a file before "
+                "adding another, or use chat attachments for one-off documents."
+            ),
+        )
 
     content_type = file.content_type or "application/octet-stream"
     file_bytes = await file.read()
@@ -81,6 +94,7 @@ async def upload_file_endpoint(
         file_title=record.file_title,
         course_name=batch.course_name,
         batch_name=batch.batch_name,
+        background_tasks=background_tasks,
     )
 
     return record

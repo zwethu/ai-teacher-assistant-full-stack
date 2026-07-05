@@ -19,7 +19,7 @@ export type AgentInvokePayload = {
   attachment_ids?: string[]
 }
 
-async function invokeAgent(
+export async function invokeAgent(
   payload: AgentInvokePayload | Record<string, unknown>,
 ): Promise<unknown> {
   const connectors =

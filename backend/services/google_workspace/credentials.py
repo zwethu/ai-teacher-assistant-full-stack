@@ -1,8 +1,10 @@
 """Central credential management for Google Workspace APIs.
 
-This is the **only** module that reads ``users/{uid}.google_refresh_token``
-from Firestore.  No refresh token or access token is ever returned to callers
-outside the backend service layer.
+This is the **only** module that reads or writes the Google OAuth refresh token.
+The token lives in an Admin-SDK-only subdocument, ``users/{uid}/private/google_oauth``
+(denied to all client reads by Firestore rules), never on the client-readable
+``users/{uid}`` doc.  No refresh/access token is ever returned to callers outside the
+backend service layer.
 """
 
 from __future__ import annotations
@@ -12,6 +14,7 @@ import os
 from typing import Any
 
 from google.auth.transport.requests import Request as GoogleAuthRequest
+from google.cloud.firestore import DELETE_FIELD, SERVER_TIMESTAMP
 from google.oauth2.credentials import Credentials
 
 from utils.firestore_client import get_firestore
@@ -19,6 +22,59 @@ from utils.firestore_client import get_firestore
 logger = logging.getLogger(__name__)
 
 USERS_COLLECTION = "users"
+
+# Admin-only location for the OAuth refresh token (secret). Firestore rules deny all
+# client access to users/{uid}/private/*, so the token is never reachable by the browser.
+OAUTH_PRIVATE_SUBCOLLECTION = "private"
+OAUTH_PRIVATE_DOC = "google_oauth"
+
+
+def _oauth_private_ref(db: Any, uid: str) -> Any:
+    return (
+        db.collection(USERS_COLLECTION)
+        .document(uid)
+        .collection(OAUTH_PRIVATE_SUBCOLLECTION)
+        .document(OAUTH_PRIVATE_DOC)
+    )
+
+
+def store_refresh_token(db: Any, uid: str, refresh_token: str) -> None:
+    """Persist the OAuth refresh token to the Admin-only private subdocument."""
+    _oauth_private_ref(db, uid).set(
+        {"google_refresh_token": refresh_token, "updatedAt": SERVER_TIMESTAMP},
+        merge=True,
+    )
+
+
+def read_refresh_token(db: Any, uid: str) -> str | None:
+    """Read the refresh token from the private subdoc.
+
+    Falls back to the legacy ``users/{uid}.google_refresh_token`` field for accounts
+    that predate the split, migrating it into the private subdoc and clearing it off the
+    client-readable doc on first read so the exposure is closed for existing users too.
+    """
+    priv = _oauth_private_ref(db, uid).get()
+    if getattr(priv, "exists", False):
+        token = (priv.to_dict() or {}).get("google_refresh_token")
+        if token:
+            return token
+
+    legacy_snap = db.collection(USERS_COLLECTION).document(uid).get()
+    legacy = (
+        (legacy_snap.to_dict() or {}).get("google_refresh_token")
+        if getattr(legacy_snap, "exists", False)
+        else None
+    )
+    if not legacy:
+        return None
+    try:  # migrate off the client-readable doc; best-effort, never blocks auth
+        store_refresh_token(db, uid, legacy)
+        db.collection(USERS_COLLECTION).document(uid).update(
+            {"google_refresh_token": DELETE_FIELD}
+        )
+    except Exception:
+        logger.warning("refresh-token migration failed for uid=%s", uid, exc_info=True)
+    return legacy
 
 # ---------------------------------------------------------------------------
 # Scope maps
@@ -100,9 +156,11 @@ def get_user_google_record(uid: str) -> dict[str, Any]:
     """
     db = get_firestore()
     snap = db.collection(USERS_COLLECTION).document(uid).get()
+    # The refresh token lives in the Admin-only private subdoc, not on this doc.
+    refresh_token = read_refresh_token(db, uid)
     if not snap.exists:
         return {
-            "google_refresh_token": None,
+            "google_refresh_token": refresh_token,
             "google_scopes": [],
             "google_token_status": None,
             "google_email": None,
@@ -110,7 +168,7 @@ def get_user_google_record(uid: str) -> dict[str, Any]:
         }
     data = snap.to_dict() or {}
     return {
-        "google_refresh_token": data.get("google_refresh_token"),
+        "google_refresh_token": refresh_token,
         "google_scopes": data.get("google_scopes") or [],
         "google_token_status": data.get("google_token_status"),
         "google_email": data.get("google_email"),

@@ -2,6 +2,7 @@ import logging
 from datetime import datetime, timezone
 
 from services.gmail_service import GmailSendError, send_email
+from services.google_workspace.credentials import read_refresh_token
 from utils.firestore_client import get_firestore
 
 logger = logging.getLogger(__name__)
@@ -44,7 +45,7 @@ def check_and_send_emails() -> None:
                 )
                 continue
 
-            refresh_token = (user_snap.to_dict() or {}).get("google_refresh_token")
+            refresh_token = read_refresh_token(db, uid)
             if not refresh_token:
                 logger.warning(
                     "No google_refresh_token for user %s (email %s); skipping",

@@ -15,6 +15,7 @@ from google.oauth2 import id_token as google_id_token
 from google_auth_oauthlib.flow import Flow
 from google.cloud.firestore import SERVER_TIMESTAMP
 
+from services.google_workspace.credentials import read_refresh_token, store_refresh_token
 from utils.firebase_auth import CurrentUser, get_current_user, init_firebase
 from utils.firestore_client import get_firestore
 from utils.google_credentials import get_google_flow, GOOGLE_SCOPES
@@ -187,7 +188,6 @@ async def google_scopes_callback(
             "uid": uid,
             "email": email,
             "display_name": name,
-            "google_refresh_token": refresh_token,
             "google_scopes": GOOGLE_SCOPES,
             "google_token_status": "valid",
             "google_oauth_provider": "google",
@@ -198,6 +198,9 @@ async def google_scopes_callback(
         if not user_snap.exists:
             user_payload["createdAt"] = SERVER_TIMESTAMP
         user_ref.set(user_payload, merge=True)
+        # The refresh token (a secret) is written to an Admin-only private subdoc,
+        # never to the client-readable users/{uid} doc.
+        store_refresh_token(db, uid, refresh_token)
 
         custom_token = firebase_auth_module.create_custom_token(uid).decode("utf-8")
     except Exception as exc:
@@ -258,11 +261,6 @@ async def check_permissions(
 ) -> dict[str, bool]:
     uid = current_user["uid"]
     db = get_firestore()
-    snapshot = db.collection(USERS_COLLECTION).document(uid).get()
-
-    if not snapshot.exists:
-        return {"has_google_scopes": False}
-
-    data = snapshot.to_dict() or {}
-    token = data.get("google_refresh_token")
+    # Token lives in the Admin-only private subdoc (with legacy fallback).
+    token = read_refresh_token(db, uid)
     return {"has_google_scopes": bool(token)}

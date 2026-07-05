@@ -43,7 +43,7 @@ import { RunDetails } from './run/RunDetails'
 import { ThinkingPanel } from './run/ThinkingPanel'
 import { CourseBlueprintReviewModal } from './CourseBlueprintReviewModal'
 import type { CourseBlueprint } from '../../../services/courseBlueprintService'
-import { normalizeCourseBlueprintRecommendation } from '../../../services/courseBlueprintService'
+import { normalizeCourseBlueprintRecommendation, saveBlueprintFromRun } from '../../../services/courseBlueprintService'
 import { SuggestedCourseBlueprintModal } from './SuggestedCourseBlueprintModal'
 
 export function MessageRow({
@@ -180,6 +180,7 @@ export function MessageRow({
               <CourseBlueprintReviewModal batchId={batchId} courseName={courseName} message={msg} initialContent={blueprintMode === 'edit-suggested' ? blueprintRecommendation || undefined : undefined} onClose={() => setBlueprintMode(null)} onSaved={(blueprint) => { setSavedBlueprint(blueprint); setBlueprintMode(null) }} />
             )}
             {!isUser && batchId && <ArtifactExportButton batchId={batchId} msg={msg} />}
+            {!isUser && batchId && <BlueprintSaveButton batchId={batchId} msg={msg} />}
           </div>
         )}
       </div>
@@ -649,6 +650,55 @@ export function MarkdownBlock({ content, webSources = [], onCitationSelect }: { 
     >
       {content}
     </ReactMarkdown>
+  )
+}
+
+function BlueprintSaveButton({ batchId, msg }: { batchId: string; msg: ChatMessage }) {
+  const metadata = msg.metadata || {}
+  const savable = metadata.pending_savable_blueprint === true
+  const alreadySavedId = String(metadata.course_blueprint_saved_id || '')
+  const runId = String(msg.run_id || '')
+  const chatId = msg.chat_id
+  const [saving, setSaving] = useState(false)
+  const [savedVersion, setSavedVersion] = useState<number | null>(null)
+  const [error, setError] = useState('')
+
+  if (!savable && !alreadySavedId) return null
+  const isSaved = Boolean(alreadySavedId) || savedVersion !== null
+
+  async function handleSave() {
+    if (!chatId || !runId) return
+    setError('')
+    setSaving(true)
+    try {
+      const res = await saveBlueprintFromRun(batchId, chatId, runId)
+      setSavedVersion(res.version ?? null)
+    } catch {
+      setError('Could not save the course plan. Please retry.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="mt-2">
+      {isSaved ? (
+        <span className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-700">
+          <Save className="h-4 w-4" /> Saved as course plan{savedVersion ? ` (v${savedVersion})` : ''}
+        </span>
+      ) : (
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saving || !chatId || !runId}
+          className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
+        >
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+          Save as course plan
+        </button>
+      )}
+      {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+    </div>
   )
 }
 

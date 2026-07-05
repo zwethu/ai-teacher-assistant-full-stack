@@ -171,6 +171,17 @@ export async function updateCurrentCourseBlueprint(
   return res.data
 }
 
+export async function saveBlueprintFromRun(
+  batchId: string,
+  chatId: string,
+  runId: string,
+): Promise<{ blueprint_id: string; version?: number; artifact_type: string }> {
+  const res = await api.post<{ blueprint_id: string; version?: number; artifact_type: string }>(
+    `/batches/${batchId}/chats/${chatId}/runs/${runId}/pending-artifact/save-blueprint`,
+  )
+  return res.data
+}
+
 export async function archiveCurrentCourseBlueprint(batchId: string): Promise<CourseBlueprint> {
   const res = await api.post<CourseBlueprint>(
     `/batches/${batchId}/course-blueprint/current/archive`,

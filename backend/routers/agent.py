@@ -77,8 +77,12 @@ _SAVE_DRAFT_WORKFLOWS = {
     "quiz",
     "quiz.generate",
 }
+# Course blueprint is a course-level (not per-week) two-stage workflow: it supports the
+# outline->approve->full pending-artifact flow but never requires a `week` and never uses
+# the one-shot save_draft path (its terminal step is save-blueprint, not doc export).
+_COURSE_BLUEPRINT_WORKFLOWS = {"course_blueprint", "course_blueprint.generate"}
 _WEEK_REQUIRED_WORKFLOWS = _SAVE_DRAFT_WORKFLOWS
-_PENDING_ARTIFACT_WORKFLOWS = _SAVE_DRAFT_WORKFLOWS
+_PENDING_ARTIFACT_WORKFLOWS = _SAVE_DRAFT_WORKFLOWS | _COURSE_BLUEPRINT_WORKFLOWS
 
 
 def _validate_invoke_request(body: AgentInvokeRequest) -> None:

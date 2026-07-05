@@ -78,6 +78,37 @@ def content_hash(payload: dict[str, Any]) -> str:
     return _content_hash(payload)
 
 
+def render_course_blueprint_markdown(payload: dict[str, Any]) -> str:
+    """Compact markdown preview of a full Course Blueprint (CourseBlueprintRecommendation)."""
+    lines = [f"# {str(payload.get('title') or 'Course Plan')}", ""]
+    if payload.get("summary"):
+        lines += [str(payload["summary"]), ""]
+    scope = str(payload.get("plan_scope") or "")
+    horizon = payload.get("planning_horizon_weeks")
+    meta = [f"**Scope:** {scope}" if scope else "", f"**Weeks:** {horizon}" if horizon else ""]
+    meta = [m for m in meta if m]
+    if meta:
+        lines += [" · ".join(meta), ""]
+    weekly = payload.get("weekly_plan")
+    if isinstance(weekly, list) and weekly:
+        lines += ["## Weekly Plan", ""]
+        for w in weekly:
+            if not isinstance(w, dict):
+                continue
+            lines.append(f"**Week {w.get('week')}: {str(w.get('theme') or '')}**")
+            for label, key in (("Lesson", "lesson_goal"), ("Lab", "lab_goal"), ("Assessment", "assessment_idea")):
+                if w.get(key):
+                    lines.append(f"- {label}: {w[key]}")
+            lines.append("")
+    for label, key in (("Assessment Strategy", "assessment_strategy"), ("Lab Strategy", "lab_strategy")):
+        if payload.get(key):
+            lines += [f"## {label}", str(payload[key]), ""]
+    prefs = payload.get("teaching_preferences")
+    if isinstance(prefs, dict) and prefs:
+        lines += ["## Teaching Preferences"] + [f"- **{k}:** {v}" for k, v in prefs.items()] + [""]
+    return "\n".join(lines).strip()
+
+
 def _render_preview_markdown(artifact_type: str, payload: dict[str, Any], fallback: str) -> tuple[str, str]:
     if artifact_type == "lesson_plan":
         return render_lesson_plan_markdown(payload), LESSON_PLAN_MARKDOWN_RENDERER_VERSION
@@ -85,6 +116,8 @@ def _render_preview_markdown(artifact_type: str, payload: dict[str, Any], fallba
         return render_lab_markdown(payload), LAB_MARKDOWN_RENDERER_VERSION
     if artifact_type == "quiz":
         return render_quiz_markdown(payload), QUIZ_MARKDOWN_RENDERER_VERSION
+    if artifact_type == "course_blueprint":
+        return render_course_blueprint_markdown(payload), "course_blueprint_markdown.v1"
     return fallback, "agent_final_text.v1"
 
 

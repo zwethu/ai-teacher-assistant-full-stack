@@ -5,9 +5,11 @@ import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
+from entity.CourseBlueprint import CourseBlueprintContent
 from services.agent_gateway import start_chat_run
+from services.course_blueprint_service import save_blueprint_from_content
 from services.agent_sessions import (
     claim_pending_artifact_export,
     get_agent_run,
@@ -518,6 +520,98 @@ async def generate_docs_from_pending_artifact_endpoint(
         "pending_artifact_id": str(pending.get("pending_artifact_id") or ""),
         "artifact_type": artifact_type,
     }
+
+
+@router.post("/{chat_id}/runs/{run_id}/pending-artifact/save-blueprint", response_model=dict)
+async def save_blueprint_from_pending_artifact_endpoint(
+    batch_id: str,
+    chat_id: str,
+    run_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Persist the run's generated Course Plan (blueprint) as a new version.
+
+    The course-plan workflow's confirm-to-persist terminal — analogous to generate-docs,
+    but it saves a blueprint version (no Google export). Content comes from the run's
+    validated pending artifact, guarded by a content hash.
+    """
+    lecturer_id: str = current_user["uid"]
+    try:
+        claim = claim_pending_artifact_export(
+            batch_id=batch_id, chat_id=chat_id, run_id=run_id, lecturer_id=lecturer_id,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found") from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    pending = claim["pending_artifact"]
+    export_lock_id = str(claim.get("export_lock_id") or "")
+    if claim["state"] == "already_exported":
+        result = pending.get("export_result")
+        if isinstance(result, dict):
+            return result
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Blueprint save result is missing")
+    if claim["state"] == "in_progress":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Blueprint save already in progress.")
+
+    def mark_failed(error: str) -> None:
+        mark_agent_run_pending_artifact_export_failed(
+            batch_id=batch_id, chat_id=chat_id, run_id=run_id,
+            error=error, export_lock_id=export_lock_id,
+        )
+
+    artifact_type = str(pending.get("artifact_type") or "")
+    if artifact_type != "course_blueprint":
+        mark_failed("Pending artifact is not a course plan")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pending artifact is not a course plan")
+
+    content = pending.get("content_json")
+    if not isinstance(content, dict) or not content:
+        mark_failed("Pending course plan content is missing")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pending course plan content is missing")
+    expected_hash = str(pending.get("content_hash") or "")
+    if expected_hash and expected_hash != content_hash(content):
+        mark_failed("Pending course plan content hash mismatch")
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Pending course plan content hash mismatch")
+
+    try:
+        blueprint_content = CourseBlueprintContent(**content)
+        saved = save_blueprint_from_content(
+            batch_id, lecturer_id, blueprint_content,
+            source_chat_id=chat_id, source_run_id=run_id,
+        )
+    except ValidationError as exc:
+        mark_failed(str(exc))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Generated course plan is invalid") from exc
+    except Exception as exc:
+        logger.exception("blueprint save failed run_id=%s", run_id)
+        mark_failed(str(exc))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    result = {"blueprint_id": str(saved.get("blueprint_id") or ""), "version": saved.get("version")}
+    mark_agent_run_pending_artifact_exported(
+        batch_id=batch_id, chat_id=chat_id, run_id=run_id,
+        pending_artifact={**pending, "status": "exported", "export_result": result},
+    )
+    write_run_event(
+        run_id, event_type="blueprint.saved", status="done",
+        title="Course plan saved", phase="save_blueprint",
+        detail={"blueprint_id": result["blueprint_id"], "version": result["version"]},
+        batch_id=batch_id, chat_id=chat_id,
+    )
+    metadata = {
+        "pending_savable_blueprint": False,
+        "pending_exportable": False,
+        "course_blueprint_saved_id": result["blueprint_id"],
+        "artifact_type": "course_blueprint",
+        "pending_artifact_id": str(pending.get("pending_artifact_id") or ""),
+    }
+    update_assistant_message_metadata_for_run(
+        batch_id=batch_id, chat_id=chat_id, run_id=run_id,
+        metadata={k: v for k, v in metadata.items() if v not in ("", None)},
+    )
+    return {**result, "artifact_type": "course_blueprint"}
 
 
 @router.post("/{chat_id}/runs/{run_id}/pending-artifact/export-google-form", response_model=dict)

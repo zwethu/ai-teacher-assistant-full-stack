@@ -762,6 +762,23 @@ def extract_quiz_full_from_state(state: dict[str, Any]) -> dict[str, Any] | None
     return raw
 
 
+def extract_course_blueprint_full_from_state(state: dict[str, Any]) -> dict[str, Any] | None:
+    """Return a plausible CourseBlueprintRecommendation payload (course-level, no week)."""
+    active_type = str(state.get("active_artifact_type") or "").strip()
+    if active_type and active_type != "course_blueprint":
+        return None
+    raw = _state_payload(state, "course_blueprint_full")
+    if not isinstance(raw, dict):
+        return None
+    title = str(raw.get("title") or "").strip()
+    scope = str(raw.get("plan_scope") or "").strip()
+    if not title or not scope:
+        return None
+    if not (raw.get("summary") or raw.get("weekly_plan") or raw.get("assessment_strategy") or raw.get("lab_strategy")):
+        return None
+    return raw
+
+
 def extract_outline_from_state(
     state: dict[str, Any], workflow_type: str
 ) -> tuple[str, dict[str, Any]] | None:
@@ -770,22 +787,49 @@ def extract_outline_from_state(
         "lesson_plan" if normalized.startswith("lesson_plan")
         else "lab" if normalized.startswith("lab")
         else "quiz" if normalized.startswith(("assessment", "quiz"))
+        else "course_blueprint" if normalized.startswith("course_blueprint")
         else ""
     )
-    key = {"lesson_plan": "lesson_plan_outline", "lab": "lab_outline", "quiz": "quiz_outline"}.get(artifact_type)
+    key = {
+        "lesson_plan": "lesson_plan_outline", "lab": "lab_outline",
+        "quiz": "quiz_outline", "course_blueprint": "course_blueprint_outline",
+    }.get(artifact_type)
     payload = _state_payload(state, key) if key else None
     if not payload or not str(payload.get("title") or "").strip():
         return None
-    try:
-        if int(payload.get("week")) < 1:
+    # Course planning is course-level — no week to validate.
+    if artifact_type != "course_blueprint":
+        try:
+            if int(payload.get("week")) < 1:
+                return None
+        except (TypeError, ValueError):
             return None
-    except (TypeError, ValueError):
-        return None
     return artifact_type, payload
 
 
 def render_outline_markdown(artifact_type: str, payload: dict[str, Any]) -> str:
     title = str(payload.get("title") or "Generated outline")
+    if artifact_type == "course_blueprint":
+        lines = [f"# {title}", ""]
+        if payload.get("summary"):
+            lines += [str(payload["summary"]), ""]
+        scope = str(payload.get("plan_scope") or "")
+        horizon = payload.get("planning_horizon_weeks")
+        meta = [m for m in (f"**Scope:** {scope}" if scope else "", f"**Weeks:** {horizon}" if horizon else "") if m]
+        if meta:
+            lines += [" · ".join(meta), ""]
+        themes = payload.get("weekly_themes")
+        if isinstance(themes, list) and themes:
+            lines += ["## Weekly Themes", ""]
+            for t in themes:
+                if isinstance(t, dict):
+                    lines.append(f"- **Week {t.get('week')}:** {str(t.get('theme') or '')}")
+            lines.append("")
+        if payload.get("assessment_strategy_summary"):
+            lines += ["## Assessment Strategy", str(payload["assessment_strategy_summary"]), ""]
+        if payload.get("lab_strategy_summary"):
+            lines += ["## Lab Strategy", str(payload["lab_strategy_summary"]), ""]
+        return "\n".join(lines).strip()
     lines = [f"# {title}", "", f"**Week:** {payload.get('week')}", ""]
     if artifact_type == "lesson_plan":
         lines.extend([
@@ -1002,6 +1046,8 @@ def maybe_store_pending_artifact_from_session(
         "assessment.generate": ("quiz", extract_quiz_full_from_state),
         "quiz": ("quiz", extract_quiz_full_from_state),
         "quiz.generate": ("quiz", extract_quiz_full_from_state),
+        "course_blueprint": ("course_blueprint", extract_course_blueprint_full_from_state),
+        "course_blueprint.generate": ("course_blueprint", extract_course_blueprint_full_from_state),
     }
     selected = candidates.get(normalized_workflow)
     if not selected:
@@ -1023,15 +1069,17 @@ def maybe_store_pending_artifact_from_session(
         )
         return None
 
-    expected_week = _coerce_week(requested_week)
+    # Course planning is course-level (no week); other artifacts are week-scoped.
     payload_week = _coerce_week(payload.get("week"))
-    if expected_week is not None and payload_week != expected_week:
-        raise RuntimeError(
-            f"{artifact_type} pending artifact week mismatch: requested_week={expected_week}, "
-            f"payload_week={payload_week}"
-        )
-    if expected_week is None and payload_week is None:
-        raise RuntimeError(f"{artifact_type} pending artifact payload.week is required")
+    if artifact_type != "course_blueprint":
+        expected_week = _coerce_week(requested_week)
+        if expected_week is not None and payload_week != expected_week:
+            raise RuntimeError(
+                f"{artifact_type} pending artifact week mismatch: requested_week={expected_week}, "
+                f"payload_week={payload_week}"
+            )
+        if expected_week is None and payload_week is None:
+            raise RuntimeError(f"{artifact_type} pending artifact payload.week is required")
 
     preview_markdown, preview_renderer_version = render_preview_markdown(
         artifact_type,
@@ -1043,7 +1091,7 @@ def maybe_store_pending_artifact_from_session(
         "artifact_type": artifact_type,
         "workflow_type": artifact_type,
         "week": payload_week,
-        "title": str(payload.get("title") or {"lesson_plan": "Lesson Plan", "lab": "Lab", "quiz": "Assessment"}[artifact_type]),
+        "title": str(payload.get("title") or {"lesson_plan": "Lesson Plan", "lab": "Lab", "quiz": "Assessment", "course_blueprint": "Course Plan"}[artifact_type]),
         "content_json": payload,
         "content_hash": content_hash(payload),
         "preview_markdown": preview_markdown,
@@ -1089,14 +1137,23 @@ def _draft_message_metadata(draft: dict[str, Any] | None) -> dict[str, Any]:
 def _pending_artifact_message_metadata(pending: dict[str, Any] | None) -> dict[str, Any]:
     if not pending:
         return {}
+    artifact_type = str(pending.get("artifact_type") or "")
+    is_blueprint = artifact_type == "course_blueprint"
+    export_target = (
+        "course_blueprint" if is_blueprint
+        else "google_forms" if artifact_type == "quiz"
+        else "google_docs"
+    )
     return {
         "pending_artifact_id": str(pending.get("pending_artifact_id") or ""),
-        "pending_artifact_type": str(pending.get("artifact_type") or ""),
+        "pending_artifact_type": artifact_type,
         "pending_artifact_week": pending.get("week"),
         "pending_artifact_content_hash": str(pending.get("content_hash") or ""),
-        "pending_exportable": True,
-        "pending_export_target": "google_forms" if pending.get("artifact_type") == "quiz" else "google_docs",
-        "artifact_type": str(pending.get("artifact_type") or ""),
+        # Blueprint terminal is "save a course-plan version", not a Google export.
+        "pending_exportable": not is_blueprint,
+        "pending_savable_blueprint": is_blueprint,
+        "pending_export_target": export_target,
+        "artifact_type": artifact_type,
         "artifact_title": str(pending.get("title") or ""),
         "artifact_preview_card": True,
         "week": pending.get("week"),

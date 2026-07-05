@@ -264,6 +264,64 @@ def _create_edited_version(batch_id: str, lecturer_id: str, content: CourseBluep
     return _serialize(new_ref.id, saved)
 
 
+def save_blueprint_from_content(
+    batch_id: str,
+    lecturer_id: str,
+    content: CourseBlueprintContent,
+    *,
+    source_chat_id: str = "",
+    source_run_id: str = "",
+) -> dict[str, Any]:
+    """Persist a new Course Blueprint version from run-generated content.
+
+    Handles both create (no current -> v1) and supersede (current -> v+1). Used by the
+    course-plan workflow's Confirm/Save terminal, where content comes from the run's
+    validated pending artifact rather than an eligible chat message.
+    """
+    db = get_firestore()
+    batch_ref = db.collection(BATCHES_COLLECTION).document(batch_id)
+    new_ref = batch_ref.collection(BLUEPRINTS_SUBCOLLECTION).document(f"blueprint_{uuid.uuid4().hex[:16]}")
+    transaction = db.transaction()
+
+    @firestore.transactional
+    def _save(txn):
+        batch_snap = batch_ref.get(transaction=txn)
+        batch = batch_snap.to_dict() or {}
+        if not batch_snap.exists or batch.get("lecturer_id") != lecturer_id:
+            raise BlueprintNotFoundError("Batch not found or access denied")
+        current_id = str(batch.get("current_course_blueprint_id") or "")
+        current_ref = _blueprints_col(batch_id).document(current_id) if current_id else None
+        current_snap = current_ref.get(transaction=txn) if current_ref else None  # read before writes
+        version = int(batch.get("current_course_blueprint_version") or 0) + 1
+        fields = _content_fields(content)
+        data = {
+            **fields, "blueprint_id": new_ref.id, "batch_id": batch_id,
+            "lecturer_id": lecturer_id, "course_name": str(batch.get("course_name") or ""),
+            "status": "active", "version": version, "is_current": True,
+            "supersedes_blueprint_id": current_id, "superseded_by_blueprint_id": "",
+            "source_proposal_id": "", "source_chat_id": source_chat_id,
+            "source_message_id": "", "source_run_id": source_run_id,
+            "content_hash": _hash_content(fields), "created_at": SERVER_TIMESTAMP,
+            "updated_at": SERVER_TIMESTAMP,
+        }
+        if current_snap is not None and current_snap.exists:
+            txn.update(current_ref, {
+                "status": "superseded", "is_current": False,
+                "superseded_by_blueprint_id": new_ref.id, "updated_at": SERVER_TIMESTAMP,
+            })
+        txn.set(new_ref, data)
+        txn.update(batch_ref, {
+            "current_course_blueprint_id": new_ref.id,
+            "current_course_blueprint_version": version,
+            "updated_at": SERVER_TIMESTAMP,
+        })
+        return data
+
+    data = _save(transaction)
+    saved = new_ref.get().to_dict() or data
+    return _serialize(new_ref.id, saved)
+
+
 def archive_current_blueprint(batch_id: str, lecturer_id: str) -> dict[str, Any]:
     db = get_firestore()
     batch_ref = db.collection(BATCHES_COLLECTION).document(batch_id)

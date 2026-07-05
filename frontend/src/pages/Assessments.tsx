@@ -6,6 +6,7 @@ import { getErrorMessage } from '../utils/errors'
 import { useBatchSelection } from '../hooks/useBatchSelection'
 import { useGenerationRun } from '../hooks/useGenerationRun'
 import { GenerationWorkspace } from '../components/generation/GenerationWorkspace'
+import { PlanHintBanner } from '../components/generation/PlanHintBanner'
 import { listArtifacts, type Artifact } from '../services/artifactService'
 import { timeAgo } from '../utils/formatDate'
 
@@ -98,6 +99,8 @@ export default function Assessments() {
           and any files you attach — then exports to Google Forms after your approval.
         </p>
       </div>
+
+      <PlanHintBanner batchId={selectedBatchId} />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <form onSubmit={handleGenerate} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4 self-start">

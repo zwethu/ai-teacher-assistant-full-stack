@@ -113,3 +113,37 @@ def test_native_eligible_pdf_skips_chunks(monkeypatch):
     assert payload["native_gcs_uri"] == "gs://b/x.pdf"
     assert payload["chunk_count"] == 0
     chunk_called.assert_not_called()  # native-eligible -> no lexical chunks
+
+
+# --- searchability probe: don't flip to "indexed" before the doc is queryable ---
+
+def test_document_is_searchable_false_until_index_time():
+    """A freshly-imported doc has a record but no index_time -> not yet searchable."""
+    from google.cloud.discoveryengine_v1.types import Document
+
+    doc = Document(id="doc-abc")
+    doc.index_status.pending_message = "Document is being indexed."
+    searchable, msg = fs._document_is_searchable(doc)
+    assert searchable is False
+    assert msg == "Document is being indexed."
+
+
+def test_document_is_searchable_true_with_index_time():
+    from google.cloud.discoveryengine_v1.types import Document
+    from google.protobuf.timestamp_pb2 import Timestamp
+
+    ts = Timestamp(); ts.seconds = 1_700_000_000
+
+    top = Document(id="doc-abc"); top.index_time = ts
+    assert fs._document_is_searchable(top)[0] is True
+
+    nested = Document(id="doc-abc"); nested.index_status.index_time = ts
+    assert fs._document_is_searchable(nested)[0] is True
+
+
+def test_document_is_searchable_legacy_fallback_true():
+    """Unknown client shape (no proto) preserves legacy existence-based behavior."""
+    class _Fake:
+        pass
+
+    assert fs._document_is_searchable(_Fake())[0] is True

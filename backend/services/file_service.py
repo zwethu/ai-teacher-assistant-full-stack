@@ -424,6 +424,42 @@ def sync_index_status(batch_id: str, file_id: str, lecturer_id: str) -> BatchFil
     snap = file_ref.get()
     return _doc_to_model(snap.id, snap.to_dict() or {})
 
+def _document_is_searchable(doc: Any) -> tuple[bool, str]:
+    """Return (is_searchable, pending_message) for a Vertex document.
+
+    A document's RECORD exists (get_document succeeds) as soon as ImportDocuments is
+    accepted, but it is not query-visible until Vertex finishes parsing/segmenting/
+    embedding. Vertex populates Document.index_time (and index_status.index_time) only once
+    the doc is actually searchable, and index_status.pending_message carries a human-readable
+    reason while it is still processing. Gating on this — instead of mere existence — is what
+    stops the UI reporting "Indexed" while the file is still parsing.
+
+    Falls back to True if the installed client predates index_time (preserves legacy
+    existence-based behavior rather than blocking forever).
+    """
+    pending_message = ""
+    status = getattr(doc, "index_status", None)
+    if status is not None:
+        try:
+            pending_message = str(getattr(status, "pending_message", "") or "")
+        except Exception:
+            pending_message = ""
+
+    pb = getattr(doc, "_pb", None)
+    if pb is None:
+        return True, pending_message  # unknown client shape — legacy behavior
+    try:
+        if pb.HasField("index_time"):
+            return True, pending_message
+        status_pb = getattr(pb, "index_status", None)
+        if status_pb is not None and status_pb.HasField("index_time"):
+            return True, pending_message
+        return False, pending_message
+    except Exception:
+        # Can't determine searchability from this proto — don't block indefinitely.
+        return True, pending_message
+
+
 def _reconcile_visibility(batch_id: str, file_id: str, lecturer_id: str) -> bool:
     file_ref = _file_ref(batch_id, file_id); snap = file_ref.get(); data = snap.to_dict() or {}
 
@@ -441,7 +477,7 @@ def _reconcile_visibility(batch_id: str, file_id: str, lecturer_id: str) -> bool
         from google.cloud import discoveryengine_v1 as discoveryengine  # type: ignore[import-untyped]
 
         client = discoveryengine.DocumentServiceClient()
-        client.get_document(name=doc_name)
+        doc = client.get_document(name=doc_name)
     except Exception as exc:
         if "google_exceptions" in locals() and isinstance(exc, google_exceptions.NotFound):
             file_ref.update(
@@ -462,6 +498,23 @@ def _reconcile_visibility(batch_id: str, file_id: str, lecturer_id: str) -> bool
         err_msg = str(exc)[:500]
         logger.warning("Vertex index sync failed for file %s: %s", file_id, err_msg)
         file_ref.update({"index_message": "Could not verify Vertex index status yet.", "index_error": err_msg, "updated_at": SERVER_TIMESTAMP})
+        return False
+
+    # The record exists, but is it actually searchable yet? Gate on index_time — not mere
+    # existence — so we don't flip to "indexed" (and start retiring the immediate overlay)
+    # while Vertex is still parsing. The check-indexing poll keeps calling until searchable.
+    indexed, pending_message = _document_is_searchable(doc)
+    if not indexed:
+        message = pending_message or "Document imported; Vertex is still processing it for search."
+        file_ref.update(
+            {
+                "vertex_doc_id": doc_id,
+                "index_status": "indexing",
+                "index_message": message,
+                "updated_at": SERVER_TIMESTAMP,
+            }
+        )
+        data.update({"index_status": "indexing", "index_message": message})
         return False
 
     now = datetime.now(timezone.utc)

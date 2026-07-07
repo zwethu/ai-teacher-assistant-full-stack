@@ -770,6 +770,18 @@ def extract_course_blueprint_full_from_state(state: dict[str, Any]) -> dict[str,
     raw = _state_payload(state, "course_blueprint_full")
     if not isinstance(raw, dict):
         return None
+    raw = dict(raw)
+    preferences = raw.get("teaching_preferences")
+    if isinstance(preferences, list):
+        normalized_preferences: dict[str, str] = {}
+        for item in preferences[:50]:
+            if not isinstance(item, dict):
+                continue
+            key = str(item.get("key") or "").strip()
+            value = str(item.get("value") or "").strip()
+            if key and value:
+                normalized_preferences[key[:200]] = value[:2000]
+        raw["teaching_preferences"] = normalized_preferences
     title = str(raw.get("title") or "").strip()
     scope = str(raw.get("plan_scope") or "").strip()
     if not title or not scope:

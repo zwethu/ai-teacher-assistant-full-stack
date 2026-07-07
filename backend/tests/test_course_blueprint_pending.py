@@ -37,6 +37,24 @@ def test_extract_full_requires_title_and_scope():
     ) is None
 
 
+def test_extract_full_normalizes_generated_preference_entries():
+    generated = {
+        **_FULL,
+        "teaching_preferences": [
+            {"key": "pedagogy", "value": "active learning"},
+            {"key": "delivery", "value": "project based"},
+        ],
+    }
+    extracted = extract_course_blueprint_full_from_state(
+        {"course_blueprint_full": generated}
+    )
+    assert extracted is not None
+    assert extracted["teaching_preferences"] == {
+        "pedagogy": "active learning",
+        "delivery": "project based",
+    }
+
+
 def test_extract_outline_blueprint_needs_no_week():
     result = extract_outline_from_state(
         {"course_blueprint_outline": _OUTLINE}, "course_blueprint.generate"

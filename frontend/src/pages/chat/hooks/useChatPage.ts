@@ -12,7 +12,7 @@ import {
 import axios from 'axios'
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import type { Batch } from '../../../entity/Batch'
-import type { Chat, ChatAttachment, ChatAttachmentSnapshot, ChatMessage } from '../../../entity/Chat'
+import type { Chat, ChatAttachment, ChatAttachmentListItem, ChatAttachmentSnapshot, ChatMessage } from '../../../entity/Chat'
 import { useAuth } from '../../../hooks/useAuth'
 import { getBatchById, listBatches } from '../../../services/batchService'
 import {
@@ -29,7 +29,7 @@ import {
   updateChatTitle,
   type ChatRunRecord,
 } from '../../../services/chatService'
-import { generateAssessment, generateLab, generateLessonPlan } from '../../../services/agentService'
+import { generateAssessment, generateLab, generateLessonPlan, invokeAgent } from '../../../services/agentService'
 import {
   subscribeAgentRun,
   type AgentRunDelta,
@@ -166,6 +166,10 @@ export function useChatPage() {
   const [activeGenerateMode, setActiveGenerateMode] = useState<GenerateMode | null>(null)
   const [sending, setSending] = useState(false)
   const [pendingAttachments, setPendingAttachments] = useState<PendingChatAttachment[]>([])
+  // Prior-message attachments the user re-references. These CANNOT go through attachment_ids
+  // (the backend rejects an already-sent attachment); they are conveyed to the agent as an
+  // id mention appended to the message at send time and surfaced here only as composer chips.
+  const [referencedAttachments, setReferencedAttachments] = useState<ChatAttachmentListItem[]>([])
   const [attachmentsUploading, setAttachmentsUploading] = useState(false)
   const [attachmentErrors, setAttachmentErrors] = useState<string[]>([])
   const [currentRunId, setCurrentRunId] = useState<string | null>(null)
@@ -578,7 +582,11 @@ export function useChatPage() {
 
   async function handleSend(text?: string) {
     const typedContent = (text ?? input).trim()
-    const content = typedContent || (pendingAttachments.length ? 'Please review the attached file(s).' : '')
+    const refMentions = referencedAttachments
+      .map((item) => `Please use the earlier attachment ${item.file_title || item.file_name}. Attachment ID: ${item.attachment_id}`)
+      .join('\n')
+    const base = typedContent || (pendingAttachments.length ? 'Please review the attached file(s).' : '')
+    const content = [base, refMentions].filter(Boolean).join('\n\n')
     if (!content || !selectedBatch || sending || attachmentsUploading) return
 
     let chat = activeChat
@@ -605,7 +613,9 @@ export function useChatPage() {
         const payload = buildGenerationRequest(
           generateMode, batchId, chatId, content, connectors, attachmentIds,
         )
-        const result = generateMode === 'lab'
+        const result = generateMode === 'course_blueprint'
+          ? await invokeAgent(payload)
+          : generateMode === 'lab'
           ? await generateLab('', payload)
           : generateMode === 'assessment'
             ? await generateAssessment('', payload)
@@ -619,6 +629,7 @@ export function useChatPage() {
     if (started) {
       attachmentsForMessage.forEach((item) => item.previewUrl && URL.revokeObjectURL(item.previewUrl))
       setPendingAttachments([])
+      setReferencedAttachments([])
       setAttachmentErrors([])
     }
   }
@@ -698,6 +709,19 @@ export function useChatPage() {
     void uploadAttachmentFiles(imageFiles)
   }
 
+  function referencePreviousAttachment(item: ChatAttachmentListItem) {
+    setAttachmentErrors([])
+    setReferencedAttachments((prev) => {
+      if (prev.some((a) => a.attachment_id === item.attachment_id)) return prev
+      if (pendingAttachmentsRef.current.some((a) => a.attachment_id === item.attachment_id)) return prev
+      return [...prev, item]
+    })
+  }
+
+  function removeReferencedAttachment(attachmentId: string) {
+    setReferencedAttachments((prev) => prev.filter((item) => item.attachment_id !== attachmentId))
+  }
+
   async function removePendingAttachment(attachmentId: string) {
     const removed = pendingAttachments.find((item) => item.attachment_id === attachmentId)
     if (!removed) return
@@ -716,7 +740,7 @@ export function useChatPage() {
     const metadata = message.metadata || {}
     const artifactType = String(metadata.outline_artifact_type || metadata.artifact_type || '')
     const mode: GenerateMode = artifactType === 'quiz' ? 'assessment' : artifactType as GenerateMode
-    if (!['lesson_plan', 'lab', 'assessment'].includes(mode)) return
+    if (!['lesson_plan', 'lab', 'assessment', 'course_blueprint'].includes(mode)) return
     const label = mode === 'assessment' ? 'assessment' : mode.replace('_', ' ')
     const text = `Approve this outline and generate the full ${label} preview.`
     await startRunInChat({
@@ -737,7 +761,9 @@ export function useChatPage() {
           message: text,
           connectors,
         }
-        const result = mode === 'lab'
+        const result = mode === 'course_blueprint'
+          ? await invokeAgent(payload)
+          : mode === 'lab'
           ? await generateLab('', payload)
           : mode === 'assessment'
             ? await generateAssessment('', payload)
@@ -986,7 +1012,7 @@ export function useChatPage() {
   function maybeClearGenerateModeFromFinalMessage(message: Pick<ChatMessage, 'run_id' | 'metadata'>) {
     const runId = message.run_id
     if (!runId || !workflowModeRunIdsRef.current[runId]) return
-    if (message.metadata?.pending_exportable === true) {
+    if (message.metadata?.pending_exportable === true || message.metadata?.pending_savable_blueprint === true) {
       setActiveGenerateMode(null)
       delete workflowModeRunIdsRef.current[runId]
     }
@@ -1266,10 +1292,13 @@ export function useChatPage() {
     setActiveGenerateMode,
     sending,
     pendingAttachments,
+    referencedAttachments,
     attachmentsUploading,
     attachmentErrors,
     handleAttachmentFiles,
     removePendingAttachment,
+    referencePreviousAttachment,
+    removeReferencedAttachment,
     handleComposerPaste,
     currentRunId,
     runStates,

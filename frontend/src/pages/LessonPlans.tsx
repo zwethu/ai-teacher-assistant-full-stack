@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { BookOpen, Clock, ExternalLink, FileText, Loader2, Sparkles } from 'lucide-react'
+import { BookOpen, Clock, ExternalLink, FileText, Loader2, Plus, Sparkles } from 'lucide-react'
 import type { ToastMessage } from '../types'
 import Toast from '../components/ui/Toast'
 import { getErrorMessage } from '../utils/errors'
 import { useBatchSelection } from '../hooks/useBatchSelection'
 import { useGenerationRun } from '../hooks/useGenerationRun'
-import { GenerationWorkspace } from '../components/generation/GenerationWorkspace'
+import { GenerationRunView } from '../components/generation/GenerationRunView'
+import { GenerationAttachments } from '../components/generation/GenerationAttachments'
 import { PlanHintBanner } from '../components/generation/PlanHintBanner'
 import { listArtifacts, type Artifact } from '../services/artifactService'
 import { timeAgo } from '../utils/formatDate'
@@ -32,15 +33,16 @@ const INITIAL_FORM = {
 }
 
 function buildMessage(f: typeof INITIAL_FORM): string {
-  const lines = [
-    `Generate a lesson plan for week ${f.week}.`,
-    `Topic: ${f.topic}`,
+  const lines = [`Generate a lesson plan for week ${f.week}.`]
+  if (f.topic.trim()) lines.push(`Topic: ${f.topic.trim()}`)
+  else lines.push('Topic: not specified — choose a suitable topic for this week, using the course plan if one exists.')
+  lines.push(
     `Grade/level: ${f.grade}`,
     `Duration: ${f.duration} minutes`,
     `Difficulty: ${f.difficulty}`,
     `Teaching approach: ${f.approach}`,
     `Lesson plan type: ${f.planType}`,
-  ]
+  )
   if (f.priorKnowledge.trim()) lines.push(`Prior knowledge: ${f.priorKnowledge.trim()}`)
   if (f.instructions.trim()) lines.push(`Additional instructions: ${f.instructions.trim()}`)
   return lines.join('\n')
@@ -49,7 +51,7 @@ function buildMessage(f: typeof INITIAL_FORM): string {
 export default function LessonPlans() {
   const { batches, loading: batchesLoading, selectedBatch, selectedBatchId, setSelectedBatchId } =
     useBatchSelection()
-  const run = useGenerationRun(selectedBatch)
+  const run = useGenerationRun(selectedBatch, 'lesson_plan')
 
   const [form, setForm] = useState(INITIAL_FORM)
   const [toast, setToast] = useState<ToastMessage | null>(null)
@@ -82,10 +84,6 @@ export default function LessonPlans() {
   async function handleGenerate(e: FormEvent) {
     e.preventDefault()
     if (!selectedBatch || run.sending) return
-    if (!form.topic.trim()) {
-      showToast('error', 'Please enter a topic.')
-      return
-    }
     await run.generate({
       workflowType: 'lesson_plan',
       message: buildMessage(form),
@@ -93,6 +91,9 @@ export default function LessonPlans() {
       webSearch: true,
     })
   }
+
+  // Keep the page form-first: the progress panel only appears once a run starts.
+  const started = run.messages.length > 0 || Boolean(run.currentRunId)
 
   return (
     <div>
@@ -108,9 +109,21 @@ export default function LessonPlans() {
 
       <PlanHintBanner batchId={selectedBatchId} />
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Left: form */}
-        <form onSubmit={handleGenerate} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4 self-start">
+      {started && selectedBatch ? (
+        <div>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-slate-700">Lesson plan generation</h2>
+            <button type="button" onClick={() => run.reset()}
+              className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              <Plus className="h-4 w-4" /> Generate another
+            </button>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-white shadow-sm min-h-[24rem] max-h-[80vh] overflow-y-auto">
+            <GenerationRunView batch={selectedBatch} run={run} accent="emerald" />
+          </div>
+        </div>
+      ) : (
+        <form onSubmit={handleGenerate} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-1.5">Space (batch)</label>
             <select
@@ -143,10 +156,10 @@ export default function LessonPlans() {
           </div>
 
           <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-1.5">Topic</label>
-            <input type="text" required value={form.topic}
+            <label className="block text-sm font-semibold text-slate-700 mb-1.5">Topic (optional)</label>
+            <input type="text" value={form.topic}
               onChange={(e) => setForm((f) => ({ ...f, topic: e.target.value }))}
-              placeholder="e.g. Introduction to Neural Networks"
+              placeholder="Leave blank to let the agent choose from the course plan"
               className="block w-full rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500" />
           </div>
 
@@ -196,9 +209,9 @@ export default function LessonPlans() {
               className="block w-full rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500 resize-y" />
           </div>
 
+          {selectedBatch && <GenerationAttachments run={run} />}
           <p className="text-xs text-slate-400">
-            Optional files can be attached in the workspace after you start. Course-Space files for the
-            selected space are always used.
+            Course-Space files for the selected space are always used.
           </p>
 
           <button type="submit" disabled={run.sending || !selectedBatch}
@@ -207,22 +220,7 @@ export default function LessonPlans() {
             Generate outline
           </button>
         </form>
-
-        {/* Right: workspace */}
-        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm min-h-[24rem] max-h-[80vh]">
-          {selectedBatch ? (
-            <GenerationWorkspace
-              batch={selectedBatch}
-              run={run}
-              emptyHint="Fill in the form and click Generate. The agent will draft an outline for your approval, then the full plan."
-            />
-          ) : (
-            <div className="flex h-full items-center justify-center text-sm text-slate-400">
-              Select a space to begin.
-            </div>
-          )}
-        </div>
-      </div>
+      )}
 
       {/* Existing lesson plans (canonical artifacts) */}
       <div className="mt-8">

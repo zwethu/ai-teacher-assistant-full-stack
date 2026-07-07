@@ -16,7 +16,7 @@ BATCHES_COLLECTION = "batches"
 BLUEPRINTS_SUBCOLLECTION = "course_blueprints"
 CHATS_SUBCOLLECTION = "chats"
 MESSAGES_SUBCOLLECTION = "messages"
-GENERATION_WORKFLOW_FAMILIES = {"lesson_plan", "lab", "assessment", "quiz"}
+GENERATION_WORKFLOW_FAMILIES = {"lesson_plan", "lab", "assessment", "quiz", "course_blueprint"}
 
 
 class BlueprintNotFoundError(LookupError):
@@ -348,6 +348,46 @@ def archive_current_blueprint(batch_id: str, lecturer_id: str) -> dict[str, Any]
 
     blueprint_id, data = _archive(transaction)
     return _serialize(blueprint_id, {**data, "status": "archived", "is_current": False})
+
+
+def delete_blueprint_version(batch_id: str, lecturer_id: str, blueprint_id: str) -> dict[str, Any]:
+    """Permanently delete a single Course Blueprint version. If it happens to be the
+    current one, the batch's current pointer is cleared."""
+    db = get_firestore()
+    batch_ref = db.collection(BATCHES_COLLECTION).document(batch_id)
+    bp_ref = batch_ref.collection(BLUEPRINTS_SUBCOLLECTION).document(blueprint_id)
+    transaction = db.transaction()
+
+    @firestore.transactional
+    def _delete(txn):
+        batch_snap = batch_ref.get(transaction=txn)
+        batch = batch_snap.to_dict() or {}
+        if not batch_snap.exists or batch.get("lecturer_id") != lecturer_id:
+            raise BlueprintNotFoundError("Batch not found or access denied")
+        bp_snap = bp_ref.get(transaction=txn)
+        if not bp_snap.exists:
+            raise BlueprintNotFoundError("Course Blueprint version not found")
+        was_current = str(batch.get("current_course_blueprint_id") or "") == blueprint_id
+        txn.delete(bp_ref)
+        if was_current:
+            txn.update(batch_ref, {
+                "current_course_blueprint_id": "",
+                "current_course_blueprint_version": 0,
+                "updated_at": SERVER_TIMESTAMP,
+            })
+
+    _delete(transaction)
+    return {"blueprint_id": blueprint_id, "deleted": True}
+
+
+def revert_to_blueprint_version(batch_id: str, lecturer_id: str, blueprint_id: str) -> dict[str, Any]:
+    """Make a past version current again by saving its content as a new active
+    version (history stays immutable — revert never rewrites the past)."""
+    target_snap = _blueprints_col(batch_id).document(blueprint_id).get()
+    if not target_snap.exists:
+        raise BlueprintNotFoundError("Course Blueprint version not found")
+    content = CourseBlueprintContent.model_validate(target_snap.to_dict() or {})
+    return save_blueprint_from_content(batch_id, lecturer_id, content)
 
 
 def build_blueprint_session_context(

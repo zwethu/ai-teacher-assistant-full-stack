@@ -9,8 +9,10 @@ from services.course_blueprint_service import (
     BlueprintEligibilityError,
     BlueprintNotFoundError,
     archive_current_blueprint,
+    delete_blueprint_version,
     get_current_blueprint,
     list_blueprint_history,
+    revert_to_blueprint_version,
     save_blueprint_from_message,
     update_current_blueprint,
 )
@@ -79,6 +81,28 @@ async def archive_current(
 ) -> dict:
     try:
         return archive_current_blueprint(batch_id, user["uid"])
+    except Exception as exc:
+        _raise_service_error(exc)
+        raise
+
+
+@router.post("/versions/{blueprint_id}/revert", response_model=dict)
+async def revert_version(
+    batch_id: str, blueprint_id: str, user: CurrentUser = Depends(get_current_user)
+) -> dict:
+    try:
+        return revert_to_blueprint_version(batch_id, user["uid"], blueprint_id)
+    except Exception as exc:
+        _raise_service_error(exc)
+        raise
+
+
+@router.delete("/versions/{blueprint_id}", response_model=dict)
+async def delete_version(
+    batch_id: str, blueprint_id: str, user: CurrentUser = Depends(get_current_user)
+) -> dict:
+    try:
+        return delete_blueprint_version(batch_id, user["uid"], blueprint_id)
     except Exception as exc:
         _raise_service_error(exc)
         raise

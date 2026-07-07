@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Archive, Loader2, Pencil, Plus, RefreshCw, Sparkles, Trash2, X } from 'lucide-react'
+import { Archive, Loader2, Pencil, Plus, RefreshCw, RotateCcw, Sparkles, Trash2, X } from 'lucide-react'
 import {
   archiveCurrentCourseBlueprint,
+  deleteCourseBlueprintVersion,
   getCurrentCourseBlueprint,
   listCourseBlueprintHistory,
+  revertToCourseBlueprintVersion,
   updateCurrentCourseBlueprint,
   type CourseBlueprint,
   type CourseBlueprintContent,
@@ -11,7 +13,8 @@ import {
 import { getBatchById } from '../../../services/batchService'
 import type { Batch } from '../../../entity/Batch'
 import { useGenerationRun } from '../../../hooks/useGenerationRun'
-import { GenerationWorkspace } from '../../../components/generation/GenerationWorkspace'
+import { GenerationRunView } from '../../../components/generation/GenerationRunView'
+import { GenerationAttachments } from '../../../components/generation/GenerationAttachments'
 import { formatDateTime } from '../../../utils/formatDate'
 
 export function PlanningTab({ batchId }: { batchId: string }) {
@@ -24,7 +27,13 @@ export function PlanningTab({ batchId }: { batchId: string }) {
   const [error, setError] = useState('')
   const [batch, setBatch] = useState<Batch | null>(null)
   const [generating, setGenerating] = useState(false)
-  const run = useGenerationRun(batch)
+  const run = useGenerationRun(batch, 'course_blueprint')
+
+  // Reopen the inline generation panel when a run is active/loaded — e.g. after
+  // navigating away and back, the run keeps going in the background.
+  useEffect(() => {
+    if (run.messages.length > 0 || run.currentRunId) setGenerating(true)
+  }, [run.messages.length, run.currentRunId])
 
   useEffect(() => {
     let cancelled = false
@@ -71,22 +80,38 @@ export function PlanningTab({ batchId }: { batchId: string }) {
     finally { setSaving(false) }
   }
 
+  async function revertVersion(blueprintId: string, version: number) {
+    if (!window.confirm(`Make v${version} the current Course Plan? A new current version is created from it; history is kept.`)) return
+    setSaving(true); setError('')
+    try { await revertToCourseBlueprintVersion(batchId, blueprintId); await refresh() }
+    catch { setError('Could not revert to this version.') }
+    finally { setSaving(false) }
+  }
+
+  async function deleteVersion(blueprintId: string, version: number) {
+    if (!window.confirm(`Permanently delete Course Plan v${version}? This cannot be undone.`)) return
+    setSaving(true); setError('')
+    try { await deleteCourseBlueprintVersion(batchId, blueprintId); await refresh() }
+    catch { setError('Could not delete this version.') }
+    finally { setSaving(false) }
+  }
+
   if (loading) return <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-emerald-600" /></div>
 
   return <div className="space-y-6">
     {error && <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
-    {!current ? <div className="rounded-2xl border border-dashed border-slate-300 bg-white/60 px-6 py-14 text-center"><h2 className="font-semibold text-slate-800">No active Course Plan</h2><p className="mt-2 text-sm text-slate-500">Generate a plan with AI, or save one from an assistant message’s action menu in Chat.</p><button onClick={() => setGenerating(true)} disabled={!batch} className="mt-4 inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"><Sparkles className="h-4 w-4"/>Generate with AI</button></div> :
+    {generating && batch && <GeneratePlanPanel batch={batch} run={run} onClose={() => { setGenerating(false); void refresh() }} />}
+    {!generating && (!current ? <div className="rounded-2xl border border-dashed border-slate-300 bg-white/60 px-6 py-14 text-center"><h2 className="font-semibold text-slate-800">No active Course Plan</h2><p className="mt-2 text-sm text-slate-500">Generate a plan with AI, or save one from an assistant message’s action menu in Chat.</p><button onClick={() => setGenerating(true)} disabled={!batch} className="mt-4 inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"><Sparkles className="h-4 w-4"/>Generate with AI</button></div> :
       <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="mb-5 flex flex-wrap items-start justify-between gap-3"><div><div className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Current · Version {current.version}</div><h2 className="mt-1 text-xl font-bold text-slate-900">{current.title}</h2><p className="text-xs text-slate-400">Updated {formatDateTime(current.updated_at || current.created_at || '')}</p></div><div className="flex gap-2"><button onClick={() => setGenerating(true)} disabled={!batch} className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm text-white hover:bg-emerald-700 disabled:opacity-60"><Sparkles className="h-4 w-4"/>Generate</button><button onClick={beginEdit} className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm"><Pencil className="h-4 w-4"/>Edit as new version</button><button onClick={archive} disabled={saving} className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm text-red-700"><Archive className="h-4 w-4"/>Archive</button></div></div>
         <BlueprintView blueprint={current}/>
-      </section>}
-    <section><div className="mb-3 flex items-center justify-between"><h2 className="font-semibold text-slate-800">Version history</h2><button onClick={() => void refresh()} className="rounded p-1 text-slate-500"><RefreshCw className="h-4 w-4"/></button></div><div className="space-y-2">{history.length === 0 ? <p className="text-sm text-slate-500">No saved versions yet.</p> : history.map((item)=><details key={item.blueprint_id} className="rounded-xl border border-slate-200 bg-white px-4 py-3"><summary className="cursor-pointer text-sm font-medium text-slate-800">v{item.version} · {item.title} <span className="ml-2 text-xs font-normal text-slate-400">{item.status}</span></summary><div className="mt-4"><BlueprintView blueprint={item}/></div></details>)}</div></section>
+      </section>)}
+    <section><div className="mb-3 flex items-center justify-between"><h2 className="font-semibold text-slate-800">Version history</h2><button onClick={() => void refresh()} className="rounded p-1 text-slate-500"><RefreshCw className="h-4 w-4"/></button></div><div className="space-y-2">{history.length === 0 ? <p className="text-sm text-slate-500">No saved versions yet.</p> : history.map((item)=><details key={item.blueprint_id} className="rounded-xl border border-slate-200 bg-white px-4 py-3"><summary className="cursor-pointer text-sm font-medium text-slate-800">v{item.version} · {item.title} <span className="ml-2 text-xs font-normal text-slate-400">{item.status}</span></summary><div className="mt-4"><BlueprintView blueprint={item}/></div><div className="mt-3 flex flex-wrap gap-2 border-t border-slate-100 pt-3">{item.blueprint_id !== current?.blueprint_id && <button onClick={()=>void revertVersion(item.blueprint_id, item.version)} disabled={saving} className="inline-flex items-center gap-1.5 rounded-md border border-emerald-200 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"><RotateCcw className="h-3.5 w-3.5"/>Make current</button>}<button onClick={()=>void deleteVersion(item.blueprint_id, item.version)} disabled={saving} className="inline-flex items-center gap-1.5 rounded-md border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-60"><Trash2 className="h-3.5 w-3.5"/>Delete</button></div></details>)}</div></section>
     {editing && form && <EditBlueprintModal form={form} setForm={setForm} saving={saving} onClose={()=>setEditing(false)} onSave={()=>void saveEdit()}/>}
-    {generating && batch && <GeneratePlanModal batch={batch} run={run} onClose={() => { setGenerating(false); void refresh() }} />}
   </div>
 }
 
-function GeneratePlanModal({
+function GeneratePlanPanel({
   batch,
   run,
   onClose,
@@ -98,7 +123,7 @@ function GeneratePlanModal({
   const [horizon, setHorizon] = useState(12)
   const [instructions, setInstructions] = useState('')
   const [web, setWeb] = useState(true)
-  const started = run.messages.length > 0
+  const started = run.messages.length > 0 || Boolean(run.currentRunId)
 
   async function handleGenerate() {
     if (run.sending) return
@@ -111,9 +136,8 @@ function GeneratePlanModal({
   }
 
   return (
-    <div className="fixed inset-0 z-[300] flex items-center justify-center bg-slate-950/50 p-4">
-      <div className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b px-6 py-4">
+    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="flex items-center justify-between border-b px-6 py-4">
           <div>
             <h2 className="text-lg font-semibold text-slate-900">Generate Course Plan</h2>
             <p className="text-sm text-slate-500">The agent uses this space’s Course-Space files, web search, and any saved artifacts.</p>
@@ -137,6 +161,7 @@ function GeneratePlanModal({
                 placeholder="Focus areas, constraints, prior materials to align with…"
                 className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
             </label>
+            <GenerationAttachments run={run} />
             <div className="flex justify-end">
               <button onClick={() => void handleGenerate()} disabled={run.sending}
                 className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60">
@@ -146,13 +171,13 @@ function GeneratePlanModal({
             </div>
           </div>
         ) : (
-          <div className="min-h-[24rem] flex-1 overflow-hidden p-4">
-            <GenerationWorkspace batch={batch} run={run}
+          <div className="min-h-[20rem] max-h-[70vh] overflow-y-auto">
+            <GenerationRunView batch={batch} run={run} accent="emerald"
+              onBlueprintSaved={() => { run.reset(); onClose() }}
               emptyHint="Drafting the plan outline for your approval…" />
           </div>
         )}
-      </div>
-    </div>
+    </section>
   )
 }
 

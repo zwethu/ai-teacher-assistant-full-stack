@@ -5,7 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ChatInput } from './ChatConversation'
-import { MessageRow } from './MessageRow'
+import { MessageRow, parseUserMessageContent } from './MessageRow'
 import type { PendingChatAttachment } from '../hooks/useChatPage'
 
 const listChatAttachments = vi.fn()
@@ -37,8 +37,9 @@ function renderInput(overrides: Partial<ComponentProps<typeof ChatInput>> = {}) 
     onInputChange: vi.fn(), onInputKeyDown: vi.fn(), onTextareaInput: vi.fn(),
     onSend: vi.fn(), connectors: { web_search: true }, onConnectorsChange: vi.fn(),
     activeGenerateMode: null, onSelectGenerateMode: vi.fn(), onClearGenerateMode: vi.fn(),
-    pendingAttachments: [imageAttachment], attachmentsUploading: false,
+    pendingAttachments: [imageAttachment], referencedAttachments: [], attachmentsUploading: false,
     attachmentErrors: [], onAttachmentFiles: vi.fn(), onRemoveAttachment: vi.fn(),
+    onReferenceAttachment: vi.fn(), onRemoveReferenced: vi.fn(),
     onPaste: vi.fn(),
     ...overrides,
   }
@@ -46,7 +47,39 @@ function renderInput(overrides: Partial<ComponentProps<typeof ChatInput>> = {}) 
   return props
 }
 
+describe('parseUserMessageContent', () => {
+  it('splits a referenced-attachment mention out of the visible body into a chip', () => {
+    const { body, references } = parseUserMessageContent(
+      'what about this\n\nPlease use the earlier attachment board.png. Attachment ID: image-1',
+    )
+    expect(body).toBe('what about this')
+    expect(references).toEqual([{ title: 'board.png', id: 'image-1' }])
+  })
+
+  it('handles a referenced-only message (empty body) and multiple references', () => {
+    const { body, references } = parseUserMessageContent(
+      'Please use the earlier attachment a.pdf. Attachment ID: doc-1\nPlease use the earlier attachment b.png. Attachment ID: img-2',
+    )
+    expect(body).toBe('')
+    expect(references).toHaveLength(2)
+    expect(references[1]).toEqual({ title: 'b.png', id: 'img-2' })
+  })
+
+  it('leaves an ordinary message untouched', () => {
+    const { body, references } = parseUserMessageContent('just a normal question')
+    expect(body).toBe('just a normal question')
+    expect(references).toEqual([])
+  })
+})
+
 describe('chat attachment composer', () => {
+  it('offers course-plan generation from the Generate menu', () => {
+    const props = renderInput({ pendingAttachments: [] })
+    fireEvent.click(screen.getByRole('button', { name: 'Generate' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Course Plan' }))
+    expect(props.onSelectGenerateMode).toHaveBeenCalledWith('course_blueprint')
+  })
+
   it('shows chat-only images, allows attachment-only send, and removes a chip', () => {
     const props = renderInput()
     expect(screen.getByText('board.png')).toBeTruthy()
@@ -62,7 +95,7 @@ describe('chat attachment composer', () => {
     expect((screen.getByRole('button', { name: 'Attach files' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it('lists safe previous attachments and inserts a reference', async () => {
+  it('lists safe previous attachments and references one as a chip (no textarea dump)', async () => {
     listChatAttachments.mockResolvedValueOnce([{
       attachment_id: 'doc-1', message_id: 'message-1', file_name: 'week-one.pdf',
       file_title: 'Week one', content_type: 'application/pdf', size_bytes: 2048,
@@ -79,7 +112,8 @@ describe('chat attachment composer', () => {
     await waitFor(() => expect(screen.getByText('Week one')).toBeTruthy())
     expect(screen.getByText(/available in this chat for 7 days/)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Reference' }))
-    expect(props.onInputChange).toHaveBeenCalledWith(expect.stringContaining('Attachment ID: doc-1'))
+    expect(props.onReferenceAttachment).toHaveBeenCalledWith(expect.objectContaining({ attachment_id: 'doc-1' }))
+    expect(props.onInputChange).not.toHaveBeenCalled()
     expect(screen.queryByText(/gs:\/\//)).toBeNull()
   })
 

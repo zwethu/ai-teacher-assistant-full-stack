@@ -5,6 +5,9 @@ import type { AgentRunEvent, AgentRunStatus } from '../../../../services/agentRu
 type Props = {
   events: AgentRunEvent[]
   runStatus: AgentRunStatus
+  // When false, the panel shows the live latest thought but cannot be expanded
+  // (used during generation so the streaming thinking stays put and read-only).
+  expandable?: boolean
 }
 
 function eventMode(event: AgentRunEvent): string {
@@ -21,7 +24,7 @@ function eventSummary(event: AgentRunEvent): string {
   return event.summary || event.title || eventRawText(event) || 'Working...'
 }
 
-export function ThinkingPanel({ events, runStatus }: Props) {
+export function ThinkingPanel({ events, runStatus, expandable = true }: Props) {
   const thinkingEvents = useMemo(
     () =>
       events
@@ -58,19 +61,24 @@ export function ThinkingPanel({ events, runStatus }: Props) {
     <div className="pl-3 border-l-2 border-slate-200/70">
       <button
         type="button"
-        onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center gap-2 py-1.5 text-left text-xs font-medium text-slate-500"
+        onClick={expandable ? () => setOpen((value) => !value) : undefined}
+        disabled={!expandable}
+        className={`flex w-full items-center gap-2 py-1.5 text-left text-xs font-medium text-slate-500 ${
+          expandable ? '' : 'cursor-default'
+        }`}
       >
-        <ChevronDown
-          className={`h-3.5 w-3.5 flex-shrink-0 text-slate-500 transition-transform duration-200 ${
-            open ? 'rotate-0' : '-rotate-90'
-          }`}
-        />
+        {expandable && (
+          <ChevronDown
+            className={`h-3.5 w-3.5 flex-shrink-0 text-slate-500 transition-transform duration-200 ${
+              open ? 'rotate-0' : '-rotate-90'
+            }`}
+          />
+        )}
         {runStatus === 'running' && (
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
         )}
         <span>Thinking</span>
-        {!open && (
+        {(!open || !expandable) && (
           <span className="min-w-0 flex-1 truncate font-normal text-slate-500">
             {collapsedSummary}
           </span>
@@ -79,7 +87,7 @@ export function ThinkingPanel({ events, runStatus }: Props) {
 
       <div
         className="grid transition-all duration-200 ease-in-out"
-        style={{ gridTemplateRows: open ? '1fr' : '0fr' }}
+        style={{ gridTemplateRows: expandable && open ? '1fr' : '0fr' }}
       >
         <div className="overflow-hidden">
           <div className="space-y-2 pt-1.5">

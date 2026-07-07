@@ -590,7 +590,12 @@ def _build_session_state(
         state.update(build_blueprint_status_context(batch.batch_id, lecturer_id))
     if approved_outline:
         artifact_type = str(approved_outline.get("outline_artifact_type") or "")
-        key = {"lesson_plan": "lesson_plan_outline", "lab": "lab_outline", "quiz": "quiz_outline"}.get(artifact_type)
+        key = {
+            "lesson_plan": "lesson_plan_outline",
+            "lab": "lab_outline",
+            "quiz": "quiz_outline",
+            "course_blueprint": "course_blueprint_outline",
+        }.get(artifact_type)
         if key and isinstance(approved_outline.get("outline_payload"), dict):
             state[key] = approved_outline["outline_payload"]
         context = approved_outline.get("outline_context")
@@ -897,6 +902,7 @@ def _append_outline_list(
 
 _OUTLINE_CONTEXT_KEYS = (
     "research_summary", "research_summary_json", "lab_research_summary",
+    "course_blueprint_outline",
     "active_artifact_type", "active_week", "active_topic", "active_generation_id",
     "active_generation_mode", "active_duration_minutes", "active_lab_modality",
     "last_assessment_lesson_context", "assessment_lesson_doc_status",

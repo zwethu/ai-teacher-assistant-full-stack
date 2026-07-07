@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import type { ChangeEvent, ClipboardEvent, KeyboardEvent } from 'react'
 import type { ChatMessage } from '../../../entity/Chat'
-import { BookOpen, FileQuestion, FileText, FlaskConical, History, Image as ImageIcon, Loader2, Paperclip, Send, Sparkles, X } from 'lucide-react'
+import { BookOpen, FileQuestion, FileText, FlaskConical, GraduationCap, History, Image as ImageIcon, Loader2, Paperclip, Send, Sparkles, X } from 'lucide-react'
 import { MessageRow, ThinkingIndicator } from './MessageRow'
 import { ConnectorToggles, type ConnectorsState } from './ConnectorToggles'
 import type { RunUiState } from '../runTypes'
@@ -9,7 +9,7 @@ import type { PendingChatAttachment } from '../hooks/useChatPage'
 import type { ChatAttachmentListItem, ChatAttachmentSnapshot } from '../../../entity/Chat'
 import { getChatAttachmentContent, listChatAttachments } from '../../../services/chatService'
 
-export type GenerateMode = 'lesson_plan' | 'lab' | 'assessment'
+export type GenerateMode = 'lesson_plan' | 'lab' | 'assessment' | 'course_blueprint'
 
 type Props = {
   input: string
@@ -27,10 +27,13 @@ type Props = {
   onSelectGenerateMode: (mode: GenerateMode) => void
   onClearGenerateMode: () => void
   pendingAttachments: PendingChatAttachment[]
+  referencedAttachments: ChatAttachmentListItem[]
   attachmentsUploading: boolean
   attachmentErrors: string[]
   onAttachmentFiles: (e: ChangeEvent<HTMLInputElement>) => void
   onRemoveAttachment: (attachmentId: string) => void
+  onReferenceAttachment: (item: ChatAttachmentListItem) => void
+  onRemoveReferenced: (attachmentId: string) => void
   onPaste: (e: ClipboardEvent<HTMLTextAreaElement>) => void
   batchId?: string
   chatId?: string
@@ -52,10 +55,13 @@ export function ChatInput({
   onSelectGenerateMode,
   onClearGenerateMode,
   pendingAttachments,
+  referencedAttachments,
   attachmentsUploading,
   attachmentErrors,
   onAttachmentFiles,
   onRemoveAttachment,
+  onReferenceAttachment,
+  onRemoveReferenced,
   onPaste,
   batchId,
   chatId,
@@ -73,6 +79,8 @@ export function ChatInput({
     ? 'Lab Preview'
     : activeGenerateMode === 'assessment'
       ? 'Assessment Preview'
+      : activeGenerateMode === 'course_blueprint'
+        ? 'Course Plan'
       : 'Lesson Plan Preview'
   const placeholder =
     activeGenerateMode === 'lesson_plan'
@@ -81,6 +89,8 @@ export function ChatInput({
         ? 'Describe the lab preview you want, e.g. Week 3 Firebase guestbook lab...'
         : activeGenerateMode === 'assessment'
           ? 'Describe the assessment preview you want, e.g. Week 3 mixed quiz, 10 questions...'
+        : activeGenerateMode === 'course_blueprint'
+          ? 'Describe the course plan you want, e.g. a 12-week plan focused on applied data skills...'
         : 'Message your teaching assistant...'
 
   const attachmentStatus = (attachment: PendingChatAttachment) => {
@@ -117,6 +127,14 @@ export function ChatInput({
             </button>
             {menuOpen && (
               <div className="absolute bottom-full left-0 z-30 mb-2 w-56 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl">
+                <button
+                  type="button"
+                  onClick={() => selectGenerateMode('course_blueprint')}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-emerald-50"
+                >
+                  <GraduationCap className="h-4 w-4 text-emerald-600" />
+                  Course Plan
+                </button>
                 <button
                   type="button"
                   onClick={() => selectGenerateMode('lesson_plan')}
@@ -156,6 +174,8 @@ export function ChatInput({
               <FlaskConical className="h-4 w-4" />
             ) : activeGenerateMode === 'assessment' ? (
               <FileQuestion className="h-4 w-4" />
+            ) : activeGenerateMode === 'course_blueprint' ? (
+              <GraduationCap className="h-4 w-4" />
             ) : (
               <BookOpen className="h-4 w-4" />
             )}
@@ -195,6 +215,22 @@ export function ChatInput({
             ))}
           </div>
         )}
+        {referencedAttachments.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-2">
+            {referencedAttachments.map((attachment) => (
+              <div key={attachment.attachment_id} className="flex max-w-xs items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50/80 p-2 shadow-sm">
+                {attachment.attachment_kind === 'image' ? <ImageIcon className="h-5 w-5 flex-shrink-0 text-sky-600" /> : <FileText className="h-5 w-5 flex-shrink-0 text-emerald-600" />}
+                <div className="min-w-0">
+                  <p className="truncate text-xs font-medium text-slate-700">{attachment.file_title || attachment.file_name}</p>
+                  <p className="text-[11px] text-slate-400">Earlier attachment</p>
+                </div>
+                <button type="button" onClick={() => onRemoveReferenced(attachment.attachment_id)} className="rounded p-1 text-slate-400 hover:bg-slate-100" aria-label={`Remove ${attachment.file_title || attachment.file_name}`}>
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         {attachmentErrors.map((error) => <p key={error} className="mb-1 text-xs text-red-600">{error}</p>)}
         {pendingAttachments.some((attachment) => attachment.status === 'processing') && (
           <p className="mb-1 text-xs text-slate-500">Some attachments are still processing — you can send now, and the assistant may note a file isn't ready yet.</p>
@@ -203,8 +239,7 @@ export function ChatInput({
           <p className="mb-1 text-xs text-amber-600">Remove the flagged attachment to send. Large files belong in Course Space, where they’re indexed for retrieval.</p>
         )}
         {batchId && chatId && <PreviousAttachments batchId={batchId} chatId={chatId} onReference={(attachment) => {
-          const mention = `Please use the earlier attachment ${attachment.file_name}. Attachment ID: ${attachment.attachment_id}`
-          onInputChange(input.trim() ? `${input.trim()}\n${mention}` : mention)
+          onReferenceAttachment(attachment)
           requestAnimationFrame(() => textareaRef.current?.focus())
         }} />}
         <div className="flex items-end gap-2 p-2 rounded-[28px] bg-white/55 border border-white/60 shadow-[0_8px_32px_rgba(15,23,42,0.08)]">
@@ -241,7 +276,7 @@ export function ChatInput({
           <button
             type="button"
             onClick={onSend}
-            disabled={(!input.trim() && pendingAttachments.length === 0) || disabled || sending || attachmentsUploading || hasBlockingAttachment}
+            disabled={(!input.trim() && pendingAttachments.length === 0 && referencedAttachments.length === 0) || disabled || sending || attachmentsUploading || hasBlockingAttachment}
             className="flex-shrink-0 inline-flex items-center justify-center w-10 h-10 mb-0.5 mr-1 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-600/25 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
             aria-label="Send message"
           >

@@ -66,6 +66,11 @@ GOOGLE_OAUTH_REQUIRED_DETAIL = {
 
 class CreateChatBody(BaseModel):
     title: str = "New Chat"
+    # Standalone generation surfaces create a hidden "workflow" chat as a run
+    # container so it never surfaces in Chat History (see get_or_create_workflow_chat).
+    type: str = "chat"
+    workflow_type: str = ""
+    hidden: bool = False
 
 
 class ConnectorState(BaseModel):
@@ -95,7 +100,14 @@ async def create_chat_endpoint(
     lecturer_id: str = current_user["uid"]
     if get_batch(batch_id, lecturer_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch not found")
-    return create_chat(batch_id, lecturer_id, body.title)
+    return create_chat(
+        batch_id,
+        lecturer_id,
+        body.title,
+        chat_type=body.type or "chat",
+        workflow_type=body.workflow_type or "",
+        hidden=bool(body.hidden),
+    )
 
 
 @router.get("", response_model=list[dict])

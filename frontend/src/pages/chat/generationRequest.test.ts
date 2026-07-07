@@ -6,6 +6,7 @@ describe.each([
   ['lesson_plan', 'Please use the earlier attachment outline.pdf. Attachment ID: doc-1'],
   ['lab', 'Use the earlier screenshot as the expected result. Attachment ID: image-1'],
   ['assessment', 'Build the quiz from the earlier PDF. Attachment ID: doc-2'],
+  ['course_blueprint', 'Build the course plan from the earlier syllabus. Attachment ID: doc-3'],
 ] as Array<[AttachmentAwareGenerateMode, string]>)('%s attachment-aware generation', (mode, message) => {
   it('preserves reference text and current attachment IDs in the invoke request', () => {
     const request = buildGenerationRequest(

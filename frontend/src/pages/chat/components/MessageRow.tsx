@@ -9,6 +9,7 @@ import {
   FileQuestion,
   FlaskConical,
   Loader2,
+  Map as MapIcon,
   Maximize2,
   MoreHorizontal,
   Save,
@@ -45,6 +46,26 @@ import { CourseBlueprintReviewModal } from './CourseBlueprintReviewModal'
 import type { CourseBlueprint } from '../../../services/courseBlueprintService'
 import { normalizeCourseBlueprintRecommendation, saveBlueprintFromRun } from '../../../services/courseBlueprintService'
 import { SuggestedCourseBlueprintModal } from './SuggestedCourseBlueprintModal'
+
+// Referenced prior attachments are conveyed to the agent as an id mention appended to the
+// message (the backend rejects re-sending an already-sent attachment via attachment_ids).
+// Strip those lines from the displayed bubble and render them as chips instead — matching
+// how they appear in the composer — so the user never sees the raw "Attachment ID:" text.
+const REFERENCED_ATTACHMENT_RE = /^Please use the earlier attachment (.+)\. Attachment ID: (\S+)$/
+
+export function parseUserMessageContent(content: string): {
+  body: string
+  references: { title: string; id: string }[]
+} {
+  const references: { title: string; id: string }[] = []
+  const bodyLines: string[] = []
+  for (const line of content.split('\n')) {
+    const match = line.match(REFERENCED_ATTACHMENT_RE)
+    if (match) references.push({ title: match[1], id: match[2] })
+    else bodyLines.push(line)
+  }
+  return { body: bodyLines.join('\n').trim(), references }
+}
 
 export function MessageRow({
   msg,
@@ -102,16 +123,31 @@ export function MessageRow({
         {isUser ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
       </div>
       <div className={`flex-1 min-w-0 pt-1 ${isUser ? 'flex justify-end' : ''}`}>
-        {isUser ? (
+        {isUser ? (() => {
+          const { body, references } = parseUserMessageContent(msg.content)
+          return (
           <div className="max-w-full">
-            <div className="inline-block max-w-full text-[15px] leading-7 whitespace-pre-wrap px-4 py-2.5 rounded-3xl rounded-br-md bg-emerald-500/15 border border-emerald-300/30 text-slate-800">
-              {msg.content}
-            </div>
+            {body && (
+              <div className="inline-block max-w-full text-[15px] leading-7 whitespace-pre-wrap px-4 py-2.5 rounded-3xl rounded-br-md bg-emerald-500/15 border border-emerald-300/30 text-slate-800">
+                {body}
+              </div>
+            )}
+            {references.length > 0 && (
+              <div className="mt-1 flex flex-wrap justify-end gap-2">
+                {references.map((ref) => (
+                  <div key={ref.id} className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50/80 px-2.5 py-1.5 shadow-sm">
+                    <FileText className="h-4 w-4 flex-shrink-0 text-emerald-600" />
+                    <span className="max-w-[220px] truncate text-xs font-medium text-slate-700">{ref.title}</span>
+                  </div>
+                ))}
+              </div>
+            )}
             {batchId && msg.attachments && msg.attachments.length > 0 && (
               <MessageAttachments batchId={batchId} chatId={msg.chat_id} attachments={msg.attachments} onAsk={onAskAboutAttachment} />
             )}
           </div>
-        ) : (
+          )
+        })() : (
           <div className="max-w-full text-[15px] leading-7 text-slate-700">
             {canSaveBlueprint && (
               <div className="relative mb-1 flex justify-end">
@@ -285,14 +321,14 @@ function AssistantIntro({ content, metadata }: { content: string; metadata?: Rec
   )
 }
 
-function isOutlineApprovalMessage(msg: ChatMessage, isPending: boolean) {
+export function isOutlineApprovalMessage(msg: ChatMessage, isPending: boolean) {
   const metadata = msg.metadata || {}
   return msg.role === 'assistant' && !isPending && msg.status !== 'failed' &&
     metadata.workflow_stage === 'outline' && metadata.outline_approvable === true &&
-    ['lesson_plan', 'lab', 'quiz'].includes(String(metadata.outline_artifact_type || metadata.artifact_type || ''))
+    ['lesson_plan', 'lab', 'quiz', 'course_blueprint'].includes(String(metadata.outline_artifact_type || metadata.artifact_type || ''))
 }
 
-function OutlineApprovalCard({
+export function OutlineApprovalCard({
   msg, disabled, completed, superseded, onApprove,
 }: {
   msg: ChatMessage
@@ -306,7 +342,7 @@ function OutlineApprovalCard({
   const isSuperseded = superseded || approvalStatus === 'superseded'
   const locked = completed || isSuperseded || approvalStatus === 'approved'
   const type = String(metadata.outline_artifact_type || metadata.artifact_type || '')
-  const label = type === 'lab' ? 'Lab Outline' : type === 'quiz' ? 'Assessment Configuration' : 'Lesson Plan Outline'
+  const label = type === 'lab' ? 'Lab Outline' : type === 'quiz' ? 'Assessment Configuration' : type === 'course_blueprint' ? 'Course Plan Outline' : 'Lesson Plan Outline'
   const Icon = type === 'lab' ? FlaskConical : type === 'quiz' ? FileQuestion : BookOpen
   return (
     <div className="overflow-hidden rounded-lg border border-emerald-200/80 bg-white/75 shadow-sm backdrop-blur-sm">
@@ -336,14 +372,14 @@ function OutlineApprovalCard({
               ? 'Outline approved'
               : disabled
                 ? 'Generating full preview...'
-                : 'Approve and generate full preview'}
+                : type === 'course_blueprint' ? 'Approve and generate course plan' : 'Approve and generate full preview'}
         </button>
       </div>
     </div>
   )
 }
 
-function isGeneratedArtifactPreviewMessage(msg: ChatMessage, isPending: boolean) {
+export function isGeneratedArtifactPreviewMessage(msg: ChatMessage, isPending: boolean) {
   if (msg.role !== 'assistant' || isPending || msg.status === 'failed') return false
 
   const content = msg.content?.trim()
@@ -362,7 +398,7 @@ function isGeneratedArtifactPreviewMessage(msg: ChatMessage, isPending: boolean)
   return explicitCard || (isArtifactType && isExportablePreview)
 }
 
-function ArtifactPreviewCard({
+export function ArtifactPreviewCard({
   content,
   metadata,
 }: {
@@ -374,12 +410,21 @@ function ArtifactPreviewCard({
   const artifactType = String(metadata.artifact_type || metadata.pending_artifact_type || '')
   const isLab = artifactType === 'lab'
   const isQuiz = artifactType === 'quiz'
-  const label = isLab ? 'Lab Preview' : isQuiz ? 'Assessment Preview' : 'Lesson Plan Preview'
+  const isCourseBlueprint = artifactType === 'course_blueprint'
+  const label = isLab
+    ? 'Lab Preview'
+    : isQuiz
+      ? 'Assessment Preview'
+      : isCourseBlueprint
+        ? 'Course Plan Preview'
+        : 'Lesson Plan Preview'
   const fallbackTitle = isLab
     ? 'Generated lab preview'
     : isQuiz
       ? 'Generated assessment preview'
-      : 'Generated lesson plan preview'
+      : isCourseBlueprint
+        ? 'Generated course plan preview'
+        : 'Generated lesson plan preview'
   const title =
     metadataText(metadata.artifact_title) || extractFirstMarkdownHeading(content) || fallbackTitle
   const week = metadata.week || metadata.pending_artifact_week
@@ -387,7 +432,7 @@ function ArtifactPreviewCard({
     ? `Week ${String(week)}`
     : ''
   const summary = extractPreviewSummary(content)
-  const Icon = isLab ? FlaskConical : isQuiz ? FileQuestion : BookOpen
+  const Icon = isLab ? FlaskConical : isQuiz ? FileQuestion : isCourseBlueprint ? MapIcon : BookOpen
 
   useEffect(() => {
     if (!open) return
@@ -653,7 +698,7 @@ export function MarkdownBlock({ content, webSources = [], onCitationSelect }: { 
   )
 }
 
-function BlueprintSaveButton({ batchId, msg }: { batchId: string; msg: ChatMessage }) {
+export function BlueprintSaveButton({ batchId, msg, onSaved }: { batchId: string; msg: ChatMessage; onSaved?: (version: number | null) => void }) {
   const metadata = msg.metadata || {}
   const savable = metadata.pending_savable_blueprint === true
   const alreadySavedId = String(metadata.course_blueprint_saved_id || '')
@@ -673,6 +718,7 @@ function BlueprintSaveButton({ batchId, msg }: { batchId: string; msg: ChatMessa
     try {
       const res = await saveBlueprintFromRun(batchId, chatId, runId)
       setSavedVersion(res.version ?? null)
+      onSaved?.(res.version ?? null)
     } catch {
       setError('Could not save the course plan. Please retry.')
     } finally {
@@ -702,7 +748,7 @@ function BlueprintSaveButton({ batchId, msg }: { batchId: string; msg: ChatMessa
   )
 }
 
-function ArtifactExportButton({
+export function ArtifactExportButton({
   batchId,
   msg,
 }: {

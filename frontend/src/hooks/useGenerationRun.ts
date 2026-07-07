@@ -11,6 +11,7 @@ import {
   uploadChatAttachment,
 } from '../services/chatService'
 import { invokeAgent } from '../services/agentService'
+import { clearGenerationRun, readGenerationRun, writeGenerationRun } from './generationRunStore'
 import {
   subscribeAgentRun,
   type AgentRunDelta,
@@ -59,11 +60,15 @@ function invokeErrorMessage(err: unknown): string {
   return message || (typeof detail === 'string' ? detail : '') || 'Sorry, something went wrong. Please try again.'
 }
 
-export function useGenerationRun(batch: Batch | null) {
+export function useGenerationRun(batch: Batch | null, persistKey?: string) {
   const [chat, setChat] = useState<Chat | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [runStates, setRunStates] = useState<Record<string, RunUiState>>({})
   const [currentRunId, setCurrentRunId] = useState<string | null>(null)
+  // Which HITL phase the in-flight run belongs to. Lets the workflow renderer
+  // tell "drafting outline" from "generating full preview" during the pending
+  // window (before the resolved message carries stage metadata).
+  const [activePhase, setActivePhase] = useState<'outline' | 'full' | 'refine' | null>(null)
   const [sending, setSending] = useState(false)
   const [pendingAttachments, setPendingAttachments] = useState<PendingChatAttachment[]>([])
   const [attachmentsUploading, setAttachmentsUploading] = useState(false)
@@ -76,8 +81,18 @@ export function useGenerationRun(batch: Batch | null) {
   const chatRef = useRef<Chat | null>(null)
   useEffect(() => { chatRef.current = chat }, [chat])
 
-  // Reset everything when the selected batch changes (each space is its own workspace).
+  // Persistence: a run continues server-side even after the page unmounts, so we
+  // keep the chat + run id in a module store keyed by (batch, surface) and reconnect
+  // on return. persistIdRef/subscribeToRunRef are set during render so the effect
+  // below (which runs before later effects) can read them on first mount.
   const batchId = batch?.id ?? null
+  const persistId = persistKey && batchId ? `${batchId}:${persistKey}` : null
+  const persistIdRef = useRef<string | null>(null)
+  persistIdRef.current = persistId
+  const subscribeToRunRef = useRef<((runId: string, chatId: string) => void) | null>(null)
+
+  // On batch/key change (incl. mount): tear down live subs, then rehydrate the
+  // persisted run for this key — or reset to an empty workspace if there is none.
   useEffect(() => {
     Object.values(runUnsubscribesRef.current).forEach((fn) => fn())
     runUnsubscribesRef.current = {}
@@ -86,14 +101,49 @@ export function useGenerationRun(batch: Batch | null) {
     Object.values(fallbackTimerRef.current).forEach((t) => window.clearTimeout(t))
     fallbackTimerRef.current = {}
     runDeltaIndexesRef.current = {}
+    setPendingAttachments([])
+    setAttachmentErrors([])
+
+    const persisted = persistId ? readGenerationRun(persistId) : undefined
+    if (persisted?.chat) {
+      const persistedChat = persisted.chat
+      const runId = persisted.currentRunId
+      chatRef.current = persistedChat
+      setChat(persistedChat)
+      setRunStates({})
+      setCurrentRunId(runId)
+      setActivePhase(persisted.activePhase)
+      listMessages(persistedChat.batch_id, persistedChat.chat_id)
+        .then((loaded) => {
+          setMessages(() => {
+            const base: ChatMessage[] = loaded.map((m) => ({ ...m, pending: false }))
+            if (runId && !base.some((m) => m.run_id === runId && m.role === 'assistant')) {
+              base.push({
+                message_id: `pending-${runId}`, chat_id: persistedChat.chat_id, role: 'assistant',
+                content: '', created_at: new Date().toISOString(), status: 'pending', run_id: runId, pending: true,
+              })
+            }
+            return base
+          })
+        })
+        .catch(() => {})
+      if (runId) {
+        setSending(true)
+        subscribeToRunRef.current?.(runId, persistedChat.chat_id)
+      } else {
+        setSending(false)
+      }
+      return
+    }
+
+    chatRef.current = null
     setChat(null)
     setMessages([])
     setRunStates({})
     setCurrentRunId(null)
+    setActivePhase(null)
     setSending(false)
-    setPendingAttachments([])
-    setAttachmentErrors([])
-  }, [batchId])
+  }, [batchId, persistId])
 
   // Poll processing attachments so the composer reflects readiness.
   useEffect(() => {
@@ -132,9 +182,23 @@ export function useGenerationRun(batch: Batch | null) {
   const ensureChat = useCallback(async (): Promise<Chat | null> => {
     if (chatRef.current) return chatRef.current
     if (!batch) return null
-    const created = await createChat(batch.id, 'Generation workspace')
+    // Reuse a persisted workflow chat for this surface if one exists (survives nav).
+    const persisted = persistIdRef.current ? readGenerationRun(persistIdRef.current) : undefined
+    if (persisted?.chat) {
+      chatRef.current = persisted.chat
+      setChat(persisted.chat)
+      return persisted.chat
+    }
+    // Hidden "workflow" chat: a run container for standalone generation, never
+    // shown in Chat History (backend list_chats filters hidden/workflow chats).
+    const created = await createChat(batch.id, 'Generation workspace', {
+      type: 'workflow',
+      workflowType: 'generation',
+      hidden: true,
+    })
     chatRef.current = created
     setChat(created)
+    if (persistIdRef.current) writeGenerationRun(persistIdRef.current, { chat: created })
     return created
   }, [batch])
 
@@ -306,6 +370,10 @@ export function useGenerationRun(batch: Batch | null) {
         onMessage: (m) => { upsertFinalMessage(m, pendingId, chatId); setSending(false); stopTimers(runId) },
         onStatus: (status) => {
           updateRunStatus(runId, status)
+          if (status === 'done' || status === 'failed') {
+            setActivePhase(null)
+            if (persistIdRef.current) writeGenerationRun(persistIdRef.current, { activePhase: null })
+          }
           if (status === 'done') { stopTimers(runId); void pollFinalOnce(chatId, runId, pendingId) }
           if (status === 'failed') {
             stopTimers(runId)
@@ -341,6 +409,9 @@ export function useGenerationRun(batch: Batch | null) {
     [ensureRunState, upsertFinalMessage, stopTimers, updateRunStatus, appendRunEvent, upsertRunStep,
      appendRunDelta, updateRunStreamMeta, updateRunError, updateRunConnection, updateRunStreamError, pollFinalOnce],
   )
+  // Expose the latest subscribeToRun to the rehydrate effect (set during render so
+  // it is available before effects run on first mount).
+  subscribeToRunRef.current = subscribeToRun
 
   const startRun = useCallback(
     async (chatId: string, message: string, invoke: () => Promise<InvokeResult>, attachmentSnapshots: PendingChatAttachment[] = []) => {
@@ -357,6 +428,9 @@ export function useGenerationRun(batch: Batch | null) {
         }
         const pendingId = `pending-${result.run_id}`
         setCurrentRunId(result.run_id)
+        if (persistIdRef.current) {
+          writeGenerationRun(persistIdRef.current, { chat: chatRef.current, currentRunId: result.run_id })
+        }
         ensureRunState(result.run_id, (result.status as AgentRunStatus) || 'running')
         setMessages((prev) => [
           ...prev.filter(Boolean),
@@ -390,6 +464,8 @@ export function useGenerationRun(batch: Batch | null) {
       if (!batch || sending) return
       const activeChat = await ensureChat()
       if (!activeChat) return
+      setActivePhase('outline')
+      if (persistIdRef.current) writeGenerationRun(persistIdRef.current, { activePhase: 'outline' })
       const attachmentsForMessage = [...pendingAttachments]
       const attachmentIds = attachmentsForMessage.map((a) => a.attachment_id)
       const started = await startRun(
@@ -429,6 +505,8 @@ export function useGenerationRun(batch: Batch | null) {
       const mode: GenerationWorkflow =
         artifactType === 'quiz' ? 'assessment' : (artifactType as GenerationWorkflow)
       if (!['lesson_plan', 'lab', 'assessment', 'course_blueprint'].includes(mode)) return
+      setActivePhase('full')
+      if (persistIdRef.current) writeGenerationRun(persistIdRef.current, { activePhase: 'full' })
       const chatId = chatRef.current.chat_id
       const text = 'Approve this outline and generate the full preview.'
       await startRun(chatId, text, async () => {
@@ -455,6 +533,8 @@ export function useGenerationRun(batch: Batch | null) {
     async (text: string, webSearch = true) => {
       const content = text.trim()
       if (!batch || !content || sending || !chatRef.current) return
+      setActivePhase('refine')
+      if (persistIdRef.current) writeGenerationRun(persistIdRef.current, { activePhase: 'refine' })
       const chatId = chatRef.current.chat_id
       await startRun(chatId, content, async () => {
         const data = await sendMessage(batch.id, chatId, content, { web_search: webSearch }, [])
@@ -463,6 +543,26 @@ export function useGenerationRun(batch: Batch | null) {
     },
     [batch, sending, startRun],
   )
+
+  // Clear the current run so the page can show its form again ("Generate another").
+  // Keeps the workflow chat for reuse but drops the persisted run so it won't rehydrate.
+  const reset = useCallback(() => {
+    Object.values(runUnsubscribesRef.current).forEach((fn) => fn())
+    runUnsubscribesRef.current = {}
+    Object.values(pollIntervalRef.current).forEach((t) => window.clearInterval(t))
+    pollIntervalRef.current = {}
+    Object.values(fallbackTimerRef.current).forEach((t) => window.clearTimeout(t))
+    fallbackTimerRef.current = {}
+    runDeltaIndexesRef.current = {}
+    setMessages([])
+    setRunStates({})
+    setCurrentRunId(null)
+    setActivePhase(null)
+    setSending(false)
+    setPendingAttachments([])
+    setAttachmentErrors([])
+    if (persistIdRef.current) clearGenerationRun(persistIdRef.current)
+  }, [])
 
   // ---- attachments (optional) ----
 
@@ -514,6 +614,7 @@ export function useGenerationRun(batch: Batch | null) {
     messages,
     runStates,
     currentRunId,
+    activePhase,
     sending,
     pendingAttachments,
     attachmentsUploading,
@@ -521,6 +622,7 @@ export function useGenerationRun(batch: Batch | null) {
     generate,
     approveOutline,
     sendFollowUp,
+    reset,
     uploadAttachmentFiles,
     removePendingAttachment,
   }

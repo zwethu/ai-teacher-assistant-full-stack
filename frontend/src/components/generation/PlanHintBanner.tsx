@@ -33,10 +33,13 @@ export function PlanHintBanner({ batchId }: { batchId: string | null | undefined
       <Lightbulb className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-500" />
       <div className="flex-1 text-sm text-amber-800">
         No course plan yet for this space. You can generate now, but creating a{' '}
-        <Link to="/batches" className="font-semibold underline hover:text-amber-900">
+        <Link
+          to={`/batches?batch=${batchId}&tab=planning`}
+          className="font-semibold underline hover:text-amber-900"
+        >
           Course Plan
         </Link>{' '}
-        first (Batches → Plan tab) helps the agent align week-to-week for better results.
+        first helps the agent align week-to-week for better results.
       </div>
       <button
         type="button"

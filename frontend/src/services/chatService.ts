@@ -19,8 +19,17 @@ export type ChatRunRecord = {
 // Chat CRUD
 // ---------------------------------------------------------------------------
 
-export async function createChat(batchId: string, title: string = 'New Chat'): Promise<Chat> {
-  const res = await api.post<Chat>(`/batches/${batchId}/chats`, { title })
+export async function createChat(
+  batchId: string,
+  title: string = 'New Chat',
+  options?: { type?: 'chat' | 'workflow'; workflowType?: string; hidden?: boolean },
+): Promise<Chat> {
+  const res = await api.post<Chat>(`/batches/${batchId}/chats`, {
+    title,
+    type: options?.type,
+    workflow_type: options?.workflowType,
+    hidden: options?.hidden,
+  })
   return res.data
 }
 

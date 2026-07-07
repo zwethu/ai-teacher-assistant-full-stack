@@ -150,7 +150,16 @@ def list_chats(
     docs = col.where("lecturer_id", "==", lecturer_id).order_by("created_at", direction="DESCENDING").stream()
     chats = [_chat_to_dict(doc.id, doc.to_dict() or {}) for doc in docs]
     if not include_hidden:
-        chats = [chat for chat in chats if not chat.get("hidden")]
+        # Exclude workflow/generation run-container chats. `hidden` covers newly
+        # created ones; the type/title guards also catch older generation chats
+        # created before they were flagged hidden (no backfill required).
+        chats = [
+            chat
+            for chat in chats
+            if not chat.get("hidden")
+            and chat.get("type") != "workflow"
+            and chat.get("title") != "Generation workspace"
+        ]
     return chats
 
 

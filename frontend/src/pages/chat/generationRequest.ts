@@ -1,6 +1,6 @@
 import type { AgentInvokePayload } from '../../services/agentService'
 
-export type AttachmentAwareGenerateMode = 'lesson_plan' | 'lab' | 'assessment'
+export type AttachmentAwareGenerateMode = 'lesson_plan' | 'lab' | 'assessment' | 'course_blueprint'
 
 export function buildGenerationRequest(
   mode: AttachmentAwareGenerateMode,

@@ -31,10 +31,13 @@ type Props = Pick<
   | 'setConnectors'
   | 'routeHydration'
   | 'pendingAttachments'
+  | 'referencedAttachments'
   | 'attachmentsUploading'
   | 'attachmentErrors'
   | 'handleAttachmentFiles'
   | 'removePendingAttachment'
+  | 'referencePreviousAttachment'
+  | 'removeReferencedAttachment'
   | 'handleComposerPaste'
   | 'handleAskAboutAttachment'
 >
@@ -66,10 +69,13 @@ export function ChatLayout(props: Props) {
     setConnectors,
     routeHydration,
     pendingAttachments,
+    referencedAttachments,
     attachmentsUploading,
     attachmentErrors,
     handleAttachmentFiles,
     removePendingAttachment,
+    referencePreviousAttachment,
+    removeReferencedAttachment,
     handleComposerPaste,
     handleAskAboutAttachment,
   } = props
@@ -162,10 +168,13 @@ export function ChatLayout(props: Props) {
             connectors={connectors}
             onConnectorsChange={(key, value) => setConnectors(prev => ({ ...prev, [key]: value }))}
             pendingAttachments={pendingAttachments}
+            referencedAttachments={referencedAttachments}
             attachmentsUploading={attachmentsUploading}
             attachmentErrors={attachmentErrors}
             onAttachmentFiles={handleAttachmentFiles}
             onRemoveAttachment={removePendingAttachment}
+            onReferenceAttachment={referencePreviousAttachment}
+            onRemoveReferenced={removeReferencedAttachment}
             onPaste={handleComposerPaste}
             batchId={selectedBatch?.id}
             chatId={activeChat?.chat_id}

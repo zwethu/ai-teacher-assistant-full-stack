@@ -33,10 +33,13 @@ export default function Chat() {
         setConnectors={state.setConnectors}
         routeHydration={state.routeHydration}
         pendingAttachments={state.pendingAttachments}
+        referencedAttachments={state.referencedAttachments}
         attachmentsUploading={state.attachmentsUploading}
         attachmentErrors={state.attachmentErrors}
         handleAttachmentFiles={state.handleAttachmentFiles}
         removePendingAttachment={state.removePendingAttachment}
+        referencePreviousAttachment={state.referencePreviousAttachment}
+        removeReferencedAttachment={state.removeReferencedAttachment}
         handleComposerPaste={state.handleComposerPaste}
         handleAskAboutAttachment={state.handleAskAboutAttachment}
       />

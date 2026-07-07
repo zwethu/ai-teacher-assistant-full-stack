@@ -188,3 +188,20 @@ export async function archiveCurrentCourseBlueprint(batchId: string): Promise<Co
   )
   return res.data
 }
+
+export async function revertToCourseBlueprintVersion(
+  batchId: string,
+  blueprintId: string,
+): Promise<CourseBlueprint> {
+  const res = await api.post<CourseBlueprint>(
+    `/batches/${batchId}/course-blueprint/versions/${blueprintId}/revert`,
+  )
+  return res.data
+}
+
+export async function deleteCourseBlueprintVersion(
+  batchId: string,
+  blueprintId: string,
+): Promise<void> {
+  await api.delete(`/batches/${batchId}/course-blueprint/versions/${blueprintId}`)
+}

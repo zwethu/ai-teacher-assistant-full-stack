@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import type { ToastMessage } from '../../../types'
 import type { Batch, BatchStudent } from '../../../entity/Batch'
 import type { BatchFile, IndexStatus } from '../../../entity/File'
@@ -56,6 +57,20 @@ export function useBatchesPage() {
 
   const [selectedBatch, setSelectedBatch] = useState<Batch | null>(null)
   const [detailTab, setDetailTab] = useState<DetailTab>('students')
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  // Deep link support: /batches?batch=<id>&tab=planning opens a batch straight
+  // to a tab (e.g. from the "create a Course Plan" hint on the standalone pages).
+  useEffect(() => {
+    const batchParam = searchParams.get('batch')
+    if (!batchParam || selectedBatch || batches.length === 0) return
+    const match = batches.find((b) => b.id === batchParam)
+    if (!match) return
+    setSelectedBatch(match)
+    const tabParam = searchParams.get('tab') as DetailTab | null
+    if (tabParam) setDetailTab(tabParam)
+    setSearchParams({}, { replace: true })
+  }, [searchParams, batches, selectedBatch, setSearchParams])
   const [students, setStudents] = useState<BatchStudent[]>([])
   const [studentsLoading, setStudentsLoading] = useState(false)
 

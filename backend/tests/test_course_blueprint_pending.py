@@ -1,9 +1,14 @@
 """Phase 3 backend: course-blueprint extraction, metadata, and preview rendering."""
 
+from unittest.mock import patch
+
+from entity.Batch import BatchModel
 from services.agent_gateway import (
+    _build_session_state,
     _pending_artifact_message_metadata,
     extract_course_blueprint_full_from_state,
     extract_outline_from_state,
+    outline_context_snapshot,
     render_outline_markdown,
 )
 from services.artifact_service import render_course_blueprint_markdown
@@ -84,3 +89,45 @@ def test_pending_metadata_quiz_still_exportable():
 def test_render_markdown_blueprint():
     assert "AI Foundations" in render_outline_markdown("course_blueprint", _OUTLINE)
     assert "Week 1" in render_course_blueprint_markdown(_FULL)
+
+
+def test_build_session_state_injects_approved_course_blueprint_outline():
+    batch = BatchModel(
+        batch_id="batch-1",
+        batch_name="Software Testing 26",
+        course_name="Software Testing",
+        lecturer_id="lecturer-1",
+        lecturer_email="teacher@example.com",
+        academic_year="2026",
+        term="1",
+    )
+    with (
+        patch("services.agent_gateway.build_blueprint_session_context", return_value={}),
+        patch("services.agent_gateway.build_agent_artifact_manifest", return_value={"status": "empty"}),
+    ):
+        state = _build_session_state(
+            run_id="run-full",
+            chat_id="chat-1",
+            agent_session_id="session-1",
+            rtdb_run_path="agentRuns/run-full",
+            batch=batch,
+            lecturer_id="lecturer-1",
+            lecturer_email="teacher@example.com",
+            connectors={"web_search": True},
+            workflow_type="course_blueprint.generate",
+            workflow_stage="full",
+            approval_action="approve_outline",
+            approved_outline_run_id="run-outline",
+            approved_outline={
+                "outline_artifact_type": "course_blueprint",
+                "outline_payload": _OUTLINE,
+                "outline_context": outline_context_snapshot({"course_blueprint_outline": _OUTLINE}),
+            },
+        )
+    assert state["course_blueprint_outline"] == _OUTLINE
+
+
+def test_outline_context_snapshot_includes_course_blueprint_outline():
+    outline = {"title": "Plan", "plan_scope": "full_course", "weekly_themes": []}
+    snap = outline_context_snapshot({"course_blueprint_outline": outline, "research_summary": "done"})
+    assert snap["course_blueprint_outline"] == outline

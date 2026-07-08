@@ -9,8 +9,8 @@ from services import file_service as fs
 
 # --- per-batch file cap ---------------------------------------------------------
 
-def test_default_course_space_cap_is_50():
-    assert fs.get_course_space_max_files() == 50
+def test_default_course_space_cap_is_10():
+    assert fs.get_course_space_max_files() == 10
 
 
 def test_cap_env_override_clamped(monkeypatch):

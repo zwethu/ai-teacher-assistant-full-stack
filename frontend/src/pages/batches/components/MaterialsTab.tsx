@@ -59,6 +59,11 @@ export function batchFileStatusLabel(file: BatchFile): string {
   return file.index_status === 'indexed' ? 'Indexed' : ''
 }
 
+// Per-space indexed-file cap. Mirrors the backend default (COURSE_SPACE_MAX_FILES,
+// services/file_service.py:get_course_space_max_files); the backend is the source of
+// truth and rejects uploads past it — this just surfaces the limit up front.
+const MAX_COURSE_SPACE_FILES = 10
+
 export function MaterialsTab({
   batchId,
   files,
@@ -70,6 +75,7 @@ export function MaterialsTab({
   onRefreshFiles,
   onOpenPlanning,
 }: Props) {
+  const atFileLimit = files.length >= MAX_COURSE_SPACE_FILES
   const navigate = useNavigate()
   const [chats, setChats] = useState<ChatWithPreview[]>([])
   const [chatsLoading, setChatsLoading] = useState(true)
@@ -346,20 +352,21 @@ export function MaterialsTab({
               Upload Materials
             </h3>
             <p className="text-xs text-slate-500 mb-3">
-              PDFs, documents, and text files are indexed for AI search.
+              PDFs, documents, and text files are indexed for AI search. Up to{' '}
+              {MAX_COURSE_SPACE_FILES} files per space.
             </p>
             <input
               ref={fileInputRef}
               type="file"
               accept=".pdf,.txt,.md,.docx,.json"
               onChange={onFileUpload}
-              disabled={fileUploading}
+              disabled={fileUploading || atFileLimit}
               className="sr-only"
             />
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              disabled={fileUploading}
+              disabled={fileUploading || atFileLimit}
               className={`${BTN_PRIMARY} w-full justify-center`}
             >
               {fileUploading ? (
@@ -374,6 +381,11 @@ export function MaterialsTab({
                 </>
               )}
             </button>
+            {atFileLimit && (
+              <p className="mt-2 text-xs text-amber-600">
+                {MAX_COURSE_SPACE_FILES}-file limit reached — remove a file to add another.
+              </p>
+            )}
           </div>
 
           <div className="flex-1 min-h-0 flex flex-col">
@@ -382,7 +394,7 @@ export function MaterialsTab({
                 <FileText className="w-4 h-4 text-emerald-600" />
                 Uploaded Files
                 {files.length > 0 && (
-                  <span className="text-xs font-normal text-slate-400">({files.length})</span>
+                  <span className="text-xs font-normal text-slate-400">({files.length} / {MAX_COURSE_SPACE_FILES})</span>
                 )}
               </h3>
               <button

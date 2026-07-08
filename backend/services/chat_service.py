@@ -173,14 +173,10 @@ def get_chat(batch_id: str, chat_id: str, lecturer_id: str) -> dict[str, Any] | 
     return _chat_to_dict(doc.id, data)
 
 
-def delete_chat(batch_id: str, chat_id: str, lecturer_id: str) -> bool:
-    chat_ref = _chats_col(batch_id).document(chat_id)
-    snap = chat_ref.get()
-    data = snap.to_dict() or {}
-    if not snap.exists or data.get("lecturer_id") != lecturer_id:
-        return False
-    if data.get("hidden"):
-        return False
+def _purge_chat_document(batch_id: str, chat_id: str) -> None:
+    """Full teardown of one chat: attachments (Firestore + GCS), runs, messages,
+    the chat doc, and its RTDB telemetry. Shared by delete_chat, batch deletion,
+    and the stale-workflow-chat sweep."""
     from services.chat_attachment_service import delete_all_chat_attachments
     delete_all_chat_attachments(batch_id, chat_id)
     run_ids: list[str] = []
@@ -189,36 +185,90 @@ def delete_chat(batch_id: str, chat_id: str, lecturer_id: str) -> bool:
         run.reference.delete()
     for msg in _messages_col(batch_id, chat_id).stream():
         msg.reference.delete()
-    chat_ref.delete()
+    _chats_col(batch_id).document(chat_id).delete()
     try:
         from utils.rtdb_client import delete_chat_rtdb_state
 
         delete_chat_rtdb_state(chat_id, run_ids)
     except Exception as exc:
         logger.warning("RTDB cleanup skipped for chat %s: %s", chat_id, exc)
+
+
+def delete_chat(batch_id: str, chat_id: str, lecturer_id: str) -> bool:
+    chat_ref = _chats_col(batch_id).document(chat_id)
+    snap = chat_ref.get()
+    data = snap.to_dict() or {}
+    if not snap.exists or data.get("lecturer_id") != lecturer_id:
+        return False
+    if data.get("hidden"):
+        return False
+    _purge_chat_document(batch_id, chat_id)
     return True
 
 
 def delete_all_batch_chats(batch_id: str) -> None:
     """Delete all chats and their messages for a batch (used during batch deletion)."""
-    col = _chats_col(batch_id)
-    for chat_doc in col.stream():
-        from services.chat_attachment_service import delete_all_chat_attachments
-        delete_all_chat_attachments(batch_id, chat_doc.id)
-        run_ids: list[str] = []
-        for run in _runs_col(batch_id, chat_doc.id).stream():
-            run_ids.append(run.id)
-            run.reference.delete()
-        for msg in _messages_col(batch_id, chat_doc.id).stream():
-            msg.reference.delete()
-        chat_doc.reference.delete()
-        try:
-            from utils.rtdb_client import delete_chat_rtdb_state
-
-            delete_chat_rtdb_state(chat_doc.id, run_ids)
-        except Exception as exc:
-            logger.warning("RTDB cleanup skipped for chat %s: %s", chat_doc.id, exc)
+    for chat_doc in _chats_col(batch_id).stream():
+        _purge_chat_document(batch_id, chat_doc.id)
     logger.info("Deleted all chats for batch %s", batch_id)
+
+
+def sweep_stale_workflow_chats(
+    idle_days: int = 14,
+    limit: int = 200,
+    dry_run: bool | None = None,
+) -> dict[str, Any]:
+    """Delete hidden ``type=="workflow"`` run-container chats idle for >= idle_days.
+
+    Standalone generation (lesson plan / assessment / course plan) creates one hidden
+    workflow chat per run; they never surface in Chat History and cannot be user-deleted,
+    so without this reaper they accumulate forever. ``updated_at`` (bumped on every message
+    save) is the idle marker. Defaults to a DRY RUN unless ``WORKFLOW_CHAT_SWEEP_ENFORCE``
+    is truthy — production must opt in before anything is deleted.
+    """
+    import os
+    from datetime import datetime, timedelta, timezone
+
+    if dry_run is None:
+        dry_run = os.getenv("WORKFLOW_CHAT_SWEEP_ENFORCE", "").strip().lower() not in {"1", "true", "yes"}
+
+    db = get_firestore()
+    cutoff = datetime.now(timezone.utc) - timedelta(days=idle_days)
+    docs = (
+        db.collection_group("chats")
+        .where("type", "==", "workflow")
+        .where("updated_at", "<=", cutoff)
+        .limit(limit)
+        .stream()
+    )
+
+    candidates: list[tuple[str, str]] = []
+    for doc in docs:
+        data = doc.to_dict() or {}
+        if not data.get("hidden"):  # defensive: only hidden run containers
+            continue
+        batch_id = str(data.get("batch_id") or "")
+        if not batch_id:  # derive from path batches/{batch_id}/chats/{chat_id}
+            parent_batch = doc.reference.parent.parent
+            batch_id = parent_batch.id if parent_batch else ""
+        if batch_id:
+            candidates.append((batch_id, doc.id))
+
+    deleted = 0
+    for batch_id, chat_id in candidates:
+        if dry_run:
+            continue
+        try:
+            _purge_chat_document(batch_id, chat_id)
+            deleted += 1
+        except Exception as exc:
+            logger.warning("workflow-chat sweep failed for %s/%s: %s", batch_id, chat_id, exc)
+
+    logger.info(
+        "workflow-chat sweep: candidates=%d deleted=%d dry_run=%s idle_days=%d",
+        len(candidates), deleted, dry_run, idle_days,
+    )
+    return {"candidates": len(candidates), "deleted": deleted, "dry_run": dry_run, "idle_days": idle_days}
 
 
 def get_or_create_workflow_chat(

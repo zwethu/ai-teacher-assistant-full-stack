@@ -30,11 +30,14 @@ _CHECK_INDEXING_MAX_ATTEMPTS = 90  # ~90 min before handing back to the recovery
 
 
 def get_course_space_max_files() -> int:
-    """Per-batch indexed-file cap (product guardrail; Vertex handles far more)."""
+    """Per-batch indexed-file cap (product guardrail; Vertex handles far more).
+
+    Default 10 files per Course Space (batch) to bound search-indexing volume and
+    cost; override with COURSE_SPACE_MAX_FILES."""
     try:
-        return max(1, min(int(os.getenv("COURSE_SPACE_MAX_FILES", "50")), 10_000))
+        return max(1, min(int(os.getenv("COURSE_SPACE_MAX_FILES", "10")), 10_000))
     except (TypeError, ValueError):
-        return 50
+        return 10
 
 
 def count_batch_files(batch_id: str) -> int:

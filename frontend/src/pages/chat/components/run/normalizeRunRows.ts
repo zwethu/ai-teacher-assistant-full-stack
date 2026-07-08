@@ -58,8 +58,24 @@ function eventKind(event: AgentRunEvent): NormalizedRunRow['kind'] {
   return 'progress'
 }
 
+// Fallback for anything the agent didn't already send a friendly label for:
+// turn a snake_case internal name into a readable phrase (mirrors labels.py).
+const NAME_SUFFIXES = ['_if_enabled', '_agent', '_worker', '_formatter', '_generator', '_tool']
+function humanizeName(raw?: string): string {
+  if (!raw) return ''
+  let s = raw
+  for (const suffix of NAME_SUFFIXES) {
+    if (s.endsWith(suffix)) { s = s.slice(0, -suffix.length); break }
+  }
+  s = s.replace(/_/g, ' ').trim()
+  return s ? s[0].toUpperCase() + s.slice(1) : ''
+}
+
 function eventTitle(event: AgentRunEvent): string {
-  if (event.kind === 'tool') return `Tool: ${event.tool_name || event.title || 'tool'}`
+  // The agent now sends a friendly, plain-language `title` for tool + process
+  // events (see Pnai-ai/pnai/shared/labels.py); prefer it and never surface a
+  // raw tool/agent name. humanizeName is only a graceful fallback.
+  if (event.kind === 'tool') return event.title || humanizeName(event.tool_name) || 'Working'
   if (isAttachmentEvent(event)) {
     const file = event.summary || 'attachment'
     if ((event.event_type || '').startsWith('attachment.vision')) return `Analyzing image: ${file}`
@@ -68,8 +84,8 @@ function eventTitle(event: AgentRunEvent): string {
   }
   if (event.kind === 'retrieval') return `Retrieval: ${event.summary || event.title || 'Sources'}`
   if (event.kind === 'artifact') return `Artifact: ${event.title || event.summary || 'Output'}`
-  if (event.kind === 'error') return `Error: ${event.title || event.summary || 'Something went wrong'}`
-  return `Progress: ${event.title || event.summary || 'Working'}`
+  if (event.kind === 'error') return `Error: ${humanizeName(event.title) || event.summary || 'Something went wrong'}`
+  return event.title || event.summary || 'Working'
 }
 
 function mergeRow(existing: NormalizedRunRow, next: NormalizedRunRow): NormalizedRunRow {

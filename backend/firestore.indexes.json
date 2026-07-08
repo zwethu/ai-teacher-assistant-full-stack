@@ -20,6 +20,14 @@
         {"fieldPath": "attachment_id", "order": "ASCENDING"},
         {"fieldPath": "expires_at", "order": "ASCENDING"}
       ]
+    },
+    {
+      "collectionGroup": "chats",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        {"fieldPath": "type", "order": "ASCENDING"},
+        {"fieldPath": "updated_at", "order": "ASCENDING"}
+      ]
     }
   ],
   "fieldOverrides": [

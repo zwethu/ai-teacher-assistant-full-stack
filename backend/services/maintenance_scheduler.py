@@ -2,6 +2,7 @@ import logging
 from apscheduler.schedulers.background import BackgroundScheduler
 from services.email_scheduler import check_and_send_emails
 from services.chat_attachment_service import cleanup_expired_attachments, run_attachment_reconciliation
+from services.chat_service import sweep_stale_workflow_chats
 from services.file_service import recover_batch_files
 
 
@@ -27,6 +28,7 @@ def start_scheduler() -> None:
     _scheduler.add_job(recover_batch_files, "interval", minutes=2, id="file-recovery", max_instances=1)
     _scheduler.add_job(cleanup_expired_attachments, "interval", hours=1, id="attachment-cleanup", max_instances=1)
     _scheduler.add_job(run_attachment_reconciliation, "interval", weeks=1, id="attachment-reconciliation", max_instances=1)
+    _scheduler.add_job(sweep_stale_workflow_chats, "interval", days=1, id="workflow-chat-sweep", max_instances=1)
     _scheduler.add_job(_run_attachment_watchdog, "interval", minutes=1, id="attachment-watchdog", max_instances=1)
     _scheduler.start(); logger.info("Maintenance scheduler started")
 

@@ -91,6 +91,11 @@ async def _handle_cron_recover_files(_payload: dict[str, Any]) -> None:
     await asyncio.to_thread(recover_batch_files)
 
 
+async def _handle_cron_sweep_workflow_chats(_payload: dict[str, Any]) -> None:
+    from services.chat_service import sweep_stale_workflow_chats
+    await asyncio.to_thread(sweep_stale_workflow_chats)
+
+
 async def _handle_index_file(payload: dict[str, Any]) -> None:
     from services.file_service import run_index_file_task
 
@@ -147,6 +152,11 @@ async def cron_recover_files(request: Request, _: None = Depends(verify_task_cal
     await _handle_cron_recover_files({})
 
 
+@router.post("/cron/sweep-workflow-chats", status_code=status.HTTP_204_NO_CONTENT)
+async def cron_sweep_workflow_chats(request: Request, _: None = Depends(verify_task_caller)) -> None:
+    await _handle_cron_sweep_workflow_chats({})
+
+
 @router.post("/index-file", status_code=status.HTTP_204_NO_CONTENT)
 async def index_file_task(request: Request, _: None = Depends(verify_task_caller)) -> None:
     await _handle_index_file(await request.json())
@@ -166,3 +176,4 @@ register_local_handler("/tasks/cron/send-emails", _handle_cron_send_emails)
 register_local_handler("/tasks/cron/cleanup-attachments", _handle_cron_cleanup_attachments)
 register_local_handler("/tasks/cron/reconcile-attachments", _handle_cron_reconcile_attachments)
 register_local_handler("/tasks/cron/recover-files", _handle_cron_recover_files)
+register_local_handler("/tasks/cron/sweep-workflow-chats", _handle_cron_sweep_workflow_chats)

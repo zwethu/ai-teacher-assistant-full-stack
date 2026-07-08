@@ -14,8 +14,17 @@ def test_all_cron_handlers_registered():
         "/tasks/cron/reconcile-attachments",
         "/tasks/cron/recover-files",
         "/tasks/cron/attachment-watchdog",
+        "/tasks/cron/sweep-workflow-chats",
     ):
         assert path in cloud_tasks._LOCAL_HANDLERS, path
+
+
+def test_sweep_workflow_chats_handler_invokes_service(monkeypatch):
+    from routers import tasks as t
+    called = MagicMock()
+    monkeypatch.setattr("services.chat_service.sweep_stale_workflow_chats", called)
+    asyncio.run(t._handle_cron_sweep_workflow_chats({}))
+    called.assert_called_once()
 
 
 def test_cron_handler_invokes_service(monkeypatch):

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
+import { Medal } from '@phosphor-icons/react';
 import { signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
 import { auth } from '../lib/firebase';
 import {
@@ -7,10 +8,14 @@ import {
   checkStudentAccess,
   getPlayerProfile,
   createPlayerProfile,
-  hasAttempted,
+  getAttempt,
 } from '../lib/gameSession';
-import type { GameSession } from '../types/catGame.types';
+import type { GameSession, AvatarType, StoredAttempt } from '../types/catGame.types';
 import CatSprite from '../components/cat/CatSprite';
+import CertificateModal from '../components/cat/CertificateModal';
+import { computeMedal } from '../components/cat/medal';
+import { formatDate } from '../utils/formatDate';
+import AvatarSelectPage from './AvatarSelectPage';
 import GameModeSelectPage from './GameModeSelectPage';
 import './PlayEntryPage.css';
 
@@ -23,12 +28,12 @@ type FlowStep =
   | 'not_enrolled'
   | 'nickname'
   | 'already_played'
-  | 'mode_select'   // NEW
+  | 'avatar_select'  // NEW — pick cat/dog buddy
+  | 'mode_select'
   | 'ready';
 
 export default function PlayEntryPage() {
   const { assessmentId } = useParams<{ assessmentId: string }>();
-  const navigate = useNavigate();
 
   const [step, setStep] = useState<FlowStep>('loading');
   const [session, setSession] = useState<GameSession | null>(null);
@@ -38,6 +43,9 @@ export default function PlayEntryPage() {
   const [saving, setSaving] = useState(false);
   const [userEmail, setUserEmail] = useState('');
   const [userUid, setUserUid] = useState('');
+  const [avatar, setAvatar] = useState<AvatarType | null>(null);
+  const [storedAttempt, setStoredAttempt] = useState<StoredAttempt | null>(null);
+  const [certOpen, setCertOpen] = useState(false);
 
   useEffect(() => {
     if (!assessmentId) { setStep('invalid'); return; }
@@ -66,15 +74,22 @@ export default function PlayEntryPage() {
       const allowed = await checkStudentAccess(s.batchId, email);
       if (!allowed) { setStep('not_enrolled'); return; }
 
-      const already = await hasAttempted(s.id, uid);
-      if (already) { setStep('already_played'); return; }
-
       const profile = await getPlayerProfile(uid);
+
+      const attempt = await getAttempt(s.id, uid);
+      if (attempt) {
+        // Already played — keep the record so they can re-issue their certificate.
+        setStoredAttempt(attempt);
+        if (profile?.nickname) setNickname(profile.nickname);
+        setStep('already_played');
+        return;
+      }
+
       if (!profile || !profile.nickname) {
         setStep('nickname');
       } else {
         setNickname(profile.nickname);
-        setStep('mode_select'); // go straight to mode selection
+        setStep('avatar_select'); // pick buddy, then mode
       }
     } catch {
       setStep('invalid');
@@ -104,7 +119,7 @@ export default function PlayEntryPage() {
     try {
       await createPlayerProfile(userUid, trimmed, userEmail);
       setNickname(trimmed);
-      setStep('mode_select'); // after nickname → mode select
+      setStep('avatar_select'); // after nickname → pick buddy
     } catch {
       setNicknameError('Something went wrong, try again.');
     } finally {
@@ -178,14 +193,36 @@ export default function PlayEntryPage() {
   }
 
   if (step === 'already_played') {
+    const total = session?.items.length ?? storedAttempt?.score ?? 0;
     return (
       <div className="play-entry-bg">
         <div className="play-card">
-          <CatSprite mood="happy" />
+          <CatSprite mood="happy" species={storedAttempt?.chosenAvatar} />
           <h2 className="play-title">Already Played!</h2>
           <p className="play-subtitle">You've already completed this assessment.</p>
           <p className="play-hint">Each assessment can only be played once 🐾</p>
+
+          {storedAttempt && (
+            <button className="play-primary-btn" onClick={() => setCertOpen(true)}>
+              <Medal size={20} weight="duotone" /> Get My Certificate
+            </button>
+          )}
+          <p className="play-footer-hint">Lost your certificate? Grab it again anytime ✨</p>
         </div>
+
+        {certOpen && storedAttempt && (
+          <CertificateModal
+            nickname={nickname || 'Player'}
+            medal={computeMedal(storedAttempt.accuracy, storedAttempt.behavior)}
+            correct={storedAttempt.score}
+            total={total}
+            accuracy={storedAttempt.accuracy}
+            species={storedAttempt.chosenAvatar ?? 'cat'}
+            dateStr={formatDate(storedAttempt.completedAt)}
+            certId={storedAttempt.id}
+            onClose={() => setCertOpen(false)}
+          />
+        )}
       </div>
     );
   }
@@ -248,13 +285,24 @@ export default function PlayEntryPage() {
     );
   }
 
+  // step === 'avatar_select' — pick cat/dog buddy inline
+  if (step === 'avatar_select') {
+    return (
+      <AvatarSelectPage
+        nickname={nickname}
+        onSelect={a => { setAvatar(a); setStep('mode_select'); }}
+      />
+    );
+  }
+
   // step === 'mode_select' — render the mode picker inline
-  if (step === 'mode_select' && session) {
+  if (step === 'mode_select' && session && avatar) {
     return (
       <GameModeSelectPage
         session={session}
         nickname={nickname}
         playerUid={userUid}
+        avatar={avatar}
       />
     );
   }

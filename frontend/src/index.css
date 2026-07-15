@@ -5,6 +5,16 @@
   --font-serif: 'Playfair Display', ui-serif, Georgia, serif;
 }
 
+/* ─── Shared repeating background for the whole cat/dog game flow ───
+   A faint tiled paw pattern (transparent tile) layered OVER each screen's
+   solid color so the flow feels textured, not empty-white.
+   To use your own image: replace the url() value below with url('/your-file.png'). */
+:root {
+  --game-pattern:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='54' height='54' viewBox='0 0 54 54'%3E%3Cg fill='%23c98a5a' fill-opacity='0.10'%3E%3Cellipse cx='27' cy='32' rx='7.5' ry='6.5'/%3E%3Cellipse cx='17' cy='21' rx='3' ry='3.6'/%3E%3Cellipse cx='24' cy='16' rx='3' ry='3.8'/%3E%3Cellipse cx='33' cy='16' rx='3' ry='3.8'/%3E%3Cellipse cx='38' cy='22' rx='3' ry='3.6'/%3E%3C/g%3E%3C/svg%3E");
+  --game-pattern-size: 54px 54px;
+}
+
 @layer utilities {
   .academic-bg {
     background-color: #e0f1ff;

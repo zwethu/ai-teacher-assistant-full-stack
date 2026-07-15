@@ -4,7 +4,9 @@
 .play-entry-bg {
   width: 100vw;
   min-height: 100vh;
-  background: linear-gradient(175deg, #fef9f0 0%, #fde8f5 50%, #e8f4fd 100%);
+  background:
+    var(--game-pattern) 0 0 / var(--game-pattern-size) repeat,
+    #fdf1e7;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -132,11 +134,15 @@
 
 /* ─── Primary button ─── */
 .play-primary-btn {
-  background: linear-gradient(135deg, #f4a261 0%, #e76f51 100%);
+  background: #ef8a5c;
   color: white;
   border: none;
   border-radius: 22px;
   padding: 13px 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   font-size: 1rem;
   font-weight: 900;
   font-family: inherit;

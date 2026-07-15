@@ -6,7 +6,10 @@ export type GameItem = {
 };
 
 // ─── Game modes (MCQ removed) ──────────────────────────────────────────────
-export type GameMode = 'matching' | 'ropelink';
+export type GameMode = 'matching' | 'ropelink' | 'bucket';
+
+// ─── Player-chosen avatar (cat person vs dog person) ───────────────────────
+export type AvatarType = 'cat' | 'dog';
 
 export type GameState = 'playing' | 'result';
 
@@ -18,13 +21,20 @@ export type AnswerRecord = {
   correct: boolean;
 };
 
-// ─── Behavior summary (stealth assessment signals) ─────────────────────────
-export type BehaviorSummary = {
+// ─── Signals the individual game modes track during play ───────────────────
+export type BehaviorSignals = {
   firstActionDelayMs: number;       // planning: time from puzzle shown → first action
   submitCount: number;              // total submit presses
   wrongSubmitCount: number;         // submits that had at least one wrong pair/link
   totalWrongLinksOrPairs: number;   // cumulative wrong pairs across all submits
   reviewTimesMs: number[];          // durations between feedback shown → next change/submit
+};
+
+// ─── Full stealth-assessment summary = mode signals + engine-owned timing ──
+export type BehaviorSummary = BehaviorSignals & {
+  durationMs: number;               // total time from puzzle shown → finish (or timeout)
+  timedOut: boolean;                // true if the countdown ran out before all-correct
+  timeLimitMs: number;              // the time limit that was in effect
 };
 
 // ─── Firebase documents ────────────────────────────────────────────────────
@@ -38,6 +48,7 @@ export type GameSession = {
   gameModeStats?: {
     matching: number;
     ropelink: number;
+    bucket: number;
   };
 };
 
@@ -51,10 +62,17 @@ export type AttemptResult = {
   playerUid: string;
   assessmentId: string;
   chosenGameMode: GameMode;
+  chosenAvatar?: AvatarType;        // cat person vs dog person
   score: number;
   accuracy: number;
-  fish: number;
-  happiness: number;
   completedAt: Date;
   behavior?: BehaviorSummary;       // stealth assessment data
+};
+
+// A saved attempt read back from Firestore. `id` is the doc id
+// (`{assessmentId}_{playerUid}`) — the certificate's verification key.
+// completedAt comes back as a Firestore Timestamp, so keep it loose.
+export type StoredAttempt = Omit<AttemptResult, 'completedAt'> & {
+  id: string;
+  completedAt: unknown;
 };

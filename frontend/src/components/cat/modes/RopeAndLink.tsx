@@ -1,11 +1,16 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import type { GameItem, AnswerRecord, BehaviorSummary } from '../../../types/catGame.types';
+import type { ReactNode } from 'react';
+import { CheckCircle, LinkSimple, HandPointing } from '@phosphor-icons/react';
+import type { GameItem, AnswerRecord, BehaviorSignals } from '../../../types/catGame.types';
+import CardBird from '../CardBird';
 
 type Props = {
   items: GameItem[];
+  timeUp: boolean;
+  sidebar?: ReactNode;
   onCorrect: () => void;
   onWrong: () => void;
-  onComplete: (answers: AnswerRecord[], behavior: BehaviorSummary) => void;
+  onComplete: (answers: AnswerRecord[], signals: BehaviorSignals) => void;
 };
 
 type Connection = {
@@ -14,7 +19,7 @@ type Connection = {
   state: 'pending' | 'correct' | 'wrong';
 };
 
-export default function RopeAndLink({ items, onCorrect, onWrong, onComplete }: Props) {
+export default function RopeAndLink({ items, timeUp, sidebar, onCorrect, onWrong, onComplete }: Props) {
   const shuffledRight = useMemo(
     () => [...items].sort(() => Math.random() - 0.5),
     [items]
@@ -23,8 +28,7 @@ export default function RopeAndLink({ items, onCorrect, onWrong, onComplete }: P
   const [connections, setConnections] = useState<Connection[]>([]);
   const [draggingFrom, setDraggingFrom] = useState<number | null>(null);
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
-  const [shakeLeft, setShakeLeft] = useState<number | null>(null);
-  const [shakeRight, setShakeRight] = useState<number | null>(null);
+  const [celebrating, setCelebrating] = useState<Set<string>>(new Set()); // item ids that just turned correct
 
   const containerRef = useRef<HTMLDivElement>(null);
   const questionRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -40,6 +44,17 @@ export default function RopeAndLink({ items, onCorrect, onWrong, onComplete }: P
   const totalWrongLinksRef = useRef(0);
   const lastFeedbackTimeRef = useRef<number | null>(null);
   const reviewTimesRef = useRef<number[]>([]);
+  const finishedRef = useRef(false);
+
+  function buildSignals(): BehaviorSignals {
+    return {
+      firstActionDelayMs: firstActionRef.current ? firstActionRef.current - startTimeRef.current : 0,
+      submitCount: submitCountRef.current,
+      wrongSubmitCount: wrongSubmitCountRef.current,
+      totalWrongLinksOrPairs: totalWrongLinksRef.current,
+      reviewTimesMs: reviewTimesRef.current,
+    };
+  }
 
   useEffect(() => {
     startTimeRef.current = Date.now();
@@ -69,16 +84,24 @@ export default function RopeAndLink({ items, onCorrect, onWrong, onComplete }: P
     }
   }
 
-  function isLeftConnected(idx: number) {
-    return connections.some(c => c.leftIndex === idx && c.state !== 'wrong');
-  }
-
   function isRightConnected(idx: number) {
     return connections.some(c => c.rightIndex === idx && c.state !== 'wrong');
   }
 
+  // Remove a not-yet-correct link so the student can redo it.
+  function disconnectLeft(idx: number) {
+    recordFirstAction();
+    setConnections(prev => prev.filter(c => !(c.leftIndex === idx && c.state !== 'correct')));
+  }
+  function disconnectRight(idx: number) {
+    recordFirstAction();
+    setConnections(prev => prev.filter(c => !(c.rightIndex === idx && c.state !== 'correct')));
+  }
+
   function handleQuestionPointerDown(e: React.PointerEvent, idx: number) {
-    if (isLeftConnected(idx)) return;
+    const conn = connections.find(c => c.leftIndex === idx);
+    if (conn?.state === 'correct') return;   // locked once correct
+    if (conn) { disconnectLeft(idx); return; } // pending → tap to undo
     recordFirstAction();
     e.currentTarget.setPointerCapture(e.pointerId);
     setDraggingFrom(idx);
@@ -126,6 +149,7 @@ export default function RopeAndLink({ items, onCorrect, onWrong, onComplete }: P
 
     submitCountRef.current += 1;
     let wrongCount = 0;
+    const newlyCorrectIds: string[] = [];
     const answers: AnswerRecord[] = [];
     const updatedConns: Connection[] = [];
 
@@ -139,9 +163,14 @@ export default function RopeAndLink({ items, onCorrect, onWrong, onComplete }: P
       const newState: Connection['state'] = isCorrect ? 'correct' : 'wrong';
       updatedConns.push({ ...conn, state: newState });
       answers.push({ questionId: items[conn.leftIndex].id, correct: isCorrect });
-      if (!isCorrect) wrongCount++;
+      if (isCorrect) newlyCorrectIds.push(items[conn.leftIndex].id);
+      else wrongCount++;
     });
 
+    if (newlyCorrectIds.length > 0) {
+      setCelebrating(new Set(newlyCorrectIds));
+      setTimeout(() => setCelebrating(new Set()), 2000);
+    }
     totalWrongLinksRef.current += wrongCount;
     if (wrongCount > 0) {
       wrongSubmitCountRef.current += 1;
@@ -155,23 +184,31 @@ export default function RopeAndLink({ items, onCorrect, onWrong, onComplete }: P
     lastFeedbackTimeRef.current = Date.now();
 
     if (wrongCount === 0) {
-      const behavior: BehaviorSummary = {
-        firstActionDelayMs: firstActionRef.current
-          ? firstActionRef.current - startTimeRef.current
-          : 0,
-        submitCount: submitCountRef.current,
-        wrongSubmitCount: wrongSubmitCountRef.current,
-        totalWrongLinksOrPairs: totalWrongLinksRef.current,
-        reviewTimesMs: reviewTimesRef.current,
-      };
-      setTimeout(() => onComplete(answers, behavior), 800);
+      finishedRef.current = true;
+      const signals = buildSignals();
+      setTimeout(() => onComplete(answers, signals), 800);
     }
   }
 
+  // Timeout: grade whatever's currently linked as the final attempt.
+  useEffect(() => {
+    if (!timeUp || finishedRef.current) return;
+    finishedRef.current = true;
+    const finalAnswers: AnswerRecord[] = items.map((item, i) => {
+      const conn = connections.find(c => c.leftIndex === i && c.state !== 'wrong');
+      const correct = !!conn && shuffledRight[conn.rightIndex].id === item.id;
+      return { questionId: item.id, correct };
+    });
+    onComplete(finalAnswers, buildSignals());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeUp]);
+
+  // Pending/wrong stay neutral (no hint during play); CONFIRMED-correct turns
+  // vivid green — that's post-submit feedback, not a during-play cue.
   const ROPE_COLORS: Record<Connection['state'], string> = {
-    pending: '#aaa',
-    correct: '#5cb85c',
-    wrong:   '#d9534f',
+    pending: '#b8a58f',
+    correct: '#10b981',
+    wrong:   '#b8a58f',
   };
 
   const lockedLines = connections.map(conn => {
@@ -187,18 +224,37 @@ export default function RopeAndLink({ items, onCorrect, onWrong, onComplete }: P
   const hasSvgContent = lockedLines.some(l => l !== null) || (dragLine !== null && dragPos !== null);
 
   return (
-    <form className="mode-panel rope-panel" autoComplete="off" onSubmit={e => e.preventDefault()}>
-      <div className="question-progress">
-        Connected: {connections.filter(c => c.state !== 'wrong').length} / {items.length}
+    <form className="mode-layout" autoComplete="off" onSubmit={e => e.preventDefault()}>
+      <div className="mode-side">
+        {sidebar}
+        <div className="question-progress">
+          Connected: {connections.filter(c => c.state !== 'wrong').length} / {items.length}
+        </div>
+        <button
+          type="submit"
+          className="submit-btn"
+          onClick={handleSubmit}
+          disabled={!allConnected}
+        >
+          {allConnected
+            ? <><CheckCircle size={18} weight="fill" /> Submit Answers</>
+            : `Connect all ${items.length} pairs first`}
+        </button>
+        <div className="rope-hint">
+          {draggingFrom !== null
+            ? <><LinkSimple size={15} weight="duotone" /> Drop on the matching definition!</>
+            : <><HandPointing size={15} weight="duotone" /> Drag a term to its match · tap a link to undo</>}
+        </div>
       </div>
 
-      <div
-        ref={containerRef}
-        className="rope-arena"
-        translate="no"
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-      >
+      <div className="mode-board mode-panel rope-panel">
+        <div
+          ref={containerRef}
+          className="rope-arena"
+          translate="no"
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+        >
         {/* Only mount SVG when there are lines to draw — prevents grey blob */}
         {hasSvgContent && (
           <svg
@@ -208,7 +264,7 @@ export default function RopeAndLink({ items, onCorrect, onWrong, onComplete }: P
             height={svgSize.h}
             style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none', overflow: 'visible' }}
           >
-            {lockedLines.map((line, i) =>
+            {lockedLines.map((line) =>
               line ? (
                 <path
                   key={line.key}
@@ -253,11 +309,12 @@ export default function RopeAndLink({ items, onCorrect, onWrong, onComplete }: P
                   conn?.state === 'pending'  ? 'rope-node-pending'  : '',
                   conn?.state === 'wrong'    ? 'rope-node-wrong'    : '',
                   draggingFrom === idx       ? 'rope-node-dragging' : '',
-                  shakeLeft === idx          ? 'rope-shake'         : '',
+                  celebrating.has(item.id)   ? 'celebrating'        : '',
                 ].join(' ')}
                 onPointerDown={e => !isDisabled && handleQuestionPointerDown(e, idx)}
               >
                 {item.term}
+                {celebrating.has(item.id) && <CardBird />}
               </div>
             );
           })}
@@ -268,6 +325,7 @@ export default function RopeAndLink({ items, onCorrect, onWrong, onComplete }: P
           {shuffledRight.map((item, idx) => {
             const conn = connections.find(c => c.rightIndex === idx);
             const isDisabled = conn?.state === 'correct';
+            const isPending = conn?.state === 'pending';
             return (
               <div
                 key={item.id}
@@ -275,34 +333,34 @@ export default function RopeAndLink({ items, onCorrect, onWrong, onComplete }: P
                 role="button"
                 tabIndex={isDisabled ? -1 : 0}
                 aria-disabled={isDisabled}
+                onClick={() => !isDisabled && disconnectRight(idx)}
                 className={[
                   'rope-node rope-node-answer',
                   conn?.state === 'correct' ? 'rope-node-locked'  : '',
                   conn?.state === 'pending' ? 'rope-node-pending' : '',
                   conn?.state === 'wrong'   ? 'rope-node-wrong'   : '',
-                  shakeRight === idx        ? 'rope-shake'        : '',
+                  celebrating.has(item.id)  ? 'celebrating'       : '',
                 ].join(' ')}
               >
                 {item.definition}
+                {isPending && (
+                  <button
+                    type="button"
+                    className="rope-disconnect-btn"
+                    aria-label="Disconnect this rope"
+                    title="Disconnect"
+                    onClick={e => { e.stopPropagation(); disconnectRight(idx); }}
+                  >
+                    ✕
+                  </button>
+                )}
+                {celebrating.has(item.id) && <CardBird />}
               </div>
             );
           })}
         </div>
       </div>
 
-      <button
-        type="submit"
-        className="submit-btn"
-        onClick={handleSubmit}
-        disabled={!allConnected}
-      >
-        {allConnected ? '✅ Submit Answers' : `Connect all ${items.length} pairs first`}
-      </button>
-
-      <div className="rope-hint">
-        {draggingFrom !== null
-          ? '🪢 Drop on the matching definition!'
-          : '👆 Drag from a term to its definition'}
       </div>
     </form>
   );

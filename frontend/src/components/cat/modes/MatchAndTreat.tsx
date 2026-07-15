@@ -1,5 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import type { GameItem, AnswerRecord, BehaviorSummary } from '../../../types/catGame.types';
+import type { ReactNode } from 'react';
+import { CheckCircle, Question, Lightbulb } from '@phosphor-icons/react';
+import type { GameItem, AnswerRecord, BehaviorSignals } from '../../../types/catGame.types';
+import CardBird from '../CardBird';
 
 type Card = {
   id: string;
@@ -12,20 +15,23 @@ type MatchState = 'unmatched' | 'matched' | 'wrong';
 
 type Props = {
   items: GameItem[];
+  timeUp: boolean;
+  sidebar?: ReactNode;
   onCorrect: () => void;
   onWrong: () => void;
-  onComplete: (answers: AnswerRecord[], behavior: BehaviorSummary) => void;
+  onComplete: (answers: AnswerRecord[], signals: BehaviorSignals) => void;
 };
 
 function shuffle<T>(arr: T[]): T[] {
   return [...arr].sort(() => Math.random() - 0.5);
 }
 
-export default function MatchAndTreat({ items, onCorrect, onWrong, onComplete }: Props) {
+export default function MatchAndTreat({ items, timeUp, sidebar, onCorrect, onWrong, onComplete }: Props) {
   const [cards, setCards] = useState<Card[]>([]);
   const [selected, setSelected] = useState<Card | null>(null);
   const [matchStates, setMatchStates] = useState<Record<string, MatchState>>({});
   const [playerPairs, setPlayerPairs] = useState<Record<string, string>>({}); // bidirectional: cardId -> cardId
+  const [celebrating, setCelebrating] = useState<Set<string>>(new Set());     // pairIds that just turned correct
 
   const startTimeRef        = useRef<number>(Date.now());
   const firstActionRef      = useRef<number | null>(null);
@@ -34,6 +40,17 @@ export default function MatchAndTreat({ items, onCorrect, onWrong, onComplete }:
   const totalWrongPairsRef  = useRef(0);
   const lastFeedbackTimeRef = useRef<number | null>(null);
   const reviewTimesRef      = useRef<number[]>([]);
+  const finishedRef         = useRef(false);
+
+  function buildSignals(): BehaviorSignals {
+    return {
+      firstActionDelayMs:     firstActionRef.current ? firstActionRef.current - startTimeRef.current : 0,
+      submitCount:            submitCountRef.current,
+      wrongSubmitCount:       wrongSubmitCountRef.current,
+      totalWrongLinksOrPairs: totalWrongPairsRef.current,
+      reviewTimesMs:          reviewTimesRef.current,
+    };
+  }
 
   useEffect(() => {
     const allCards: Card[] = [];
@@ -101,6 +118,19 @@ export default function MatchAndTreat({ items, onCorrect, onWrong, onComplete }:
     setSelected(null);
   }
 
+  // Break a not-yet-submitted pair (both cards return to unpaired).
+  function unpair(card: Card) {
+    recordFirstAction();
+    const partnerId = playerPairs[card.id];
+    setPlayerPairs(prev => {
+      const next = { ...prev };
+      if (partnerId) delete next[partnerId];
+      delete next[card.id];
+      return next;
+    });
+    if (selected && (selected.id === card.id || selected.id === partnerId)) setSelected(null);
+  }
+
   const termCards = cards.filter(c => c.side === 'term');
   const allPaired = termCards.length > 0 && termCards.every(tc => playerPairs[tc.id] !== undefined);
 
@@ -124,6 +154,15 @@ export default function MatchAndTreat({ items, onCorrect, onWrong, onComplete }:
     });
 
     totalWrongPairsRef.current += wrongCount;
+
+    const newlyCorrectIds = termCards
+      .filter(tc => newMatchStates[tc.pairId] === 'matched' && matchStates[tc.pairId] !== 'matched')
+      .map(tc => tc.pairId);
+    if (newlyCorrectIds.length > 0) {
+      setCelebrating(new Set(newlyCorrectIds));
+      setTimeout(() => setCelebrating(new Set()), 2000);
+    }
+
     if (wrongCount > 0) {
       wrongSubmitCountRef.current += 1;
       onWrong();
@@ -146,24 +185,50 @@ export default function MatchAndTreat({ items, onCorrect, onWrong, onComplete }:
     lastFeedbackTimeRef.current = Date.now();
 
     if (wrongCount === 0) {
-      const behavior: BehaviorSummary = {
-        firstActionDelayMs:     firstActionRef.current ? firstActionRef.current - startTimeRef.current : 0,
-        submitCount:            submitCountRef.current,
-        wrongSubmitCount:       wrongSubmitCountRef.current,
-        totalWrongLinksOrPairs: totalWrongPairsRef.current,
-        reviewTimesMs:          reviewTimesRef.current,
-      };
-      setTimeout(() => onComplete(answers, behavior), 800);
+      finishedRef.current = true;
+      const signals = buildSignals();
+      setTimeout(() => onComplete(answers, signals), 800);
     }
   }
 
+  // Timeout: grade whatever's currently on the board as the final attempt.
+  useEffect(() => {
+    if (!timeUp || finishedRef.current) return;
+    finishedRef.current = true;
+    const finalAnswers: AnswerRecord[] = termCards.map(tc => ({
+      questionId: tc.pairId,
+      correct: playerPairs[tc.id] === `${tc.pairId}-D`,
+    }));
+    onComplete(finalAnswers, buildSignals());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeUp]);
+
   return (
-    <form className="mode-panel" autoComplete="off" onSubmit={e => e.preventDefault()}>
-      <div className="question-progress">
-        Pairs connected: {termCards.filter(tc => playerPairs[tc.id]).length} / {termCards.length}
+    <form className="mode-layout" autoComplete="off" onSubmit={e => e.preventDefault()}>
+      <div className="mode-side">
+        {sidebar}
+        <div className="question-progress">
+          Pairs connected: {termCards.filter(tc => playerPairs[tc.id]).length} / {termCards.length}
+        </div>
+        <button
+          type="submit"
+          className="submit-btn"
+          onClick={handleSubmit}
+          disabled={!allPaired}
+        >
+          {allPaired
+            ? <><CheckCircle size={18} weight="fill" /> Submit Answers</>
+            : `Pair all ${termCards.length} items first`}
+        </button>
+        <div className="match-hint">
+          {selected
+            ? `Selected: "${selected.text}" — now click its match`
+            : 'Click any card, then click its match'}
+        </div>
       </div>
 
-      <div className="match-grid" translate="no">
+      <div className="mode-board mode-panel">
+        <div className="match-grid" translate="no">
         {cards.map(card => {
           const state     = matchStates[card.pairId] ?? 'unmatched';
           const isMatched = state === 'matched';
@@ -176,10 +241,11 @@ export default function MatchAndTreat({ items, onCorrect, onWrong, onComplete }:
               aria-disabled={isMatched}
               className={[
                 'match-card',
-                isMatched                 ? 'matched'       : '',
-                state === 'wrong'         ? 'wrong-pair'    : '',
-                selected?.id === card.id  ? 'selected'      : '',
-                isPaired && !isMatched    ? 'paired-pending': '',
+                isMatched                    ? 'matched'       : '',
+                state === 'wrong'            ? 'wrong-pair'    : '',
+                selected?.id === card.id     ? 'selected'      : '',
+                isPaired && !isMatched       ? 'paired-pending': '',
+                celebrating.has(card.pairId) ? 'celebrating'   : '',
               ].filter(Boolean).join(' ')}
               onClick={() => !isMatched && handleCardClick(card)}
               onKeyDown={e => {
@@ -187,25 +253,34 @@ export default function MatchAndTreat({ items, onCorrect, onWrong, onComplete }:
                 if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCardClick(card); }
               }}
             >
-              {isMatched ? '✅ ' : ''}{card.text}
+              <span className="match-card-watermark" aria-hidden="true">
+                {card.side === 'term'
+                  ? <Question size={34} weight="duotone" />
+                  : <Lightbulb size={34} weight="duotone" />}
+              </span>
+              <span className="match-card-text">
+                {isMatched && <CheckCircle size={15} weight="fill" className="match-card-check" />}
+                {card.text}
+              </span>
+              {isPaired && !isMatched && (
+                <button
+                  type="button"
+                  className="match-remove-btn"
+                  aria-label="Un-pair this card"
+                  title="Un-pair"
+                  onPointerDown={e => e.stopPropagation()}
+                  onKeyDown={e => e.stopPropagation()}
+                  onClick={e => { e.stopPropagation(); unpair(card); }}
+                >
+                  ✕
+                </button>
+              )}
+              {celebrating.has(card.pairId) && <CardBird />}
             </div>
           );
         })}
       </div>
 
-      <button
-        type="submit"
-        className="submit-btn"
-        onClick={handleSubmit}
-        disabled={!allPaired}
-      >
-        {allPaired ? '✅ Submit Answers' : `Pair all ${termCards.length} items first`}
-      </button>
-
-      <div className="match-hint">
-        {selected
-          ? `Selected: "${selected.text}" — now click its match`
-          : 'Click any card, then click its match'}
       </div>
     </form>
   );

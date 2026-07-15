@@ -10,6 +10,7 @@ import Batches from './pages/Batches'
 import Email from './pages/Email'
 import CatGamePage from './pages/CatGamePage'
 import CatThemePickerPage from './pages/CatThemePickerPage'
+import CatPreviewPage from './pages/CatPreviewPage'
 import PlayEntryPage from './pages/PlayEntryPage'
 
 export default function App() {
@@ -26,6 +27,7 @@ export default function App() {
 
         {/* ─── Dev/preview routes ─── */}
         <Route path="/cat-themes" element={<CatThemePickerPage />} />
+        <Route path="/play-preview" element={<CatPreviewPage />} />
 
         {/* ─── Teacher app (protected + layout) ─── */}
         <Route element={<ProtectedRoute />}>

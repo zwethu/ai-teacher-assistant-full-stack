@@ -11,7 +11,7 @@ import {
   increment,
   updateDoc,
 } from 'firebase/firestore';
-import type { GameSession, PlayerProfile, AttemptResult, GameMode } from '../types/catGame.types';
+import type { GameSession, PlayerProfile, AttemptResult, StoredAttempt, GameMode } from '../types/catGame.types';
 
 // ─── Game Session ───────────────────────────────────────────────
 
@@ -62,6 +62,19 @@ export async function hasAttempted(
   const ref = doc(db, 'attempts', attemptId);
   const snap = await getDoc(ref);
   return snap.exists();
+}
+
+// Reads back a saved attempt so a student can re-issue their certificate
+// (e.g. they lost the PNG). Returns null if they never played.
+export async function getAttempt(
+  assessmentId: string,
+  playerUid: string
+): Promise<StoredAttempt | null> {
+  const attemptId = `${assessmentId}_${playerUid}`;
+  const ref = doc(db, 'attempts', attemptId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return null;
+  return { id: snap.id, ...snap.data() } as StoredAttempt;
 }
 
 export async function saveAttempt(result: AttemptResult): Promise<void> {

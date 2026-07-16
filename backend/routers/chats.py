@@ -2,18 +2,20 @@
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field, ValidationError
 
 from entity.CourseBlueprint import CourseBlueprintContent
-from services.agent_gateway import start_chat_run
+from services.agent_gateway import render_email_preview_markdown, start_chat_run
 from services.course_blueprint_service import save_blueprint_from_content
 from services.agent_sessions import (
     claim_pending_artifact_export,
     get_agent_run,
     invalidate_latest_outline_for_followup,
+    mark_agent_run_pending_artifact,
     mark_agent_run_pending_artifact_export_failed,
     mark_agent_run_pending_artifact_exported,
     persist_agent_run_timeline,
@@ -26,12 +28,18 @@ from services.artifact_service import (
     save_pending_artifact_as_draft,
 )
 from services.batch_service import get_batch
+from services.email_dispatch import (
+    EmailDispatchError,
+    schedule_pending_email,
+    send_pending_email_now,
+)
 from services.chat_service import (
     create_chat,
     delete_chat,
     get_chat,
     list_chats,
     list_messages,
+    update_assistant_message_content_for_run,
     update_assistant_message_metadata_for_run,
     update_chat_title,
 )
@@ -71,6 +79,18 @@ class CreateChatBody(BaseModel):
     type: str = "chat"
     workflow_type: str = ""
     hidden: bool = False
+
+
+class SchedulePendingEmailRequest(BaseModel):
+    send_at: datetime
+
+
+class UpdatePendingEmailBody(BaseModel):
+    """Lecturer edits to a staged email. Omitting recipients keeps the resolved list."""
+
+    subject: str
+    body: str
+    recipients: list[str] | None = None
 
 
 class ConnectorState(BaseModel):
@@ -725,3 +745,273 @@ async def export_pending_quiz_to_google_form_endpoint(
         phase="export", batch_id=batch_id, chat_id=chat_id,
     )
     return {**result, "artifact_id": artifact_id, "artifact_type": "quiz"}
+
+
+def _claim_pending_email(batch_id: str, chat_id: str, run_id: str, lecturer_id: str):
+    """Claim + validate the pending email staged for a run.
+
+    Returns ``(early, pending, content, export_lock_id, mark_failed)``. When ``early``
+    is not None the caller must return it immediately (the email was already
+    sent/scheduled on a prior request — idempotent replay). Otherwise ``content`` is
+    the validated ``{recipients, subject, body}`` dict and ``mark_failed(error)``
+    releases the export lock and emits a failure event.
+    """
+    try:
+        claim = claim_pending_artifact_export(
+            batch_id=batch_id, chat_id=chat_id, run_id=run_id, lecturer_id=lecturer_id,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found") from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    pending = claim["pending_artifact"]
+    export_lock_id = str(claim.get("export_lock_id") or "")
+    if claim["state"] == "already_exported":
+        result = pending.get("export_result")
+        early = result if isinstance(result, dict) else {"success": True}
+        return early, pending, None, export_lock_id, None
+    if claim["state"] == "in_progress":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email action already in progress.",
+        )
+
+    def mark_failed(error: str) -> None:
+        mark_agent_run_pending_artifact_export_failed(
+            batch_id=batch_id, chat_id=chat_id, run_id=run_id,
+            error=error, export_lock_id=export_lock_id,
+        )
+        write_run_event(
+            run_id, event_type="email.failed", kind="error", status="failed",
+            title="Email action failed", phase="email",
+            detail={"error": error[:500]}, batch_id=batch_id, chat_id=chat_id,
+        )
+
+    if str(pending.get("artifact_type") or "") != "email":
+        mark_failed("Pending artifact is not an email")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pending artifact is not an email")
+    if str(pending.get("status") or "") != "exporting":
+        mark_failed("Pending email is not sendable")
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Pending email is not sendable")
+
+    content = pending.get("content_json")
+    recipients = content.get("recipients") if isinstance(content, dict) else None
+    if not isinstance(content, dict) or not recipients:
+        mark_failed("Pending email content is missing")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pending email content is missing")
+
+    expected_hash = str(pending.get("content_hash") or "")
+    actual_hash = content_hash(content)
+    if expected_hash and expected_hash != actual_hash:
+        mark_failed("Pending email content hash mismatch")
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Pending email content hash mismatch")
+
+    return None, pending, content, export_lock_id, mark_failed
+
+
+@router.patch("/{chat_id}/runs/{run_id}/pending-artifact/email", response_model=dict)
+async def update_pending_email_endpoint(
+    batch_id: str,
+    chat_id: str,
+    run_id: str,
+    body: UpdatePendingEmailBody,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Edit the email staged for this run before it is sent.
+
+    Rewrites content_json and its hash together so the unchanged send/schedule
+    endpoints validate cleanly. Only a draft that has not been claimed for sending
+    can be edited — once claimed (status "exporting") or sent, the run is immutable.
+    """
+    lecturer_id: str = current_user["uid"]
+    run = get_agent_run(
+        batch_id=batch_id, chat_id=chat_id, run_id=run_id, lecturer_id=lecturer_id
+    )
+    if run is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+
+    pending = run.get("pending_artifact")
+    if not isinstance(pending, dict):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No pending email for this run")
+    if str(pending.get("artifact_type") or "") != "email":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pending artifact is not an email")
+    if str(pending.get("status") or "") != "pending_export":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This email can no longer be edited — it is already being sent or has been sent.",
+        )
+
+    existing_content = pending.get("content_json")
+    existing_recipients = (
+        existing_content.get("recipients") if isinstance(existing_content, dict) else None
+    ) or []
+    recipients = [r.strip() for r in (body.recipients or existing_recipients) if r and r.strip()]
+    if not recipients:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one recipient is required")
+
+    subject = body.subject.strip()
+    text = body.body.strip()
+    if not subject or not text:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Subject and body are required")
+
+    content = {"recipients": recipients, "subject": subject, "body": text}
+    preview_markdown = render_email_preview_markdown(recipients, subject, text)
+    updated = {
+        **pending,
+        "content_json": content,
+        "content_hash": content_hash(content),
+        "title": subject,
+        "preview_markdown": preview_markdown,
+        "edited_by_lecturer": True,
+    }
+    mark_agent_run_pending_artifact(
+        batch_id=batch_id, chat_id=chat_id, run_id=run_id, pending_artifact=updated
+    )
+    # Keep the rendered card in step with what will actually be sent.
+    update_assistant_message_content_for_run(
+        batch_id=batch_id,
+        chat_id=chat_id,
+        run_id=run_id,
+        content=preview_markdown,
+        metadata={
+            "pending_artifact_content_hash": updated["content_hash"],
+            "artifact_title": subject,
+            "email_subject": subject,
+            "email_body": text,
+            "email_recipients": recipients,
+            "email_recipient_count": len(recipients),
+        },
+    )
+    return {
+        "success": True,
+        "subject": subject,
+        "body": text,
+        "recipients": recipients,
+        "recipient_count": len(recipients),
+        "preview_markdown": preview_markdown,
+    }
+
+
+@router.post("/{chat_id}/runs/{run_id}/pending-artifact/send-email", response_model=dict)
+async def send_pending_email_endpoint(
+    batch_id: str,
+    chat_id: str,
+    run_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Send the email staged for this run immediately via Gmail (teacher-confirmed)."""
+    lecturer_id: str = current_user["uid"]
+    early, pending, content, export_lock_id, mark_failed = _claim_pending_email(
+        batch_id, chat_id, run_id, lecturer_id
+    )
+    if early is not None:
+        return early
+
+    recipients = [str(r) for r in content["recipients"]]
+    subject = str(content.get("subject") or "")
+    body = str(content.get("body") or "")
+
+    write_run_event(
+        run_id, event_type="email.started", status="started", title="Sending email",
+        phase="email", batch_id=batch_id, chat_id=chat_id,
+    )
+    try:
+        assert_google_oauth_valid(lecturer_id, ["gmail.send"])
+        result = send_pending_email_now(
+            uid=lecturer_id, recipients=recipients, subject=subject, body=body,
+            source_run_id=run_id,
+        )
+    except (GoogleOAuthRequiredError, GoogleOAuthInvalidError) as exc:
+        mark_failed(str(exc))
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=GOOGLE_OAUTH_REQUIRED_DETAIL) from exc
+    except EmailDispatchError as exc:
+        mark_failed(str(exc))
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("pending email send failed run_id=%s", run_id)
+        mark_failed(str(exc))
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to send email") from exc
+
+    export_result = {"action": "sent", **result}
+    mark_agent_run_pending_artifact_exported(
+        batch_id=batch_id, chat_id=chat_id, run_id=run_id,
+        pending_artifact={**pending, "status": "exported", "export_result": export_result},
+    )
+    write_run_event(
+        run_id, event_type="email.done", status="done", title="Email sent", phase="email",
+        detail={"sent": result["sent_count"], "failed": result["failed_count"]},
+        batch_id=batch_id, chat_id=chat_id,
+    )
+    update_assistant_message_metadata_for_run(
+        batch_id=batch_id, chat_id=chat_id, run_id=run_id,
+        metadata={
+            "pending_email_sendable": False,
+            "email_sent": True,
+            "email_sent_count": result["sent_count"],
+            "email_failed_count": result["failed_count"],
+        },
+    )
+    return {"success": True, **result}
+
+
+@router.post("/{chat_id}/runs/{run_id}/pending-artifact/schedule-email", response_model=dict)
+async def schedule_pending_email_endpoint(
+    batch_id: str,
+    chat_id: str,
+    run_id: str,
+    body: SchedulePendingEmailRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Schedule the staged email for a future time (drained by the send cron)."""
+    lecturer_id: str = current_user["uid"]
+
+    send_at = body.send_at
+    if send_at.tzinfo is None:
+        send_at = send_at.replace(tzinfo=timezone.utc)
+    if send_at <= datetime.now(timezone.utc):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Scheduled time must be in the future.")
+
+    early, pending, content, export_lock_id, mark_failed = _claim_pending_email(
+        batch_id, chat_id, run_id, lecturer_id
+    )
+    if early is not None:
+        return early
+
+    recipients = [str(r) for r in content["recipients"]]
+    subject = str(content.get("subject") or "")
+    body_text = str(content.get("body") or "")
+
+    try:
+        assert_google_oauth_valid(lecturer_id, ["gmail.send"])
+        result = schedule_pending_email(
+            uid=lecturer_id, recipients=recipients, subject=subject, body=body_text,
+            send_at=send_at, source_run_id=run_id,
+        )
+    except (GoogleOAuthRequiredError, GoogleOAuthInvalidError) as exc:
+        mark_failed(str(exc))
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=GOOGLE_OAUTH_REQUIRED_DETAIL) from exc
+    except Exception as exc:
+        logger.exception("pending email schedule failed run_id=%s", run_id)
+        mark_failed(str(exc))
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to schedule email") from exc
+
+    export_result = {"action": "scheduled", **result}
+    mark_agent_run_pending_artifact_exported(
+        batch_id=batch_id, chat_id=chat_id, run_id=run_id,
+        pending_artifact={**pending, "status": "exported", "export_result": export_result},
+    )
+    write_run_event(
+        run_id, event_type="email.scheduled", status="done", title="Email scheduled", phase="email",
+        detail={"send_at": result["send_at"], "recipients": result["recipient_count"]},
+        batch_id=batch_id, chat_id=chat_id,
+    )
+    update_assistant_message_metadata_for_run(
+        batch_id=batch_id, chat_id=chat_id, run_id=run_id,
+        metadata={
+            "pending_email_sendable": False,
+            "email_scheduled": True,
+            "email_send_at": result["send_at"],
+        },
+    )
+    return {"success": True, **result}

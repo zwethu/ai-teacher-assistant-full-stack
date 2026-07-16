@@ -24,6 +24,7 @@ import {
   orderBy,
   query,
   serverTimestamp,
+  Timestamp,
   where,
 } from 'firebase/firestore'
 import { db } from '../lib/firebase'
@@ -228,9 +229,8 @@ export default function Email() {
           return
         }
 
-        await addDoc(
-          collection(db, 'emails'),
-          toFirestore({
+        await addDoc(collection(db, 'emails'), {
+          ...toFirestore({
             uid: user.uid,
             to: payload.to,
             subject: payload.subject,
@@ -239,7 +239,10 @@ export default function Email() {
             sendAt: sendDate.toISOString(),
             createdAt: serverTimestamp(),
           }),
-        )
+          // The send cron (check_and_send_emails) filters on send_at as a Firestore
+          // Timestamp; the camelCase sendAt above is only for the card's display.
+          send_at: Timestamp.fromDate(sendDate),
+        })
 
         closeModal()
         showToast('success', 'Email scheduled successfully')

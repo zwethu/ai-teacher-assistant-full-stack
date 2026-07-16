@@ -28,6 +28,14 @@
         {"fieldPath": "type", "order": "ASCENDING"},
         {"fieldPath": "updated_at", "order": "ASCENDING"}
       ]
+    },
+    {
+      "collectionGroup": "emails",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "status", "order": "ASCENDING"},
+        {"fieldPath": "send_at", "order": "ASCENDING"}
+      ]
     }
   ],
   "fieldOverrides": [

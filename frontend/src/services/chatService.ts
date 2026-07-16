@@ -153,3 +153,65 @@ export async function exportPendingQuizToGoogleForms(
   )
   return res.data
 }
+
+export interface SendPendingEmailResult {
+  success?: boolean
+  sent_count: number
+  failed_count: number
+  recipients: string[]
+  failed: { to: string; error: string }[]
+}
+
+export async function sendPendingEmail(
+  batchId: string,
+  chatId: string,
+  runId: string,
+): Promise<SendPendingEmailResult> {
+  const res = await api.post<SendPendingEmailResult>(
+    `/batches/${batchId}/chats/${chatId}/runs/${runId}/pending-artifact/send-email`,
+  )
+  return res.data
+}
+
+export interface SchedulePendingEmailResult {
+  success?: boolean
+  email_id: string
+  recipient_count: number
+  send_at: string
+}
+
+export async function schedulePendingEmail(
+  batchId: string,
+  chatId: string,
+  runId: string,
+  sendAtIso: string,
+): Promise<SchedulePendingEmailResult> {
+  const res = await api.post<SchedulePendingEmailResult>(
+    `/batches/${batchId}/chats/${chatId}/runs/${runId}/pending-artifact/schedule-email`,
+    { send_at: sendAtIso },
+  )
+  return res.data
+}
+
+export interface UpdatePendingEmailResult {
+  success: boolean
+  subject: string
+  body: string
+  recipients: string[]
+  recipient_count: number
+  preview_markdown: string
+}
+
+/** Edit a staged email before sending. Only valid until it is sent or scheduled. */
+export async function updatePendingEmail(
+  batchId: string,
+  chatId: string,
+  runId: string,
+  payload: { subject: string; body: string; recipients?: string[] },
+): Promise<UpdatePendingEmailResult> {
+  const res = await api.patch<UpdatePendingEmailResult>(
+    `/batches/${batchId}/chats/${chatId}/runs/${runId}/pending-artifact/email`,
+    payload,
+  )
+  return res.data
+}

@@ -54,20 +54,33 @@ def check_and_send_emails() -> None:
                 )
                 continue
 
-            to = data.get("to")
             subject = data.get("subject")
             body = data.get("body")
-            if not to or not subject or not body:
+            # Chat-staged batch emails carry a `recipients` list (one send per
+            # recipient, no roster disclosure); standalone emails carry a single `to`.
+            recipients_raw = data.get("recipients")
+            if isinstance(recipients_raw, list) and recipients_raw:
+                recipients = [str(r) for r in recipients_raw if str(r).strip()]
+            else:
+                to = data.get("to")
+                recipients = [str(to)] if to else []
+            if not recipients or not subject or not body:
                 logger.warning(
-                    "Email %s missing to/subject/body; skipping", doc.id
+                    "Email %s missing recipients/subject/body; skipping", doc.id
                 )
                 continue
 
-            send_email(refresh_token, str(to), str(subject), str(body))
+            for recipient in recipients:
+                send_email(refresh_token, recipient, str(subject), str(body))
 
             sent_at = datetime.now(timezone.utc)
-            doc.reference.update({"status": "sent", "sent_at": sent_at})
-            logger.info("Sent scheduled email %s to %s", doc.id, to)
+            # Both casings: snake_case for the backend, camelCase for the Email page.
+            doc.reference.update(
+                {"status": "sent", "sent_at": sent_at, "sentAt": sent_at}
+            )
+            logger.info(
+                "Sent scheduled email %s to %d recipient(s)", doc.id, len(recipients)
+            )
         except GmailSendError as exc:
             logger.error("Failed to send email %s: %s", doc.id, exc)
         except Exception as exc:

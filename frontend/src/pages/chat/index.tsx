@@ -8,10 +8,7 @@ export default function Chat() {
   return (
     <ChatErrorBoundary>
       <ChatLayout
-        batches={state.batches}
-        batchesLoading={state.batchesLoading}
         selectedBatch={state.selectedBatch}
-        setSelectedBatch={state.setSelectedBatch}
         activeChat={state.activeChat}
         messages={state.messages}
         messagesLoading={state.messagesLoading}
@@ -42,6 +39,14 @@ export default function Chat() {
         removeReferencedAttachment={state.removeReferencedAttachment}
         handleComposerPaste={state.handleComposerPaste}
         handleAskAboutAttachment={state.handleAskAboutAttachment}
+        renamingId={state.renamingId}
+        renameValue={state.renameValue}
+        setRenameValue={state.setRenameValue}
+        renameInputRef={state.renameInputRef}
+        startRename={state.startRename}
+        commitRename={state.commitRename}
+        cancelRename={state.cancelRename}
+        handleDeleteChat={state.handleDeleteChat}
       />
     </ChatErrorBoundary>
   )

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { createRef, type ComponentProps } from 'react'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ChatInput } from './ChatConversation'
@@ -38,8 +38,8 @@ function renderInput(overrides: Partial<ComponentProps<typeof ChatInput>> = {}) 
     onSend: vi.fn(), connectors: { web_search: true }, onConnectorsChange: vi.fn(),
     activeGenerateMode: null, onSelectGenerateMode: vi.fn(), onClearGenerateMode: vi.fn(),
     pendingAttachments: [imageAttachment], referencedAttachments: [], attachmentsUploading: false,
-    attachmentErrors: [], onAttachmentFiles: vi.fn(), onRemoveAttachment: vi.fn(),
-    onReferenceAttachment: vi.fn(), onRemoveReferenced: vi.fn(),
+    attachmentErrors: [],     onAttachmentFiles: vi.fn(), onRemoveAttachment: vi.fn(),
+    onRemoveReferenced: vi.fn(),
     onPaste: vi.fn(),
     ...overrides,
   }
@@ -95,26 +95,18 @@ describe('chat attachment composer', () => {
     expect((screen.getByRole('button', { name: 'Attach files' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it('lists safe previous attachments and references one as a chip (no textarea dump)', async () => {
-    listChatAttachments.mockResolvedValueOnce([{
-      attachment_id: 'doc-1', message_id: 'message-1', file_name: 'week-one.pdf',
-      file_title: 'Week one', content_type: 'application/pdf', size_bytes: 2048,
-      attachment_kind: 'document', status: 'ready', token_estimate: 516,
-      parse_status: 'ready', vision_status: 'skipped',
-      vision_source: 'none', thumbnail_available: false, created_at: '2026-01-01T00:00:00Z',
-      expires_at: '2026-02-01T00:00:00Z',
-      rag_status: 'ready', chunk_status: 'ready', embedding_status: 'skipped',
-      semantic_search_ready: false, chunk_count: 2, indexed_chars: 2048,
-      ocr_status: 'not_needed', rag_updated_at: '2026-01-01T00:00:00Z',
-    }])
-    const props = renderInput({ batchId: 'batch-1', chatId: 'chat-1', pendingAttachments: [] })
+  it('opens the files panel from Previous attachments instead of an inline popover', () => {
+    const onOpenFilesPanel = vi.fn()
+    renderInput({
+      batchId: 'batch-1',
+      chatId: 'chat-1',
+      pendingAttachments: [],
+      onOpenFilesPanel,
+    })
     fireEvent.click(screen.getByRole('button', { name: /Previous attachments/ }))
-    await waitFor(() => expect(screen.getByText('Week one')).toBeTruthy())
-    expect(screen.getByText(/available in this chat for 7 days/)).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Reference' }))
-    expect(props.onReferenceAttachment).toHaveBeenCalledWith(expect.objectContaining({ attachment_id: 'doc-1' }))
-    expect(props.onInputChange).not.toHaveBeenCalled()
-    expect(screen.queryByText(/gs:\/\//)).toBeNull()
+    expect(onOpenFilesPanel).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText(/available in this chat for 7 days/)).toBeNull()
+    expect(listChatAttachments).not.toHaveBeenCalled()
   })
 
   it('shows native processing state without storage paths', () => {

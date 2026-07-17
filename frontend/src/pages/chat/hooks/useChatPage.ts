@@ -1176,10 +1176,33 @@ export function useChatPage() {
   }
 
   function handleAskAboutAttachment(attachment: ChatAttachmentSnapshot) {
-    const text = attachment.attachment_kind === 'image'
-      ? `What is this image about? Attachment ID: ${attachment.attachment_id}`
-      : `Please summarize this file. Attachment ID: ${attachment.attachment_id}`
-    setInput(text)
+    // Reference the earlier attachment as a chip (like the side-panel "Reference"
+    // action) rather than dumping raw "Attachment ID: …" text into the composer.
+    // The id mention is appended for the agent at send time (see the message build),
+    // and MessageRow strips it so the sent message also renders a chip.
+    const referenced: ChatAttachmentListItem = {
+      ...attachment,
+      message_id: '',
+      rag_status: 'skipped',
+      chunk_status: 'skipped',
+      embedding_status: 'skipped',
+      semantic_search_ready: false,
+      chunk_count: 0,
+      indexed_chars: 0,
+      ocr_status: 'not_needed',
+      rag_updated_at: null,
+      vision_source: 'none',
+      created_at: null,
+      expires_at: null,
+    }
+    referencePreviousAttachment(referenced)
+    setInput((prev) =>
+      prev.trim()
+        ? prev
+        : attachment.attachment_kind === 'image'
+          ? 'What is this image about?'
+          : 'Please summarize this file.',
+    )
     requestAnimationFrame(() => textareaRef.current?.focus())
   }
 

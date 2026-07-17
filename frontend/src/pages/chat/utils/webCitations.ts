@@ -265,3 +265,19 @@ export function citationRemarkPlugin(sourceByIndex: Map<number, WebSourceMetadat
     visit(tree)
   }
 }
+
+/** Unique web sources across chat messages, first-seen title/domain wins. */
+export function collectUniqueChatWebLinks(
+  messages: Array<{ role?: string; metadata?: Record<string, unknown> }>,
+): WebSourceMetadata[] {
+  const byUrl = new Map<string, WebSourceMetadata>()
+  for (const message of messages) {
+    if (message.role && message.role !== 'assistant') continue
+    for (const source of normalizeWebSources(message.metadata)) {
+      const key = source.url.trim()
+      if (!key || byUrl.has(key)) continue
+      byUrl.set(key, source)
+    }
+  }
+  return Array.from(byUrl.values())
+}

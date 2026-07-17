@@ -1,15 +1,14 @@
+import { useCallback, useState } from 'react'
 import { Sparkles } from 'lucide-react'
 import type { ChatPageState } from '../hooks/useChatPage'
-import { BatchSelectorBar } from './BatchSelectorBar'
 import { ChatInput, ChatMessagesPanel } from './ChatConversation'
+import { ChatPageHeader } from './ChatPageHeader'
+import { ChatSidePanel, type ChatSidePanelSection } from './ChatSidePanel'
 import { ChatWelcomeScreen } from './ChatWelcomeScreen'
 
 type Props = Pick<
   ChatPageState,
-  | 'batches'
-  | 'batchesLoading'
   | 'selectedBatch'
-  | 'setSelectedBatch'
   | 'activeChat'
   | 'messages'
   | 'messagesLoading'
@@ -40,14 +39,19 @@ type Props = Pick<
   | 'removeReferencedAttachment'
   | 'handleComposerPaste'
   | 'handleAskAboutAttachment'
+  | 'renamingId'
+  | 'renameValue'
+  | 'setRenameValue'
+  | 'renameInputRef'
+  | 'startRename'
+  | 'commitRename'
+  | 'cancelRename'
+  | 'handleDeleteChat'
 >
 
 export function ChatLayout(props: Props) {
   const {
-    batches,
-    batchesLoading,
     selectedBatch,
-    setSelectedBatch,
     activeChat,
     messages,
     messagesLoading,
@@ -78,9 +82,36 @@ export function ChatLayout(props: Props) {
     removeReferencedAttachment,
     handleComposerPaste,
     handleAskAboutAttachment,
+    renamingId,
+    renameValue,
+    setRenameValue,
+    renameInputRef,
+    startRename,
+    commitRename,
+    cancelRename,
+    handleDeleteChat,
   } = props
 
+  const [sidePanelOpen, setSidePanelOpen] = useState(false)
+  const [sidePanelSection, setSidePanelSection] = useState<ChatSidePanelSection | null>(null)
   const isRouteInvalid = routeHydration === 'invalid'
+
+  const openSidePanel = useCallback((section: ChatSidePanelSection | null = null) => {
+    setSidePanelSection(section)
+    setSidePanelOpen(true)
+  }, [])
+
+  const closeSidePanel = useCallback(() => {
+    setSidePanelOpen(false)
+  }, [])
+
+  const handleReferenceFromPanel = useCallback(
+    (item: Parameters<typeof referencePreviousAttachment>[0]) => {
+      referencePreviousAttachment(item)
+      requestAnimationFrame(() => textareaRef.current?.focus())
+    },
+    [referencePreviousAttachment, textareaRef],
+  )
 
   return (
     <div className="absolute inset-0 flex flex-col overflow-hidden">
@@ -90,6 +121,21 @@ export function ChatLayout(props: Props) {
       </div>
 
       <div className="relative z-0 flex flex-col flex-1 min-h-0">
+        <ChatPageHeader
+          selectedBatch={selectedBatch}
+          activeChat={activeChat}
+          renamingId={renamingId}
+          renameValue={renameValue}
+          renameInputRef={renameInputRef}
+          onRenameValueChange={setRenameValue}
+          onStartRename={startRename}
+          onCommitRename={() => void commitRename()}
+          onCancelRename={cancelRename}
+          onDeleteChat={(chat) => void handleDeleteChat(chat)}
+          onOpenPanel={() => openSidePanel(null)}
+          panelOpen={sidePanelOpen}
+        />
+
         {!selectedBatch ? (
           <main className="flex-1 overflow-y-auto">
             <div className="max-w-3xl mx-auto px-4 py-8 min-h-full flex flex-col items-center justify-center text-center">
@@ -98,7 +144,7 @@ export function ChatLayout(props: Props) {
               </div>
               <h2 className="text-2xl font-semibold text-slate-800 mb-2">AI Teaching Assistant</h2>
               <p className="text-slate-500 text-sm max-w-sm">
-                Select a batch below to start chatting about lesson plans, assessments, and more.
+                Open a space from Batches or Sessions to start chatting about lesson plans, assessments, and more.
               </p>
             </div>
           </main>
@@ -145,13 +191,6 @@ export function ChatLayout(props: Props) {
         )}
 
         <div className="z-20 flex flex-col flex-shrink-0 bg-transparent">
-          <BatchSelectorBar
-            batches={batches}
-            batchesLoading={batchesLoading}
-            selectedBatch={selectedBatch}
-            onSelectBatch={setSelectedBatch}
-          />
-
           <ChatInput
             input={input}
             sending={sending}
@@ -166,21 +205,33 @@ export function ChatLayout(props: Props) {
             onSelectGenerateMode={setActiveGenerateMode}
             onClearGenerateMode={() => setActiveGenerateMode(null)}
             connectors={connectors}
-            onConnectorsChange={(key, value) => setConnectors(prev => ({ ...prev, [key]: value }))}
+            onConnectorsChange={(key, value) => setConnectors((prev) => ({ ...prev, [key]: value }))}
             pendingAttachments={pendingAttachments}
             referencedAttachments={referencedAttachments}
             attachmentsUploading={attachmentsUploading}
             attachmentErrors={attachmentErrors}
             onAttachmentFiles={handleAttachmentFiles}
             onRemoveAttachment={removePendingAttachment}
-            onReferenceAttachment={referencePreviousAttachment}
             onRemoveReferenced={removeReferencedAttachment}
             onPaste={handleComposerPaste}
             batchId={selectedBatch?.id}
             chatId={activeChat?.chat_id}
+            onOpenFilesPanel={() => openSidePanel('files')}
           />
         </div>
       </div>
+
+      {selectedBatch && activeChat && (
+        <ChatSidePanel
+          open={sidePanelOpen}
+          onClose={closeSidePanel}
+          batchId={selectedBatch.id}
+          chatId={activeChat.chat_id}
+          messages={messages}
+          initialSection={sidePanelSection}
+          onReferenceAttachment={handleReferenceFromPanel}
+        />
+      )}
     </div>
   )
 }

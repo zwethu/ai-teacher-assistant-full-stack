@@ -18,8 +18,11 @@ import {
   Image as ImageIcon,
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
-import rehypeSanitize from 'rehype-sanitize'
+import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
+import rehypeKatex from 'rehype-katex'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import 'katex/dist/katex.min.css'
 import type { ChatAttachmentSnapshot, ChatMessage } from '../../../entity/Chat'
 import { startGoogleOAuth } from '../../../services/authService'
 import { exportPendingQuizToGoogleForms, generateDocsFromPendingArtifact } from '../../../services/chatService'
@@ -33,6 +36,7 @@ import {
 } from '../../../services/artifactService'
 import type { RunUiState } from '../runTypes'
 import { splitSourcesSection } from '../utils/splitSourcesSection'
+import { SourceFavicon } from './SourceFavicon'
 import {
   citationRemarkPlugin,
   normalizeWebCitations,
@@ -598,6 +602,7 @@ export function WebSourcesList({
           return (
             <li key={source.url} className="flex gap-2 text-xs leading-5">
               <span className="font-semibold text-emerald-700">[{source.index}]</span>
+              <SourceFavicon domain={visibleDomain} url={source.url} className="mt-0.5 h-4 w-4 flex-shrink-0 rounded-sm" />
               <div className="min-w-0">
                 <div className="font-medium text-slate-800">{source.title}</div>
                 {visibleDomain && <div className="truncate text-slate-500">{visibleDomain}{isGroundedLink && <span className="ml-1 text-slate-400">· Google grounded link</span>}</div>}
@@ -616,7 +621,7 @@ export function CitationSourceModal({ source, citedText, onClose }: { source: We
   useModalLifecycle(onClose)
   const supportText = source.supports || citedText
   const visibleDomain = source.display_domain || source.domain
-  return createPortal(<div className="fixed inset-0 z-[360] flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={`Source ${source.index}`} onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><div className="w-full max-w-md rounded-2xl border border-white/60 bg-white p-5 shadow-2xl"><div className="flex items-start justify-between gap-3"><div><div className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Source [{source.index}]</div><h2 className="mt-1 text-lg font-semibold text-slate-900">{source.title}</h2>{visibleDomain && <p className="mt-1 text-sm text-slate-500">{visibleDomain}</p>}</div><button type="button" onClick={onClose} className="rounded-full p-2 text-slate-500 hover:bg-slate-100" aria-label="Close source popup"><X className="h-4 w-4" /></button></div>{supportText && <p className="mt-4 text-sm leading-6 text-slate-600">{supportText}</p>}{source.link_type === 'google_grounding_redirect' && <p className="mt-3 text-xs text-slate-400">Google grounded link</p>}<a href={source.url} target="_blank" rel="noreferrer" className="mt-5 inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-emerald-700"><ExternalLink className="h-4 w-4" />Open source</a></div></div>, document.body)
+  return createPortal(<div className="fixed inset-0 z-[360] flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={`Source ${source.index}`} onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><div className="w-full max-w-md rounded-2xl border border-white/60 bg-white p-5 shadow-2xl"><div className="flex items-start justify-between gap-3"><div><div className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Source [{source.index}]</div><h2 className="mt-1 text-lg font-semibold text-slate-900">{source.title}</h2>{visibleDomain && <p className="mt-1 flex items-center gap-1.5 text-sm text-slate-500"><SourceFavicon domain={visibleDomain} url={source.url} className="h-4 w-4 flex-shrink-0 rounded-sm" />{visibleDomain}</p>}</div><button type="button" onClick={onClose} className="rounded-full p-2 text-slate-500 hover:bg-slate-100" aria-label="Close source popup"><X className="h-4 w-4" /></button></div>{supportText && <p className="mt-4 text-sm leading-6 text-slate-600">{supportText}</p>}{source.link_type === 'google_grounding_redirect' && <p className="mt-3 text-xs text-slate-400">Google grounded link</p>}<a href={source.url} target="_blank" rel="noreferrer" className="mt-5 inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-emerald-700"><ExternalLink className="h-4 w-4" />Open source</a></div></div>, document.body)
 }
 
 export function SourcesModal({ queries, sources, citations, markdownSources, onClose }: { queries: string[]; sources: WebSourceMetadata[]; citations: ReturnType<typeof normalizeWebCitations>; markdownSources: string; onClose: () => void }) {
@@ -634,13 +639,39 @@ function useModalLifecycle(onClose: () => void) {
   }, [onClose])
 }
 
+// KaTeX (rehype-katex) emits <span>/MathML/SVG markup that rehype-sanitize would
+// otherwise strip. Extend the default schema to let its output through while still
+// sanitizing everything else. className is needed everywhere (KaTeX is class-driven);
+// inline style/SVG attrs are scoped to the tags KaTeX actually uses.
+const MATHML_TAGS = [
+  'math', 'semantics', 'annotation', 'annotation-xml', 'mrow', 'mi', 'mn', 'mo', 'ms',
+  'mtext', 'mspace', 'msup', 'msub', 'msubsup', 'mfrac', 'mroot', 'msqrt', 'mtable',
+  'mtr', 'mtd', 'mlabeledtr', 'munder', 'mover', 'munderover', 'mpadded', 'mphantom',
+  'menclose', 'mstyle', 'mglyph', 'malignmark', 'maligngroup', 'mfenced', 'merror',
+  'mmultiscripts', 'mprescripts', 'none',
+]
+
+const katexSanitizeSchema = {
+  ...defaultSchema,
+  tagNames: [...(defaultSchema.tagNames ?? []), 'span', 'svg', 'path', 'line', ...MATHML_TAGS],
+  attributes: {
+    ...defaultSchema.attributes,
+    '*': [...(defaultSchema.attributes?.['*'] ?? []), 'className', 'style', 'ariaHidden'],
+    svg: ['xmlns', 'width', 'height', 'viewBox', 'preserveAspectRatio', 'style'],
+    path: ['d'],
+    line: ['x1', 'y1', 'x2', 'y2', 'stroke', 'strokeWidth'],
+    math: ['xmlns', 'display'],
+    annotation: ['encoding'],
+  },
+}
+
 export function MarkdownBlock({ content, webSources = [], onCitationSelect }: { content: string; webSources?: WebSourceMetadata[]; onCitationSelect?: (source: WebSourceMetadata) => void }) {
   const sourceByIndex = new Map(webSources.map((source) => [source.index, source]))
   const sourceByUrl = new Map(webSources.map((source) => [source.url, source]))
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm, citationRemarkPlugin(sourceByIndex)]}
-      rehypePlugins={[rehypeSanitize]}
+      remarkPlugins={[remarkGfm, remarkMath, citationRemarkPlugin(sourceByIndex)]}
+      rehypePlugins={[rehypeKatex, [rehypeSanitize, katexSanitizeSchema]]}
       components={{
         h1: ({ ...props }) => <h1 className="mb-4 mt-2 border-b border-slate-200 pb-2 text-2xl font-bold text-slate-950" {...props} />,
         h2: ({ ...props }) => <h2 className="mb-2 mt-7 text-xl font-semibold text-slate-900" {...props} />,
@@ -654,7 +685,20 @@ export function MarkdownBlock({ content, webSources = [], onCitationSelect }: { 
           const isCitation = Boolean(source && /^\[\d+\]$/.test(String(children)))
           const unavailableCitation = Boolean(href?.startsWith('#citation-unavailable-') && /^\[\d+\]$/.test(String(children)))
           if (unavailableCitation) return <span className="mx-0.5 inline-flex rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0.5 align-baseline text-xs font-semibold text-slate-400" title="Source not available in captured metadata.">{children}</span>
-          if (isCitation && source) return <button type="button" onClick={() => onCitationSelect?.(source)} className="mx-0.5 inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 align-baseline text-xs font-semibold text-emerald-700 no-underline hover:bg-emerald-100" title={`${source.title} — ${source.display_domain || source.domain}`}>{children}</button>
+          if (isCitation && source) {
+            const chipLabel = source.display_domain || source.domain || source.title
+            return (
+              <button
+                type="button"
+                onClick={() => onCitationSelect?.(source)}
+                className="mx-0.5 inline-flex max-w-[14rem] items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 align-baseline text-xs font-medium text-emerald-700 no-underline hover:bg-emerald-100"
+                title={`${source.title} — ${source.display_domain || source.domain}`}
+              >
+                <SourceFavicon domain={source.display_domain || source.domain} url={source.url} className="h-3 w-3 flex-shrink-0 rounded-sm" />
+                <span className="truncate">{chipLabel}</span>
+              </button>
+            )
+          }
           return (
             <a
               href={href}

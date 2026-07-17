@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   cleanSourceSupportText,
+  collectUniqueChatWebLinks,
   isGoogleGroundingRedirectUrl,
   normalizeWebCitations,
   normalizeWebQueries,
@@ -244,5 +245,48 @@ describe('normalizeWebCitations — cited_text cleanup', () => {
       })),
     })
     expect(citations).toHaveLength(40)
+  })
+})
+
+describe('collectUniqueChatWebLinks', () => {
+  it('dedupes by url across assistant messages and keeps first title', () => {
+    const links = collectUniqueChatWebLinks([
+      {
+        role: 'assistant',
+        metadata: {
+          web_sources: [
+            { index: 1, title: 'First title', url: 'https://example.com/a', domain: 'example.com', display_domain: 'example.com', supports: '' },
+            { index: 2, title: 'Other', url: 'https://example.com/b', domain: 'example.com', display_domain: 'example.com', supports: '' },
+          ],
+        },
+      },
+      {
+        role: 'user',
+        metadata: {
+          web_sources: [
+            { index: 1, title: 'Ignored user', url: 'https://example.com/c', domain: 'example.com', display_domain: 'example.com', supports: '' },
+          ],
+        },
+      },
+      {
+        role: 'assistant',
+        metadata: {
+          web_sources: [
+            { index: 1, title: 'Duplicate later', url: 'https://example.com/a', domain: 'example.com', display_domain: 'example.com', supports: '' },
+            { index: 3, title: 'Third', url: 'https://docs.example.com/x', domain: 'docs.example.com', display_domain: 'docs.example.com', supports: '' },
+          ],
+        },
+      },
+    ])
+    expect(links.map((item) => item.url)).toEqual([
+      'https://example.com/a',
+      'https://example.com/b',
+      'https://docs.example.com/x',
+    ])
+    expect(links[0].title).toBe('First title')
+  })
+
+  it('returns an empty list when there are no web sources', () => {
+    expect(collectUniqueChatWebLinks([{ role: 'assistant', metadata: {} }])).toEqual([])
   })
 })

@@ -1,3 +1,5 @@
+/* Colour tokens (--g-*) live in index.css. */
+
 /* ─── Certificate card (fixed size for clean PNG export) ─── */
 .certificate {
   width: 640px;
@@ -6,17 +8,19 @@
   font-family: 'Nunito', 'Segoe UI', sans-serif;
   border-radius: 20px;
 }
-.certificate--gold   { background: #ffedbe; }
-.certificate--silver { background: #e8edf4; }
-.certificate--bronze { background: #ffdcbb; }
+/* Medal papers stay in the warm family. "Silver" is a warm grey, not a blue
+   one — a cool grey sheet in an otherwise cream flow reads as a bug. */
+.certificate--gold   { background: var(--g-butter-300); }
+.certificate--silver { background: #f1ebe2; }
+.certificate--bronze { background: var(--g-cream-300); }
 
 .cert-inner {
-  background: #fffdf8;
+  background: var(--g-cream-50);
   border-radius: 14px;
   padding: 34px 40px 28px;
   text-align: center;
-  border: 3px double #cbb48a;
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.04);
+  border: 3px double var(--g-cocoa-300);
+  box-shadow: inset 0 0 0 1px rgba(107, 67, 38, 0.05);
 }
 .cert-kicker {
   margin: 0;
@@ -24,7 +28,7 @@
   font-weight: 800;
   letter-spacing: 3px;
   text-transform: uppercase;
-  color: #b08b4a;
+  color: var(--g-butter-700);
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -33,7 +37,7 @@
   margin: 10px 0 0;
   font-size: 2rem;
   font-weight: 900;
-  color: #3a2d4c;
+  color: var(--g-cocoa-900);
   letter-spacing: 0.5px;
 }
 .cert-rule {
@@ -41,16 +45,16 @@
   height: 3px;
   margin: 12px auto 18px;
   border-radius: 3px;
-  background: #c79ae8;
+  background: var(--g-rose-300);
 }
-.cert-awarded { margin: 0; font-size: 0.95rem; color: #6d5f7e; font-weight: 700; }
+.cert-awarded { margin: 0; font-size: 0.95rem; color: var(--g-ink-soft); font-weight: 700; }
 .cert-name {
   margin: 8px 0 6px;
   font-size: 1.7rem;
   font-weight: 900;
-  color: #6b4a8a;
+  color: var(--g-rose-700);
 }
-.cert-desc { margin: 0 0 14px; font-size: 0.95rem; color: #6d5f7e; font-weight: 700; }
+.cert-desc { margin: 0 0 14px; font-size: 0.95rem; color: var(--g-ink-soft); font-weight: 700; }
 
 .cert-medal {
   display: flex;
@@ -60,9 +64,9 @@
   margin: 6px 0 16px;
 }
 .cert-medal-emoji { font-size: 3.4rem; line-height: 1; }
-.cert-medal-title { font-size: 1.3rem; font-weight: 900; color: #d99400; }
-.certificate--silver .cert-medal-title { color: #7c8794; }
-.certificate--bronze .cert-medal-title { color: #b5691f; }
+.cert-medal-title { font-size: 1.3rem; font-weight: 900; color: var(--g-butter-700); }
+.certificate--silver .cert-medal-title { color: var(--g-cocoa-500); }
+.certificate--bronze .cert-medal-title { color: var(--g-coral-700); }
 
 .cert-stats {
   display: flex;
@@ -71,18 +75,18 @@
   margin: 4px 0 22px;
 }
 .cert-stat { display: flex; flex-direction: column; }
-.cert-stat-num { font-size: 1.5rem; font-weight: 900; color: #3a2d4c; }
-.cert-stat-lbl { font-size: 0.78rem; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; color: #9a8bb0; }
+.cert-stat-num { font-size: 1.5rem; font-weight: 900; color: var(--g-cocoa-900); }
+.cert-stat-lbl { font-size: 0.78rem; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; color: var(--g-ink-soft); }
 
 .cert-footer {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border-top: 1.5px solid #eadfce;
+  border-top: 1.5px solid var(--g-cream-300);
   padding-top: 14px;
   font-size: 0.82rem;
   font-weight: 800;
-  color: #8a75a0;
+  color: var(--g-ink-soft);
 }
 
 .cert-verify {
@@ -90,12 +94,12 @@
   font-size: 0.62rem;
   font-weight: 700;
   letter-spacing: 0.3px;
-  color: #b0a3c0;
+  color: var(--g-cocoa-300);
   text-align: center;
 }
 .cert-verify-code {
   font-family: 'Consolas', 'Menlo', monospace;
-  color: #8a75a0;
+  color: var(--g-ink-soft);
   word-break: break-all;
 }
 
@@ -104,7 +108,7 @@
   position: fixed;
   inset: 0;
   z-index: 999;
-  background: rgba(40, 25, 60, 0.55);
+  background: rgba(74, 45, 24, 0.55);
   backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
@@ -124,7 +128,7 @@
   flex-direction: column;
   align-items: center;
   gap: 14px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 20px 60px rgba(74, 45, 24, 0.38);
 }
 .cert-scroll {
   max-width: 100%;
@@ -136,7 +140,7 @@
   padding: 12px 30px;
   border: none;
   border-radius: 40px;
-  background: #b06fe0;
+  background: var(--g-accent);
   color: white;
   display: inline-flex;
   align-items: center;
@@ -145,27 +149,31 @@
   font-family: inherit;
   font-size: 1rem;
   cursor: pointer;
-  box-shadow: 0 6px 18px rgba(168, 85, 247, 0.4);
+  box-shadow: 0 6px 18px var(--g-accent-ring);
 }
 .cert-download-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 .cert-close-btn {
   padding: 12px 24px;
-  border: 2px solid #e0d6ea;
+  border: 2px solid var(--g-cream-300);
   border-radius: 40px;
   background: white;
-  color: #7a6690;
+  color: var(--g-ink-soft);
   font-weight: 800;
   font-family: inherit;
   cursor: pointer;
 }
-.cert-modal-hint { margin: 0; font-size: 0.82rem; font-weight: 700; color: #9a8bb0; text-align: center; display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px; }
+.cert-modal-hint { margin: 0; font-size: 0.82rem; font-weight: 700; color: var(--g-ink-soft); text-align: center; display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px; }
 
-/* Button on the result screen that opens the certificate */
+/* Button on the result screen that opens the certificate.
+   This is the result screen's ONE primary action, so it gets the solid rose;
+   "Play again" next to it is the secondary (see .restart-btn in CatGame.css).
+   It used to be solid amber beside a solid purple restart — two shouting
+   buttons, no hierarchy. */
 .cert-open-btn {
   padding: 12px 30px;
   border: none;
   border-radius: 40px;
-  background: #f5a623;
+  background: var(--g-accent);
   color: white;
   display: inline-flex;
   align-items: center;
@@ -175,7 +183,7 @@
   font-family: inherit;
   font-size: 0.98rem;
   cursor: pointer;
-  box-shadow: 0 6px 18px rgba(245, 158, 11, 0.4);
+  box-shadow: 0 6px 18px var(--g-accent-ring);
   transition: transform 0.15s, box-shadow 0.2s;
 }
-.cert-open-btn:hover { transform: translateY(-2px); box-shadow: 0 9px 24px rgba(245, 158, 11, 0.5); }
+.cert-open-btn:hover { transform: translateY(-2px); box-shadow: 0 9px 24px var(--g-accent-ring); }

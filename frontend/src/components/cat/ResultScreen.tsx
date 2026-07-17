@@ -55,17 +55,16 @@ export default function ResultScreen({
           <div className="result-cat-wrap">
             <CatSprite mood={spriteMood} species={species} size="result" />
           </div>
-          {show && (
+        </div>
+
+        {show && (
+          <div className="result-col result-col-right">
             <div className={`result-medal result-medal--${medal.tier}`}>
               <span className="result-medal-emoji">{medal.emoji}</span>
               <h2 className="result-medal-title">{medal.title}</h2>
               <p className="result-medal-blurb">{medal.blurb}</p>
             </div>
-          )}
-        </div>
 
-        {show && (
-          <div className="result-col result-col-right">
             <div className="result-stats">
               <div className="stat-row">
                 <span className="stat-label"><CheckCircle size={17} weight="duotone" /> Correct</span>
@@ -93,14 +92,10 @@ export default function ResultScreen({
               <Medal size={20} weight="duotone" /> Get Certificate
             </button>
 
-            {onRestart ? (
+            {onRestart && (
               <button className="restart-btn" onClick={onRestart}>
                 <ArrowsClockwise size={19} weight="bold" /> Play Again
               </button>
-            ) : (
-              <p className="result-saved-note">
-                <CheckCircle size={15} weight="fill" /> Result saved! Good job <PawPrint size={14} weight="fill" />
-              </p>
             )}
           </div>
         )}

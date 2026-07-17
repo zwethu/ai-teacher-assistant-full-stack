@@ -1,8 +1,10 @@
+/* Colour tokens (--g-*) live in index.css. */
+
 .mode-select-bg {
   min-height: 100vh;
   background:
     var(--game-pattern) 0 0 / var(--game-pattern-size) repeat,
-    #fdf1e7;
+    var(--g-bg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -29,20 +31,20 @@
   flex-direction: column;
   align-items: center;
   gap: 10px;
-  box-shadow: 0 12px 50px rgba(150, 110, 200, 0.18);
+  box-shadow: var(--g-shadow-lg);
 }
 
 .mode-select-title {
   font-size: 1.7rem;
   font-weight: 900;
-  color: #6b4a8a;
+  color: var(--g-cocoa-900);
   margin: 4px 0 0;
   text-align: center;
 }
 
 .mode-select-subtitle {
   font-size: 1rem;
-  color: #9a7fb0;
+  color: var(--g-ink-soft);
   margin: 0 0 6px;
   text-align: center;
   display: inline-flex;
@@ -50,6 +52,12 @@
   gap: 5px;
   justify-content: center;
   font-weight: 700;
+}
+
+/* Sound control sits top-right of the card, out of the reading path. */
+.mode-select-card .music-toggle {
+  align-self: flex-end;
+  margin-bottom: -8px;
 }
 
 /* ─── Mode cards grid ─── */
@@ -79,57 +87,45 @@
   font-family: inherit;
 }
 
-/* Colorful per-mode fills (flat, no gradient) */
-.mode-option-card--matching {
-  background: #ffe6c8;
-}
-.mode-option-card--ropelink {
-  background: #d3e6ff;
-}
-.mode-option-card--bucket {
-  background: #d9f0e0;
-}
+/* Per-mode tints. These are CATEGORY colours (which game), not status — so
+   they're the lightest step of each ramp and never compete with the CTA. */
+.mode-option-card--matching { background: var(--g-cream-200); }
+.mode-option-card--ropelink { background: var(--g-sky-200); }
+.mode-option-card--bucket   { background: var(--g-mint-200); }
 /* Fallback for any card without a mode modifier */
 .mode-option-card:not([class*='--matching']):not([class*='--ropelink']) {
-  background: #ede1fb;
+  background: var(--g-rose-200);
 }
 
 .mode-option-card:hover {
   transform: translateY(-6px) scale(1.02);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.12);
+  box-shadow: var(--g-shadow-md);
 }
 
-.mode-option-card--selected.mode-option-card--matching {
-  border-color: #f4922e;
-  box-shadow: 0 0 0 5px rgba(244, 146, 46, 0.25), 0 12px 28px rgba(244, 146, 46, 0.25);
-  transform: translateY(-6px) scale(1.02);
-}
-.mode-option-card--selected.mode-option-card--ropelink {
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 5px rgba(59, 130, 246, 0.25), 0 12px 28px rgba(59, 130, 246, 0.25);
-  transform: translateY(-6px) scale(1.02);
-}
+/* One selection colour for every card — sky means "this is what you picked"
+   here exactly as it does in-game. Per-mode selection colours (the old orange
+   / blue / purple) made selection look like part of the category. */
 .mode-option-card--selected {
-  border-color: #a855f7;
-  box-shadow: 0 0 0 5px rgba(168, 85, 247, 0.22), 0 12px 28px rgba(168, 85, 247, 0.22);
+  border-color: var(--g-select);
+  box-shadow: 0 0 0 5px var(--g-select-ring), 0 12px 28px var(--g-select-ring);
   transform: translateY(-6px) scale(1.02);
 }
 
 .mode-option-icon {
-  color: #7a5768;
+  color: var(--g-cocoa-500);
   margin-bottom: 2px;
-  filter: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.1));
+  filter: drop-shadow(0 3px 5px rgba(74, 45, 24, 0.12));
 }
 
 .mode-option-label {
   font-size: 1.1rem;
   font-weight: 900;
-  color: #4a3d5c;
+  color: var(--g-cocoa-900);
 }
 
 .mode-option-desc {
   font-size: 0.84rem;
-  color: #6d5f7e;
+  color: var(--g-ink-soft);
   font-weight: 700;
   line-height: 1.45;
 }
@@ -144,26 +140,27 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  background: #b06fe0;
+  background: var(--g-accent);
   color: white;
   font-size: 1.15rem;
   font-weight: 900;
   font-family: 'Nunito', inherit;
   cursor: pointer;
   transition: background 0.2s, transform 0.15s, box-shadow 0.2s, opacity 0.2s;
-  box-shadow: 0 6px 22px rgba(168, 85, 247, 0.4);
+  box-shadow: 0 6px 22px var(--g-accent-ring);
 }
 
 .mode-start-btn:not(:disabled):hover {
-  background: #9f57d6;
+  background: var(--g-accent-hover);
   transform: translateY(-2px);
-  box-shadow: 0 8px 28px rgba(168, 85, 247, 0.55);
+  box-shadow: 0 8px 28px var(--g-accent-ring);
 }
 
 .mode-start-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.85;
   cursor: not-allowed;
-  background: #c9c0d4;
+  background: var(--g-cocoa-200);
+  color: var(--g-cocoa-500);
   box-shadow: none;
 }
 
@@ -171,10 +168,10 @@
   margin-top: 4px;
   background: none;
   border: none;
-  color: #9a7fb0;
+  color: var(--g-ink-soft);
   font-weight: 800;
   font-family: inherit;
   font-size: 0.9rem;
   cursor: pointer;
 }
-.mode-back-link:hover { color: #6b4a8a; }
+.mode-back-link:hover { color: var(--g-cocoa-900); }

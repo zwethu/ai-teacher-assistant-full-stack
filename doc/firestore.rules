@@ -91,6 +91,35 @@ service cloud.firestore {
       allow delete: if isOwner();
     }
 
+    // The countdown's anchor: one doc per player per assessment, holding the
+    // server's stamp of when their run began. The client reads this back to
+    // work out how much time is really left, so these rules — not the app code
+    // — are what actually stop the clock being reset. Three things matter:
+    //   · startedAt must BE the server's time (== request.time), not a value
+    //     the client picked
+    //   · startedAt can never be rewritten after create
+    //   · the doc can never be deleted, since deleting it and re-creating is
+    //     the same reset by another route
+    match /gameRuns/{runId} {
+      function ownRun(data) {
+        return signedIn() && data.playerUid == request.auth.uid;
+      }
+
+      allow get: if ownRun(resource.data);
+
+      allow create: if ownRun(request.resource.data)
+        && runId == request.resource.data.assessmentId + '_' + request.auth.uid
+        && request.resource.data.startedAt  == request.time
+        && request.resource.data.lastSeenAt == request.time;
+
+      // Resuming only ever touches lastSeenAt.
+      allow update: if ownRun(resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastSeenAt'])
+        && request.resource.data.lastSeenAt == request.time;
+
+      allow delete: if false;
+    }
+
     // Written only by the backend (Admin SDK). Block all client access.
     match /oauth_states/{docId} {
       allow read, write: if false;

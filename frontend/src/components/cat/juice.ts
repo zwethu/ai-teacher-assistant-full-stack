@@ -1,20 +1,11 @@
 // Lightweight game "juice": synth sound effects + haptic buzz.
-// One shared AudioContext, unlocked on first user gesture (clicks precede all sfx).
-let ctx: AudioContext | null = null;
-
-function actx(): AudioContext | null {
-  try {
-    if (!ctx) ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-    if (ctx.state === 'suspended') void ctx.resume();
-    return ctx;
-  } catch {
-    return null;
-  }
-}
+// Context, master bus and mute live in audio.ts and are shared with music.ts.
+import { actx, masterGain } from './audio';
 
 function tone(freq: number, start: number, dur: number, type: OscillatorType = 'sine', vol = 0.2) {
   const c = actx();
-  if (!c) return;
+  const bus = masterGain();
+  if (!c || !bus) return;
   const t0 = c.currentTime + start;
   const osc = c.createOscillator();
   const gain = c.createGain();
@@ -24,7 +15,7 @@ function tone(freq: number, start: number, dur: number, type: OscillatorType = '
   gain.gain.exponentialRampToValueAtTime(vol, t0 + 0.02);
   gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
   osc.connect(gain);
-  gain.connect(c.destination);
+  gain.connect(bus);
   osc.start(t0);
   osc.stop(t0 + dur + 0.02);
 }
@@ -35,6 +26,16 @@ export function buzz(pattern: number | number[]) {
   } catch {
     /* unsupported */
   }
+}
+
+/** Fires the moment the player pairs / links / drops an item — the "it landed"
+ *  cue. Deliberately the SAME sound whether the match is right or wrong: during
+ *  play, audio must not leak correctness any more than colour does. The reward
+ *  chime stays at submit, where feedback is earned. */
+export function playSnap() {
+  tone(520, 0, 0.06, 'sine', 0.13);
+  tone(700, 0.05, 0.07, 'sine', 0.10);
+  buzz(15);
 }
 
 export function playCorrect() {

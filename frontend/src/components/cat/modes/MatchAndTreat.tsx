@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { CheckCircle, Question, Lightbulb } from '@phosphor-icons/react';
 import type { GameItem, AnswerRecord, BehaviorSignals } from '../../../types/catGame.types';
 import CardBird from '../CardBird';
+import { playSnap } from '../juice';
 
 type Card = {
   id: string;
@@ -16,6 +17,9 @@ type MatchState = 'unmatched' | 'matched' | 'wrong';
 type Props = {
   items: GameItem[];
   timeUp: boolean;
+  /** False only for a demo skip: score just the cards the player paired,
+   *  instead of counting every untouched card as wrong. */
+  countUnplaced?: boolean;
   sidebar?: ReactNode;
   onCorrect: () => void;
   onWrong: () => void;
@@ -26,7 +30,7 @@ function shuffle<T>(arr: T[]): T[] {
   return [...arr].sort(() => Math.random() - 0.5);
 }
 
-export default function MatchAndTreat({ items, timeUp, sidebar, onCorrect, onWrong, onComplete }: Props) {
+export default function MatchAndTreat({ items, timeUp, countUnplaced = true, sidebar, onCorrect, onWrong, onComplete }: Props) {
   const [cards, setCards] = useState<Card[]>([]);
   const [selected, setSelected] = useState<Card | null>(null);
   const [matchStates, setMatchStates] = useState<Record<string, MatchState>>({});
@@ -115,6 +119,7 @@ export default function MatchAndTreat({ items, timeUp, sidebar, onCorrect, onWro
       next[defCard.id]  = termCard.id;
       return next;
     });
+    playSnap();
     setSelected(null);
   }
 
@@ -195,10 +200,12 @@ export default function MatchAndTreat({ items, timeUp, sidebar, onCorrect, onWro
   useEffect(() => {
     if (!timeUp || finishedRef.current) return;
     finishedRef.current = true;
-    const finalAnswers: AnswerRecord[] = termCards.map(tc => ({
-      questionId: tc.pairId,
-      correct: playerPairs[tc.id] === `${tc.pairId}-D`,
-    }));
+    const finalAnswers: AnswerRecord[] = termCards
+      .filter(tc => countUnplaced || playerPairs[tc.id] !== undefined)
+      .map(tc => ({
+        questionId: tc.pairId,
+        correct: playerPairs[tc.id] === `${tc.pairId}-D`,
+      }));
     onComplete(finalAnswers, buildSignals());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeUp]);
@@ -207,26 +214,9 @@ export default function MatchAndTreat({ items, timeUp, sidebar, onCorrect, onWro
     <form className="mode-layout" autoComplete="off" onSubmit={e => e.preventDefault()}>
       <div className="mode-side">
         {sidebar}
-        <div className="question-progress">
-          Pairs connected: {termCards.filter(tc => playerPairs[tc.id]).length} / {termCards.length}
-        </div>
-        <button
-          type="submit"
-          className="submit-btn"
-          onClick={handleSubmit}
-          disabled={!allPaired}
-        >
-          {allPaired
-            ? <><CheckCircle size={18} weight="fill" /> Submit Answers</>
-            : `Pair all ${termCards.length} items first`}
-        </button>
-        <div className="match-hint">
-          {selected
-            ? `Selected: "${selected.text}" — now click its match`
-            : 'Click any card, then click its match'}
-        </div>
       </div>
 
+      <div className="mode-main">
       <div className="mode-board mode-panel">
         <div className="match-grid" translate="no">
         {cards.map(card => {
@@ -281,6 +271,28 @@ export default function MatchAndTreat({ items, timeUp, sidebar, onCorrect, onWro
         })}
       </div>
 
+      </div>
+
+        <div className="mode-footer">
+          <div className="mode-footer-info">
+            <div className="question-progress">
+              Pairs connected: {termCards.filter(tc => playerPairs[tc.id]).length} / {termCards.length}
+            </div>
+            <div className="match-hint">
+              Click any card, then click its match
+            </div>
+          </div>
+          <button
+            type="submit"
+            className="submit-btn"
+            onClick={handleSubmit}
+            disabled={!allPaired}
+          >
+            {allPaired
+              ? <><CheckCircle size={18} weight="fill" /> Submit Answers</>
+              : `Pair all ${termCards.length} items first`}
+          </button>
+        </div>
       </div>
     </form>
   );

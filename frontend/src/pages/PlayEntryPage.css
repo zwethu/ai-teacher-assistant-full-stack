@@ -6,7 +6,7 @@
   min-height: 100vh;
   background:
     var(--game-pattern) 0 0 / var(--game-pattern-size) repeat,
-    #fdf1e7;
+    var(--g-bg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -133,8 +133,11 @@
 }
 
 /* ─── Primary button ─── */
+/* Rose, matching every other primary in the flow. It was orange — an
+   analogous neighbour of the peach background, so the one thing the player
+   must click had the least contrast of anything on the page. */
 .play-primary-btn {
-  background: #ef8a5c;
+  background: var(--g-accent);
   color: white;
   border: none;
   border-radius: 22px;
@@ -148,13 +151,14 @@
   font-family: inherit;
   cursor: pointer;
   width: 100%;
-  box-shadow: 0 5px 18px rgba(231,111,81,0.35);
-  transition: transform 0.2s, box-shadow 0.2s;
+  box-shadow: 0 5px 18px var(--g-accent-ring);
+  transition: transform 0.2s, box-shadow 0.2s, background 0.2s;
   letter-spacing: 0.3px;
 }
 .play-primary-btn:hover:not(:disabled) {
   transform: translateY(-3px);
-  box-shadow: 0 8px 24px rgba(231,111,81,0.45);
+  background: var(--g-accent-hover);
+  box-shadow: 0 8px 24px var(--g-accent-ring);
 }
 .play-primary-btn:disabled {
   opacity: 0.65;

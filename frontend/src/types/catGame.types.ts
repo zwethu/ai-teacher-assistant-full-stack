@@ -58,6 +58,14 @@ export type PlayerProfile = {
   email: string;
 };
 
+// The server's answer to "when did this run start, and what time is it now?".
+// Both read off the server clock, so the gap between them is elapsed time the
+// player can't touch by refreshing or moving their device clock.
+export type TimedRun = {
+  startedAtMs: number;
+  serverNowMs: number;
+};
+
 export type AttemptResult = {
   playerUid: string;
   assessmentId: string;

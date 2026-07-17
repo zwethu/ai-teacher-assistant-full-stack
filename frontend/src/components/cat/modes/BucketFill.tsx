@@ -3,10 +3,14 @@ import type { ReactNode } from 'react';
 import { CheckCircle, Basket, HandPointing, Confetti } from '@phosphor-icons/react';
 import type { GameItem, AnswerRecord, BehaviorSignals } from '../../../types/catGame.types';
 import CardBird from '../CardBird';
+import { playSnap } from '../juice';
 
 type Props = {
   items: GameItem[];
   timeUp: boolean;
+  /** False only for a demo skip: score just the buckets the player filled,
+   *  instead of counting every empty bucket as wrong. */
+  countUnplaced?: boolean;
   sidebar?: ReactNode;
   onCorrect: () => void;
   onWrong: () => void;
@@ -22,7 +26,7 @@ type Placement = {
   state: 'pending' | 'correct' | 'wrong';
 };
 
-export default function BucketFill({ items, timeUp, sidebar, onCorrect, onWrong, onComplete }: Props) {
+export default function BucketFill({ items, timeUp, countUnplaced = true, sidebar, onCorrect, onWrong, onComplete }: Props) {
   // Buckets keep their natural order (labelled by term); chips are shuffled.
   const shuffledChips = useMemo(() => [...items].sort(() => Math.random() - 0.5), [items]);
 
@@ -107,6 +111,7 @@ export default function BucketFill({ items, timeUp, sidebar, onCorrect, onWrong,
           ...prev.filter(p => p.chipId !== dragChip && !(p.bucketIndex === targetBucket && p.state !== 'correct')),
           { bucketIndex: targetBucket!, chipId: dragChip!, state: 'pending' },
         ]);
+        playSnap();
       }
     } else {
       // Dropped outside any bucket → send the chip back to the tray.
@@ -176,11 +181,15 @@ export default function BucketFill({ items, timeUp, sidebar, onCorrect, onWrong,
   useEffect(() => {
     if (!timeUp || finishedRef.current) return;
     finishedRef.current = true;
-    const finalAnswers: AnswerRecord[] = items.map((item, bi) => {
-      const p = placements.find(pl => pl.bucketIndex === bi && pl.state !== 'wrong');
-      const correct = !!p && items[bi].id === p.chipId;
-      return { questionId: item.id, correct };
-    });
+    const finalAnswers: AnswerRecord[] = items
+      .map((item, bi) => {
+        const p = placements.find(pl => pl.bucketIndex === bi && pl.state !== 'wrong');
+        const correct = !!p && items[bi].id === p.chipId;
+        const touched = placements.some(pl => pl.bucketIndex === bi);
+        return { questionId: item.id, correct, touched };
+      })
+      .filter(a => countUnplaced || a.touched)
+      .map(({ questionId, correct }) => ({ questionId, correct }));
     onComplete(finalAnswers, buildSignals());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeUp]);
@@ -194,26 +203,9 @@ export default function BucketFill({ items, timeUp, sidebar, onCorrect, onWrong,
     <form className="mode-layout" autoComplete="off" onSubmit={e => e.preventDefault()}>
       <div className="mode-side">
         {sidebar}
-        <div className="question-progress">
-          Sorted: {filledCount} / {items.length}
-        </div>
-        <button
-          type="submit"
-          className="submit-btn"
-          onClick={handleSubmit}
-          disabled={!allFilled}
-        >
-          {allFilled
-            ? <><CheckCircle size={18} weight="fill" /> Submit Answers</>
-            : `Fill all ${items.length} buckets first`}
-        </button>
-        <div className="rope-hint">
-          {dragChip !== null
-            ? <><Basket size={15} weight="duotone" /> Drop it in the right bucket!</>
-            : <><HandPointing size={15} weight="duotone" /> Drag each item into its bucket · tap ✕ to take it back</>}
-        </div>
       </div>
 
+      <div className="mode-main">
       <div className="mode-board mode-panel bucket-panel">
         <div
           ref={containerRef}
@@ -300,6 +292,30 @@ export default function BucketFill({ items, timeUp, sidebar, onCorrect, onWrong,
               {chipText(dragChip)}
             </div>
           )}
+        </div>
+      </div>
+
+        <div className="mode-footer">
+          <div className="mode-footer-info">
+            <div className="question-progress">
+              Sorted: {filledCount} / {items.length}
+            </div>
+            <div className="rope-hint">
+              {dragChip !== null
+                ? <><Basket size={15} weight="duotone" /> Drop it in the right bucket!</>
+                : <><HandPointing size={15} weight="duotone" /> Drag each item into its bucket · tap ✕ to take it back</>}
+            </div>
+          </div>
+          <button
+            type="submit"
+            className="submit-btn"
+            onClick={handleSubmit}
+            disabled={!allFilled}
+          >
+            {allFilled
+              ? <><CheckCircle size={18} weight="fill" /> Submit Answers</>
+              : `Fill all ${items.length} buckets first`}
+          </button>
         </div>
       </div>
     </form>

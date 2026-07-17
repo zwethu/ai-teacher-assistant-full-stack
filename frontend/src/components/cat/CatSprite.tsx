@@ -21,7 +21,7 @@ export default function CatSprite({ mood, species = 'cat', size = 'normal' }: Pr
   const animation = avatarAnimation(species, mood);
 
   return (
-    <div className={`cat-sprite cat-sprite--${size} cat-mood-${mood}`}>
+    <div className={`cat-sprite cat-sprite--${size} cat-sprite--${species} cat-mood-${mood}`}>
       <div className="cat-shadow" />
       <div className="cat-lottie">
         <Lottie animationData={animation as object} loop autoplay />

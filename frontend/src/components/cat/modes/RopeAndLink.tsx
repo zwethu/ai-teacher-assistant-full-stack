@@ -3,10 +3,14 @@ import type { ReactNode } from 'react';
 import { CheckCircle, LinkSimple, HandPointing } from '@phosphor-icons/react';
 import type { GameItem, AnswerRecord, BehaviorSignals } from '../../../types/catGame.types';
 import CardBird from '../CardBird';
+import { playSnap } from '../juice';
 
 type Props = {
   items: GameItem[];
   timeUp: boolean;
+  /** False only for a demo skip: score just the terms the player linked,
+   *  instead of counting every untouched term as wrong. */
+  countUnplaced?: boolean;
   sidebar?: ReactNode;
   onCorrect: () => void;
   onWrong: () => void;
@@ -19,7 +23,7 @@ type Connection = {
   state: 'pending' | 'correct' | 'wrong';
 };
 
-export default function RopeAndLink({ items, timeUp, sidebar, onCorrect, onWrong, onComplete }: Props) {
+export default function RopeAndLink({ items, timeUp, countUnplaced = true, sidebar, onCorrect, onWrong, onComplete }: Props) {
   const shuffledRight = useMemo(
     () => [...items].sort(() => Math.random() - 0.5),
     [items]
@@ -134,6 +138,7 @@ export default function RopeAndLink({ items, timeUp, sidebar, onCorrect, onWrong
         ...prev.filter(c => c.leftIndex !== draggingFrom),
         { leftIndex: draggingFrom, rightIndex: droppedOnIdx!, state: 'pending' },
       ]);
+      playSnap();
     }
 
     setDraggingFrom(null);
@@ -194,21 +199,27 @@ export default function RopeAndLink({ items, timeUp, sidebar, onCorrect, onWrong
   useEffect(() => {
     if (!timeUp || finishedRef.current) return;
     finishedRef.current = true;
-    const finalAnswers: AnswerRecord[] = items.map((item, i) => {
-      const conn = connections.find(c => c.leftIndex === i && c.state !== 'wrong');
-      const correct = !!conn && shuffledRight[conn.rightIndex].id === item.id;
-      return { questionId: item.id, correct };
-    });
+    const finalAnswers: AnswerRecord[] = items
+      .map((item, i) => {
+        const conn = connections.find(c => c.leftIndex === i && c.state !== 'wrong');
+        const correct = !!conn && shuffledRight[conn.rightIndex].id === item.id;
+        const touched = connections.some(c => c.leftIndex === i);
+        return { questionId: item.id, correct, touched };
+      })
+      .filter(a => countUnplaced || a.touched)
+      .map(({ questionId, correct }) => ({ questionId, correct }));
     onComplete(finalAnswers, buildSignals());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeUp]);
 
-  // Pending/wrong stay neutral (no hint during play); CONFIRMED-correct turns
-  // vivid green — that's post-submit feedback, not a during-play cue.
+  // Pending/wrong stay neutral cocoa (no hint during play); CONFIRMED-correct
+  // turns mint — that's post-submit feedback, not a during-play cue.
+  // Values mirror the --g-* tokens in index.css; SVG stroke can't read them
+  // from a stylesheet, so keep the two in sync by hand.
   const ROPE_COLORS: Record<Connection['state'], string> = {
-    pending: '#b8a58f',
-    correct: '#10b981',
-    wrong:   '#b8a58f',
+    pending: '#c9a986',  // --g-cocoa-300
+    correct: '#4fc992',  // --g-mint-500
+    wrong:   '#c9a986',  // --g-cocoa-300
   };
 
   const lockedLines = connections.map(conn => {
@@ -227,26 +238,9 @@ export default function RopeAndLink({ items, timeUp, sidebar, onCorrect, onWrong
     <form className="mode-layout" autoComplete="off" onSubmit={e => e.preventDefault()}>
       <div className="mode-side">
         {sidebar}
-        <div className="question-progress">
-          Connected: {connections.filter(c => c.state !== 'wrong').length} / {items.length}
-        </div>
-        <button
-          type="submit"
-          className="submit-btn"
-          onClick={handleSubmit}
-          disabled={!allConnected}
-        >
-          {allConnected
-            ? <><CheckCircle size={18} weight="fill" /> Submit Answers</>
-            : `Connect all ${items.length} pairs first`}
-        </button>
-        <div className="rope-hint">
-          {draggingFrom !== null
-            ? <><LinkSimple size={15} weight="duotone" /> Drop on the matching definition!</>
-            : <><HandPointing size={15} weight="duotone" /> Drag a term to its match · tap a link to undo</>}
-        </div>
       </div>
 
+      <div className="mode-main">
       <div className="mode-board mode-panel rope-panel">
         <div
           ref={containerRef}
@@ -280,7 +274,7 @@ export default function RopeAndLink({ items, timeUp, sidebar, onCorrect, onWrong
             {dragLine && dragPos && (
               <path
                 d={`M ${dragLine.x} ${dragLine.y} C ${dragLine.x + 60} ${dragLine.y}, ${dragPos.x - 60} ${dragPos.y}, ${dragPos.x} ${dragPos.y}`}
-                stroke="#bbb"
+                stroke="#c9a986"
                 strokeWidth="2.5"
                 fill="none"
                 strokeDasharray="6 4"
@@ -361,6 +355,30 @@ export default function RopeAndLink({ items, timeUp, sidebar, onCorrect, onWrong
         </div>
       </div>
 
+      </div>
+
+        <div className="mode-footer">
+          <div className="mode-footer-info">
+            <div className="question-progress">
+              Connected: {connections.filter(c => c.state !== 'wrong').length} / {items.length}
+            </div>
+            <div className="rope-hint">
+              {draggingFrom !== null
+                ? <><LinkSimple size={15} weight="duotone" /> Drop on the matching definition!</>
+                : <><HandPointing size={15} weight="duotone" /> Drag a term to its match · tap a link to undo</>}
+            </div>
+          </div>
+          <button
+            type="submit"
+            className="submit-btn"
+            onClick={handleSubmit}
+            disabled={!allConnected}
+          >
+            {allConnected
+              ? <><CheckCircle size={18} weight="fill" /> Submit Answers</>
+              : `Connect all ${items.length} pairs first`}
+          </button>
+        </div>
       </div>
     </form>
   );

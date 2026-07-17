@@ -3,6 +3,8 @@ import { Cat, Dog, GameController } from '@phosphor-icons/react';
 import Lottie from '../components/cat/LottieBox';
 import type { AvatarType } from '../types/catGame.types';
 import { AVATARS, avatarAnimation } from '../components/cat/avatarAnimations';
+import MusicToggle from '../components/cat/MusicToggle';
+import { useMusic } from '../components/cat/useMusic';
 import './AvatarSelectPage.css';
 
 type Props = {
@@ -12,10 +14,12 @@ type Props = {
 
 export default function AvatarSelectPage({ nickname, onSelect }: Props) {
   const [selected, setSelected] = useState<AvatarType | null>(null);
+  useMusic('menu');
 
   return (
     <div className="avatar-select-bg">
       <div className="avatar-select-card">
+        <MusicToggle />
         <h2 className="avatar-select-title">Choose your buddy, {nickname}! 🐾</h2>
         <p className="avatar-select-subtitle">Who's going to study with you today?</p>
 

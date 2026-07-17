@@ -1,4 +1,7 @@
-const COLORS = ['#f472b6', '#fbbf24', '#34d399', '#60a5fa', '#a855f7', '#fb7185', '#facc15'];
+// The game palette's accents (--g-* in index.css), not a random rainbow —
+// confetti is the most saturated thing on screen, so off-palette hues here
+// are what make the whole result page look mismatched.
+const COLORS = ['#f4739e', '#ffcc57', '#4fc992', '#5ea8f0', '#ffc2d6', '#ffe6a3', '#b6eed3'];
 
 // Deterministic (index-based) so it never needs Math.random.
 export default function Confetti({ count = 44 }: { count?: number }) {

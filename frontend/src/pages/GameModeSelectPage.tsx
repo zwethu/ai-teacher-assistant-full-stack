@@ -5,6 +5,8 @@ import type { Icon } from '@phosphor-icons/react';
 import type { GameMode, GameSession, AvatarType } from '../types/catGame.types';
 import { saveGameModeChoice } from '../lib/gameSession';
 import CatSprite from '../components/cat/CatSprite';
+import MusicToggle from '../components/cat/MusicToggle';
+import { useMusic } from '../components/cat/useMusic';
 import './GameModeSelectPage.css';
 
 type Props = {
@@ -19,7 +21,7 @@ const MODES: { mode: GameMode; icon: Icon; label: string; desc: string }[] = [
     mode: 'matching',
     icon: PuzzlePiece,
     label: 'Match & Treat',
-    desc: 'Flip cards and match each term with its definition. Your cat loves a good memory game!',
+    desc: 'Flip cards and match each term with its definition. Your buddy loves a good memory game!',
   },
   {
     mode: 'ropelink',
@@ -39,6 +41,7 @@ export default function GameModeSelectPage({ session, nickname, playerUid, avata
   const navigate = useNavigate();
   const [selected, setSelected] = useState<GameMode | null>(null);
   const [loading, setLoading] = useState(false);
+  useMusic('menu');
 
   async function handleStart() {
     if (!selected) return;
@@ -49,7 +52,10 @@ export default function GameModeSelectPage({ session, nickname, playerUid, avata
       console.error('Could not save mode choice:', e);
     } finally {
       setLoading(false);
-      navigate(`/play/${session.id}/game`, {
+      // Carry the query string across: `?demo=1` is set on the entry URL, but
+      // the game is a fresh path, so without this the flag is lost by the time
+      // CatGame reads it.
+      navigate(`/play/${session.id}/game${window.location.search}`, {
         state: { session, nickname, playerUid, chosenGameMode: selected, chosenAvatar: avatar },
       });
     }
@@ -58,10 +64,11 @@ export default function GameModeSelectPage({ session, nickname, playerUid, avata
   return (
     <div className="mode-select-bg">
       <div className="mode-select-card">
+        <MusicToggle />
         <CatSprite mood="playful" species={avatar} />
         <h2 className="mode-select-title">How do you want to play, {nickname}?</h2>
         <p className="mode-select-subtitle">
-          Pick a game mode — your cat is ready! <PawPrint size={16} weight="fill" />
+          Pick a game mode — your {avatar} is ready! <PawPrint size={16} weight="fill" />
         </p>
 
         <div className="mode-select-grid">

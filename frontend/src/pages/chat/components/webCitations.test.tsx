@@ -33,9 +33,9 @@ describe('web citation presentation', () => {
   it('splits grouped citations into separate chips and preserves source 11', () => {
     const sources = Array.from({ length: 11 }, (_, offset) => ({ index: offset + 1, title: `Source ${offset + 1}`, url: `https://source${offset + 1}.example/path`, domain: `source${offset + 1}.example`, supports: '' }))
     render(<ResponseMarkdown content="Claims [8, 9] and [11]." streaming={false} metadata={{ web_sources: sources }} />)
-    expect(screen.getByRole('button', { name: '[8]' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: '[9]' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: '[11]' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'source8.example' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'source9.example' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'source11.example' })).toBeTruthy()
   })
 
   it('does not transform markers inside code or existing links', () => {
@@ -48,7 +48,7 @@ describe('web citation presentation', () => {
   it('opens a focused citation popup and external source button', async () => {
     const user = userEvent.setup()
     render(<ResponseMarkdown content="Grounded claim [1]." streaming={false} metadata={metadata} />)
-    await user.click(screen.getByRole('button', { name: '[1]' }))
+    await user.click(screen.getByRole('button', { name: 'docs.example' }))
     expect(screen.getByRole('dialog', { name: 'Source 1' })).toBeTruthy()
     expect(screen.getByText('Official docs')).toBeTruthy()
     const open = screen.getByRole('link', { name: /Open source/i })

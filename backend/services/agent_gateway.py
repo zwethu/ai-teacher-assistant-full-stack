@@ -796,6 +796,41 @@ def extract_course_blueprint_full_from_state(state: dict[str, Any]) -> dict[str,
     return raw
 
 
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def extract_email_full_from_state(
+    state: dict[str, Any], run_id: str
+) -> dict[str, Any] | None:
+    """Return an email staged by the email agent, only if THIS run staged it.
+
+    Session state is long-lived per chat, so a stale ``email_full`` from an earlier
+    turn must never resurface send buttons on an unrelated message. The email agent
+    stamps ``staged_in_run`` with the current run id (via stage_email_for_send); we
+    require it to match the run being finalized.
+    """
+    raw = _state_payload(state, "email_full")
+    if not isinstance(raw, dict):
+        return None
+    if str(raw.get("staged_in_run") or "") != str(run_id or ""):
+        return None
+
+    recipients_raw = raw.get("recipients")
+    if isinstance(recipients_raw, str):
+        recipients_raw = [recipients_raw]
+    recipients: list[str] = []
+    for item in recipients_raw or []:
+        addr = str(item).strip()
+        if addr and _EMAIL_RE.match(addr) and addr not in recipients:
+            recipients.append(addr)
+
+    subject = str(raw.get("subject") or "").strip()
+    body = str(raw.get("body") or "").strip()
+    if not recipients or not subject or not body:
+        return None
+    return {"recipients": recipients, "subject": subject, "body": body}
+
+
 def extract_outline_from_state(
     state: dict[str, Any], workflow_type: str
 ) -> tuple[str, dict[str, Any]] | None:
@@ -1175,6 +1210,104 @@ def _pending_artifact_message_metadata(pending: dict[str, Any] | None) -> dict[s
         "artifact_title": str(pending.get("title") or ""),
         "artifact_preview_card": True,
         "week": pending.get("week"),
+    }
+
+
+def render_email_preview_markdown(
+    recipients: list[str], subject: str, body: str
+) -> str:
+    count = len(recipients)
+    if count <= 5:
+        who = ", ".join(recipients)
+    else:
+        who = ", ".join(recipients[:5]) + f", +{count - 5} more"
+    return "\n".join(
+        [
+            "**📧 Email ready to send**",
+            "",
+            f"**To ({count}):** {who}",
+            f"**Subject:** {subject}",
+            "",
+            body,
+        ]
+    )
+
+
+def maybe_store_pending_email_from_session(
+    *,
+    batch_id: str,
+    chat_id: str,
+    run_id: str,
+    state: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Store a run-scoped pending email when the agent staged one this run.
+
+    Mirrors ``maybe_store_pending_artifact_from_session`` so email reuses the same
+    claim/hash/mark export lifecycle, but the terminal action is a Gmail send/schedule
+    (owned by the backend) rather than a Google Docs/Forms export.
+    """
+    payload = extract_email_full_from_state(state, run_id)
+    if not payload:
+        return None
+
+    content = {
+        "recipients": payload["recipients"],
+        "subject": payload["subject"],
+        "body": payload["body"],
+    }
+    pending = {
+        "pending_artifact_id": f"pending_{run_id}",
+        "artifact_type": "email",
+        "workflow_type": "email",
+        "week": None,
+        "title": payload["subject"],
+        "content_json": content,
+        "content_hash": content_hash(content),
+        "preview_markdown": render_email_preview_markdown(
+            payload["recipients"], payload["subject"], payload["body"]
+        ),
+        "preview_renderer_version": "email_v1",
+        "content_schema_version": "v1",
+        "source_run_id": run_id,
+        "source_chat_id": chat_id,
+        "batch_id": batch_id,
+        "status": "pending_export",
+    }
+    mark_agent_run_pending_artifact(
+        batch_id=batch_id,
+        chat_id=chat_id,
+        run_id=run_id,
+        pending_artifact=pending,
+    )
+    logger.info(
+        "pending email stored run_id=%s recipients=%d hash=%s",
+        run_id,
+        len(payload["recipients"]),
+        pending["content_hash"],
+    )
+    return pending
+
+
+def _pending_email_message_metadata(pending: dict[str, Any] | None) -> dict[str, Any]:
+    if not pending:
+        return {}
+    content = pending.get("content_json") or {}
+    recipients = content.get("recipients") or []
+    return {
+        "pending_artifact_id": str(pending.get("pending_artifact_id") or ""),
+        "pending_artifact_type": "email",
+        "pending_artifact_content_hash": str(pending.get("content_hash") or ""),
+        "pending_email_sendable": True,
+        "pending_export_target": "gmail",
+        "artifact_type": "email",
+        "artifact_title": str(pending.get("title") or ""),
+        "email_subject": str(content.get("subject") or ""),
+        # Carried so the UI can prefill an edit form without re-parsing the preview.
+        "email_body": str(content.get("body") or ""),
+        "email_recipients": list(recipients),
+        "email_recipient_count": len(recipients),
+        # Reuse the presenter-intro preservation path used by artifact preview cards.
+        "artifact_preview_card": True,
     }
 
 
@@ -1624,7 +1757,29 @@ async def _run_agent_background(
                         _attach_assistant_intro(metadata, final_text, preview_markdown)
                         assistant_message_text = preview_markdown
             else:
-                logger.info("generated draft save skipped run_id=%s reason=save_draft_false", run_id)
+                # Plain chat: the email agent may have staged an email this run.
+                # session_state_after is already loaded below for web citations /
+                # blueprint hints, so this detection adds no extra Agent Engine read.
+                session_state_after = await load_session_state_after()
+                pending_email = maybe_store_pending_email_from_session(
+                    batch_id=batch_id,
+                    chat_id=chat_id,
+                    run_id=run_id,
+                    state=session_state_after,
+                )
+                if pending_email:
+                    emit_backend_event(
+                        "pending_email.done",
+                        status="done",
+                        title="Email ready to send",
+                    )
+                    metadata = _pending_email_message_metadata(pending_email)
+                    preview_markdown = str(pending_email.get("preview_markdown") or "").strip()
+                    if preview_markdown:
+                        _attach_assistant_intro(metadata, final_text, preview_markdown)
+                        assistant_message_text = preview_markdown
+                else:
+                    logger.info("generated draft save skipped run_id=%s reason=save_draft_false", run_id)
             if draft:
                 metadata = _draft_message_metadata(draft)
                 preview_markdown = str(draft.get("preview_markdown") or "").strip()

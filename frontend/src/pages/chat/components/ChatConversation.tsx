@@ -1,14 +1,14 @@
 import { useRef, useState, type RefObject } from 'react'
 import type { ChangeEvent, ClipboardEvent, KeyboardEvent } from 'react'
 import type { ChatMessage } from '../../../entity/Chat'
-import { BookOpen, FileQuestion, FileText, FlaskConical, GraduationCap, History, Image as ImageIcon, Loader2, Paperclip, Send, Sparkles, X } from 'lucide-react'
+import { BookOpen, FileQuestion, FileText, FlaskConical, GraduationCap, History, Image as ImageIcon, Loader2, Mail, Paperclip, Send, Sparkles, X } from 'lucide-react'
 import { MessageRow, ThinkingIndicator } from './MessageRow'
 import { ConnectorToggles, type ConnectorsState } from './ConnectorToggles'
 import type { RunUiState } from '../runTypes'
 import type { PendingChatAttachment } from '../hooks/useChatPage'
 import type { ChatAttachmentListItem, ChatAttachmentSnapshot } from '../../../entity/Chat'
 
-export type GenerateMode = 'lesson_plan' | 'lab' | 'assessment' | 'course_blueprint'
+export type GenerateMode = 'lesson_plan' | 'lab' | 'assessment' | 'course_blueprint' | 'email'
 
 type Props = {
   input: string
@@ -80,6 +80,8 @@ export function ChatInput({
       ? 'Assessment Preview'
       : activeGenerateMode === 'course_blueprint'
         ? 'Course Plan'
+      : activeGenerateMode === 'email'
+        ? 'Email'
       : 'Lesson Plan Preview'
   const placeholder =
     activeGenerateMode === 'lesson_plan'
@@ -90,6 +92,8 @@ export function ChatInput({
           ? 'Describe the assessment preview you want, e.g. Week 3 mixed quiz, 10 questions...'
         : activeGenerateMode === 'course_blueprint'
           ? 'Describe the course plan you want, e.g. a 12-week plan focused on applied data skills...'
+        : activeGenerateMode === 'email'
+          ? 'Describe the email you want, e.g. remind students about the Friday quiz deadline...'
         : 'Message your teaching assistant...'
 
   const attachmentStatus = (attachment: PendingChatAttachment) => {
@@ -158,6 +162,15 @@ export function ChatInput({
                   <FileQuestion className="h-4 w-4 text-emerald-600" />
                   Assessment Preview
                 </button>
+                <div className="my-1 border-t border-slate-100" />
+                <button
+                  type="button"
+                  onClick={() => selectGenerateMode('email')}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-emerald-50"
+                >
+                  <Mail className="h-4 w-4 text-emerald-600" />
+                  Send Email
+                </button>
               </div>
             )}
           </div>
@@ -175,6 +188,8 @@ export function ChatInput({
               <FileQuestion className="h-4 w-4" />
             ) : activeGenerateMode === 'course_blueprint' ? (
               <GraduationCap className="h-4 w-4" />
+            ) : activeGenerateMode === 'email' ? (
+              <Mail className="h-4 w-4" />
             ) : (
               <BookOpen className="h-4 w-4" />
             )}

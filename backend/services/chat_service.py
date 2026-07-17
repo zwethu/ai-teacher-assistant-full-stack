@@ -458,6 +458,34 @@ def update_assistant_message_metadata_for_run(
         )
 
 
+def update_assistant_message_content_for_run(
+    *,
+    batch_id: str,
+    chat_id: str,
+    run_id: str,
+    content: str,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    """Replace assistant message text for a run, merging metadata when given.
+
+    Used when a staged preview is edited after the run finished, so the rendered
+    card matches what will actually be sent.
+    """
+    for msg in (
+        _messages_col(batch_id, chat_id)
+        .where("run_id", "==", run_id)
+        .where("role", "==", "assistant")
+        .stream()
+    ):
+        update: dict[str, Any] = {"content": content, "updated_at": SERVER_TIMESTAMP}
+        if metadata:
+            existing = (msg.to_dict() or {}).get("metadata") or {}
+            if not isinstance(existing, dict):
+                existing = {}
+            update["metadata"] = {**existing, **metadata}
+        msg.reference.update(update)
+
+
 def list_messages(batch_id: str, chat_id: str, lecturer_id: str) -> list[dict[str, Any]]:
     """Return messages for a chat oldest-first, after ownership check."""
     chat = get_chat(batch_id, chat_id, lecturer_id)

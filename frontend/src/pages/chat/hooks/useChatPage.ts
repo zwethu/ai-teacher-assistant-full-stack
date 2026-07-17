@@ -607,7 +607,10 @@ export function useChatPage() {
       chat,
       message: content,
       invoke: async () => {
-        if (!generateMode) {
+        // Email has no outline/preview stage: it routes through plain chat so the
+        // backend's pending-email staging (which only runs when pending_artifact is
+        // unset) can stage the draft for the Send/Schedule buttons.
+        if (!generateMode || generateMode === 'email') {
           return sendMessage(batchId, chatId, content, connectors, attachmentIds)
         }
         const payload = buildGenerationRequest(
@@ -1012,7 +1015,11 @@ export function useChatPage() {
   function maybeClearGenerateModeFromFinalMessage(message: Pick<ChatMessage, 'run_id' | 'metadata'>) {
     const runId = message.run_id
     if (!runId || !workflowModeRunIdsRef.current[runId]) return
-    if (message.metadata?.pending_exportable === true || message.metadata?.pending_savable_blueprint === true) {
+    if (
+      message.metadata?.pending_exportable === true ||
+      message.metadata?.pending_savable_blueprint === true ||
+      message.metadata?.pending_email_sendable === true
+    ) {
       setActiveGenerateMode(null)
       delete workflowModeRunIdsRef.current[runId]
     }

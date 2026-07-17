@@ -3,16 +3,20 @@ import { createPortal } from 'react-dom'
 import {
   BookOpen,
   Bot,
+  CalendarClock,
   ChevronDown,
   ExternalLink,
   FileText,
   FileQuestion,
   FlaskConical,
   Loader2,
+  Mail,
   Map as MapIcon,
   Maximize2,
   MoreHorizontal,
+  Pencil,
   Save,
+  Send,
   User,
   X,
   Image as ImageIcon,
@@ -25,7 +29,13 @@ import remarkMath from 'remark-math'
 import 'katex/dist/katex.min.css'
 import type { ChatAttachmentSnapshot, ChatMessage } from '../../../entity/Chat'
 import { startGoogleOAuth } from '../../../services/authService'
-import { exportPendingQuizToGoogleForms, generateDocsFromPendingArtifact } from '../../../services/chatService'
+import {
+  exportPendingQuizToGoogleForms,
+  generateDocsFromPendingArtifact,
+  schedulePendingEmail,
+  sendPendingEmail,
+  updatePendingEmail,
+} from '../../../services/chatService'
 import { getChatAttachmentContent } from '../../../services/chatService'
 import {
   exportArtifactDraftToGoogleDocs,
@@ -221,6 +231,7 @@ export function MessageRow({
             )}
             {!isUser && batchId && <ArtifactExportButton batchId={batchId} msg={msg} />}
             {!isUser && batchId && <BlueprintSaveButton batchId={batchId} msg={msg} />}
+            {!isUser && batchId && <EmailActionButtons batchId={batchId} msg={msg} />}
           </div>
         )}
       </div>
@@ -788,6 +799,266 @@ export function BlueprintSaveButton({ batchId, msg, onSaved }: { batchId: string
         </button>
       )}
       {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+    </div>
+  )
+}
+
+function minScheduleLocalValue(): string {
+  const d = new Date(Date.now() + 60_000)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+function formatMaybeDate(value: string): string {
+  const d = new Date(value)
+  return Number.isNaN(d.getTime()) ? value : d.toLocaleString()
+}
+
+export function EmailActionButtons({ batchId, msg }: { batchId: string; msg: ChatMessage }) {
+  const metadata = msg.metadata || {}
+  const sendable = metadata.pending_email_sendable === true
+  const alreadySent = metadata.email_sent === true
+  const alreadyScheduled = metadata.email_scheduled === true
+  const runId = String(msg.run_id || '')
+  const chatId = msg.chat_id
+  const recipientCount =
+    typeof metadata.email_recipient_count === 'number' ? metadata.email_recipient_count : 0
+
+  const [busy, setBusy] = useState<'send' | 'schedule' | 'edit' | null>(null)
+  const [showSchedule, setShowSchedule] = useState(false)
+  const [sendAt, setSendAt] = useState('')
+  const [showEdit, setShowEdit] = useState(false)
+  const [draft, setDraft] = useState({
+    subject: String(metadata.email_subject || ''),
+    body: String(metadata.email_body || ''),
+  })
+  const [done, setDone] = useState<{ kind: 'sent' | 'scheduled'; detail: string } | null>(
+    alreadySent
+      ? { kind: 'sent', detail: '' }
+      : alreadyScheduled
+        ? { kind: 'scheduled', detail: String(metadata.email_send_at || '') }
+        : null,
+  )
+  const [needsGoogle, setNeedsGoogle] = useState(false)
+  const [error, setError] = useState('')
+
+  if ((!sendable && !done) || !chatId || !runId) return null
+
+  function onError(err: unknown) {
+    const maybe = err as { response?: { data?: { detail?: unknown } }; message?: string }
+    const detail = maybe.response?.data?.detail
+    if (detail && typeof detail === 'object' && 'code' in detail) {
+      if (String((detail as { code?: unknown }).code || '') === 'GOOGLE_OAUTH_REQUIRED') {
+        setNeedsGoogle(true)
+        return
+      }
+    }
+    setError(typeof detail === 'string' ? detail : maybe.message || 'Email action failed.')
+  }
+
+  async function handleSend() {
+    setError('')
+    setNeedsGoogle(false)
+    setBusy('send')
+    try {
+      const res = await sendPendingEmail(batchId, chatId, runId)
+      const failed = res.failed_count || 0
+      setDone({
+        kind: 'sent',
+        detail:
+          failed > 0
+            ? `${res.sent_count} sent, ${failed} failed`
+            : `${res.sent_count} recipient${res.sent_count === 1 ? '' : 's'}`,
+      })
+    } catch (err) {
+      onError(err)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function handleSaveEdit() {
+    if (!draft.subject.trim() || !draft.body.trim()) {
+      setError('Subject and body are required.')
+      return
+    }
+    setError('')
+    setBusy('edit')
+    try {
+      await updatePendingEmail(batchId, chatId, runId, {
+        subject: draft.subject,
+        body: draft.body,
+      })
+      setShowEdit(false)
+    } catch (err) {
+      onError(err)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function handleSchedule() {
+    if (!sendAt) {
+      setError('Choose a date and time.')
+      return
+    }
+    if (new Date(sendAt) <= new Date()) {
+      setError('Scheduled time must be in the future.')
+      return
+    }
+    setError('')
+    setNeedsGoogle(false)
+    setBusy('schedule')
+    try {
+      const res = await schedulePendingEmail(batchId, chatId, runId, new Date(sendAt).toISOString())
+      setDone({ kind: 'scheduled', detail: res.send_at })
+      setShowSchedule(false)
+    } catch (err) {
+      onError(err)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  if (done) {
+    return (
+      <div className="mt-3 border-t border-slate-200 pt-3">
+        <span className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-700">
+          <Mail className="h-4 w-4" />
+          {done.kind === 'sent'
+            ? `Email sent${done.detail ? ` — ${done.detail}` : ''}`
+            : `Email scheduled${done.detail ? ` for ${formatMaybeDate(done.detail)}` : ''}`}
+        </span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mt-3 flex flex-col gap-2 border-t border-slate-200 pt-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => void handleSend()}
+          disabled={busy !== null}
+          className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-70"
+        >
+          {busy === 'send' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          {busy === 'send' ? 'Sending…' : `Send now${recipientCount ? ` (${recipientCount})` : ''}`}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setShowEdit((s) => !s)
+            setShowSchedule(false)
+            setError('')
+          }}
+          disabled={busy !== null}
+          className="inline-flex items-center gap-2 rounded-md border border-emerald-200 bg-white px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-70"
+        >
+          <Pencil className="h-4 w-4" />
+          {showEdit ? 'Cancel edit' : 'Edit'}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setShowSchedule((s) => !s)
+            setError('')
+            if (!sendAt) setSendAt(minScheduleLocalValue())
+          }}
+          disabled={busy !== null}
+          className="inline-flex items-center gap-2 rounded-md border border-emerald-200 bg-white px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-70"
+        >
+          <CalendarClock className="h-4 w-4" />
+          Schedule
+        </button>
+        {needsGoogle && (
+          <button
+            type="button"
+            onClick={startGoogleOAuth}
+            className="inline-flex items-center rounded-md border border-emerald-200 bg-white px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50"
+          >
+            Connect Google
+          </button>
+        )}
+      </div>
+      {showEdit && (
+        <div className="flex flex-col gap-2 rounded-lg border border-emerald-100 bg-emerald-50/60 p-3">
+          <label className="text-xs font-semibold text-slate-600">
+            Subject
+            <input
+              type="text"
+              value={draft.subject}
+              onChange={(e) => setDraft((d) => ({ ...d, subject: e.target.value }))}
+              disabled={busy !== null}
+              className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-normal text-slate-800 focus:border-emerald-500 focus:ring-emerald-500 disabled:opacity-60"
+            />
+          </label>
+          <label className="text-xs font-semibold text-slate-600">
+            Body
+            <textarea
+              rows={8}
+              value={draft.body}
+              onChange={(e) => setDraft((d) => ({ ...d, body: e.target.value }))}
+              disabled={busy !== null}
+              className="mt-1 block w-full resize-y rounded-md border border-slate-300 px-3 py-2 text-sm font-normal text-slate-800 focus:border-emerald-500 focus:ring-emerald-500 disabled:opacity-60"
+            />
+          </label>
+          <p className="text-[11px] text-slate-500">
+            Sending to {recipientCount} recipient{recipientCount === 1 ? '' : 's'}.
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void handleSaveEdit()}
+              disabled={busy !== null}
+              className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-70"
+            >
+              {busy === 'edit' ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {busy === 'edit' ? 'Saving…' : 'Save changes'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setShowEdit(false)
+                setDraft({
+                  subject: String(metadata.email_subject || ''),
+                  body: String(metadata.email_body || ''),
+                })
+                setError('')
+              }}
+              disabled={busy !== null}
+              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-70"
+            >
+              Discard
+            </button>
+          </div>
+        </div>
+      )}
+      {showSchedule && (
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="datetime-local"
+            min={minScheduleLocalValue()}
+            value={sendAt}
+            onChange={(e) => setSendAt(e.target.value)}
+            className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+          />
+          <button
+            type="button"
+            onClick={() => void handleSchedule()}
+            disabled={busy !== null}
+            className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-70"
+          >
+            {busy === 'schedule' ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <CalendarClock className="h-4 w-4" />
+            )}
+            Confirm schedule
+          </button>
+        </div>
+      )}
+      {error && <span className="text-sm text-red-600">{error}</span>}
     </div>
   )
 }

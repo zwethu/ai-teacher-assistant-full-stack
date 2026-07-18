@@ -611,7 +611,11 @@ export function useChatPage() {
         // backend's pending-email staging (which only runs when pending_artifact is
         // unset) can stage the draft for the Send/Schedule buttons.
         if (!generateMode || generateMode === 'email') {
-          return sendMessage(batchId, chatId, content, connectors, attachmentIds)
+          // Email drafting never uses web search — force it off so the hidden
+          // toggle's default `web_search: true` can't reach the backend.
+          const chatConnectors =
+            generateMode === 'email' ? { ...connectors, web_search: false } : connectors
+          return sendMessage(batchId, chatId, content, chatConnectors, attachmentIds)
         }
         const payload = buildGenerationRequest(
           generateMode, batchId, chatId, content, connectors, attachmentIds,

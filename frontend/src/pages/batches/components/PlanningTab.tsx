@@ -153,7 +153,7 @@ function GeneratePlanPanel({
                   className="ml-2 w-24 rounded-md border border-slate-300 px-2 py-1.5 text-sm" />
               </label>
               <label className="inline-flex items-center gap-2 text-sm text-slate-700">
-                <input type="checkbox" checked={web} onChange={(e) => setWeb(e.target.checked)} /> Web search
+                <input type="checkbox" checked={web} onChange={(e) => setWeb(e.target.checked)} className="accent-emerald-600" /> Web search
               </label>
             </div>
             <label className="block text-sm font-medium text-slate-700">Instructions (optional)

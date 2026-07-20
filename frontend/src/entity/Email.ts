@@ -9,6 +9,11 @@ export interface Email extends BaseDoc {
   status: string
   sendAt: FirestoreTimestamp
   sentAt: FirestoreTimestamp
+  /** All recipients when an email targets more than one address. */
+  recipients?: string[]
+  /** Batch ("space") this email was composed for, when sent from the batch flow. */
+  batchId?: string
+  batchName?: string
 }
 
 export const defaultShape: Email = {

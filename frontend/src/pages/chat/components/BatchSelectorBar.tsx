@@ -88,7 +88,7 @@ export function BatchSelectorBar({
       </div>
 
       {open && batches.length > 0 && (
-        <div className="absolute left-4 right-4 top-full mt-1 max-w-sm mx-auto rounded-xl border border-slate-200 bg-white shadow-lg z-20 overflow-hidden">
+        <div className="absolute left-4 right-4 bottom-full mb-1 max-w-sm mx-auto rounded-xl border border-slate-200 bg-white shadow-lg z-30 overflow-hidden">
           <div className="max-h-56 overflow-y-auto py-1">
             {batches.map((batch) => (
               <button

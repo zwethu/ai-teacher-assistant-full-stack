@@ -1,14 +1,20 @@
 import { useCallback, useState } from 'react'
-import { Sparkles } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Loader2, Sparkles } from 'lucide-react'
 import type { ChatPageState } from '../hooks/useChatPage'
 import { ChatInput, ChatMessagesPanel } from './ChatConversation'
 import { ChatPageHeader } from './ChatPageHeader'
 import { ChatSidePanel, type ChatSidePanelSection } from './ChatSidePanel'
 import { ChatWelcomeScreen } from './ChatWelcomeScreen'
+import { BatchSelectorBar } from './BatchSelectorBar'
+import { NoBatchesView } from './NoBatchesView'
 
 type Props = Pick<
   ChatPageState,
   | 'selectedBatch'
+  | 'batches'
+  | 'batchesLoading'
+  | 'setSelectedBatch'
   | 'activeChat'
   | 'messages'
   | 'messagesLoading'
@@ -52,6 +58,9 @@ type Props = Pick<
 export function ChatLayout(props: Props) {
   const {
     selectedBatch,
+    batches,
+    batchesLoading,
+    setSelectedBatch,
     activeChat,
     messages,
     messagesLoading,
@@ -92,6 +101,7 @@ export function ChatLayout(props: Props) {
     handleDeleteChat,
   } = props
 
+  const navigate = useNavigate()
   const [sidePanelOpen, setSidePanelOpen] = useState(false)
   const [sidePanelSection, setSidePanelSection] = useState<ChatSidePanelSection | null>(null)
   const isRouteInvalid = routeHydration === 'invalid'
@@ -138,15 +148,33 @@ export function ChatLayout(props: Props) {
 
         {!selectedBatch ? (
           <main className="flex-1 overflow-y-auto">
-            <div className="max-w-3xl mx-auto px-4 py-8 min-h-full flex flex-col items-center justify-center text-center">
-              <div className="w-14 h-14 rounded-2xl bg-white/50 border border-white/60 shadow-lg flex items-center justify-center mb-6">
-                <Sparkles className="w-7 h-7 text-emerald-600" />
+            {routeHydration === 'hydrating' ? (
+              // A canonical /batches/:id/chats/:id URL is still loading its space —
+              // show a spinner, not the picker, to avoid a flash of batch selection.
+              <div className="max-w-3xl mx-auto px-4 py-8 min-h-full flex items-center justify-center">
+                <Loader2 className="w-7 h-7 text-emerald-600 animate-spin" />
               </div>
-              <h2 className="text-2xl font-semibold text-slate-800 mb-2">AI Teaching Assistant</h2>
-              <p className="text-slate-500 text-sm max-w-sm">
-                Open a space from Batches or Sessions to start chatting about lesson plans, assessments, and more.
-              </p>
-            </div>
+            ) : isRouteInvalid ? (
+              <div className="max-w-3xl mx-auto px-4 py-8 min-h-full flex flex-col items-center justify-center text-center">
+                <h3 className="text-lg font-semibold text-slate-700 mb-1">Chat not found</h3>
+                <p className="text-sm text-slate-500 mb-4 max-w-xs">
+                  This conversation may have been deleted or you may not have access to it.
+                </p>
+              </div>
+            ) : !batchesLoading && batches.length === 0 ? (
+              <NoBatchesView onGoToBatches={() => navigate('/batches')} />
+            ) : (
+              <div className="max-w-3xl mx-auto px-4 py-8 min-h-full flex flex-col items-center justify-center text-center">
+                <div className="w-14 h-14 rounded-2xl bg-white/50 border border-white/60 shadow-lg flex items-center justify-center mb-6">
+                  <Sparkles className="w-7 h-7 text-emerald-600" />
+                </div>
+                <h2 className="text-2xl font-semibold text-slate-800 mb-2">AI Teaching Assistant</h2>
+                <p className="text-slate-500 text-sm max-w-sm">
+                  Pick a batch from the <span className="font-medium text-slate-700">Select a batch</span> button
+                  below to start chatting about lesson plans, assessments, and more.
+                </p>
+              </div>
+            )}
           </main>
         ) : isRouteInvalid ? (
           <main className="flex-1 overflow-y-auto">
@@ -191,6 +219,14 @@ export function ChatLayout(props: Props) {
         )}
 
         <div className="z-20 flex flex-col flex-shrink-0 bg-transparent">
+          {!isRouteInvalid && routeHydration !== 'hydrating' && (batchesLoading || batches.length > 0 || selectedBatch) && (
+            <BatchSelectorBar
+              batches={batches}
+              batchesLoading={batchesLoading}
+              selectedBatch={selectedBatch}
+              onSelectBatch={setSelectedBatch}
+            />
+          )}
           <ChatInput
             input={input}
             sending={sending}

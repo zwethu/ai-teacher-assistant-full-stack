@@ -73,10 +73,10 @@ describe('parseUserMessageContent', () => {
 })
 
 describe('chat attachment composer', () => {
-  it('offers course-plan generation from the Generate menu', () => {
+  it('offers course-plan generation from the + menu', () => {
     const props = renderInput({ pendingAttachments: [] })
-    fireEvent.click(screen.getByRole('button', { name: 'Generate' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Course Plan' }))
+    fireEvent.click(screen.getByRole('button', { name: /Add files, generate/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Course Plan' }))
     expect(props.onSelectGenerateMode).toHaveBeenCalledWith('course_blueprint')
   })
 
@@ -92,7 +92,8 @@ describe('chat attachment composer', () => {
   it('disables send and file selection while an upload is active', () => {
     renderInput({ pendingAttachments: [], attachmentsUploading: true })
     expect((screen.getByRole('button', { name: 'Send message' }) as HTMLButtonElement).disabled).toBe(true)
-    expect((screen.getByRole('button', { name: 'Attach files' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: /Add files, generate/ }))
+    expect((screen.getByRole('menuitem', { name: 'Add files or photos' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('opens the files panel from Previous attachments instead of an inline popover', () => {
@@ -103,7 +104,8 @@ describe('chat attachment composer', () => {
       pendingAttachments: [],
       onOpenFilesPanel,
     })
-    fireEvent.click(screen.getByRole('button', { name: /Previous attachments/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Add files, generate/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /Previous attachments/ }))
     expect(onOpenFilesPanel).toHaveBeenCalledTimes(1)
     expect(screen.queryByText(/available in this chat for 7 days/)).toBeNull()
     expect(listChatAttachments).not.toHaveBeenCalled()

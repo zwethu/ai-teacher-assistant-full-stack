@@ -1,9 +1,9 @@
-import { useRef, useState, type RefObject } from 'react'
+import { useEffect, useRef, useState, type RefObject } from 'react'
 import type { ChangeEvent, ClipboardEvent, KeyboardEvent } from 'react'
 import type { ChatMessage } from '../../../entity/Chat'
-import { BookOpen, FileQuestion, FileText, FlaskConical, GraduationCap, History, Image as ImageIcon, Loader2, Mail, Paperclip, Send, Sparkles, X } from 'lucide-react'
+import { BookOpen, Check, FileQuestion, FileText, FlaskConical, Globe, GraduationCap, History, Image as ImageIcon, Loader2, Mail, Paperclip, Plus, Send, X } from 'lucide-react'
 import { MessageRow, ThinkingIndicator } from './MessageRow'
-import { ConnectorToggles, type ConnectorsState } from './ConnectorToggles'
+import { type ConnectorsState } from './ConnectorToggles'
 import type { RunUiState } from '../runTypes'
 import type { PendingChatAttachment } from '../hooks/useChatPage'
 import type { ChatAttachmentListItem, ChatAttachmentSnapshot } from '../../../entity/Chat'
@@ -67,12 +67,39 @@ export function ChatInput({
 }: Props) {
   const [menuOpen, setMenuOpen] = useState(false)
   const attachmentInputRef = useRef<HTMLInputElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!menuOpen) return undefined
+    function handlePointerDown(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', handlePointerDown)
+    return () => document.removeEventListener('mousedown', handlePointerDown)
+  }, [menuOpen])
 
   function selectGenerateMode(mode: GenerateMode) {
     onSelectGenerateMode(mode)
     setMenuOpen(false)
     requestAnimationFrame(() => textareaRef.current?.focus())
   }
+
+  function openFilePicker() {
+    setMenuOpen(false)
+    attachmentInputRef.current?.click()
+  }
+
+  function openPreviousAttachments() {
+    setMenuOpen(false)
+    onOpenFilesPanel?.()
+  }
+
+  function toggleWebSearch() {
+    onConnectorsChange('web_search', !connectors.web_search)
+  }
+
+  const canUsePreviousAttachments = Boolean(batchId && chatId && onOpenFilesPanel)
+  const attachDisabled = disabled || sending || attachmentsUploading || pendingAttachments.length >= 5
 
   const modeLabel = activeGenerateMode === 'lab'
     ? 'Lab Preview'
@@ -117,92 +144,46 @@ export function ChatInput({
       }`}
     >
       <div className="max-w-3xl mx-auto">
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setMenuOpen((value) => !value)}
-              disabled={disabled || sending}
-              className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-white/75 px-3 py-1.5 text-sm font-medium text-emerald-700 shadow-sm hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <Sparkles className="h-4 w-4" />
-              Generate
-            </button>
-            {menuOpen && (
-              <div className="absolute bottom-full left-0 z-30 mb-2 w-56 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl">
+        {(activeGenerateMode || connectors.web_search) && (
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            {activeGenerateMode && (
+              <span className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50/90 px-3 py-1.5 text-sm font-medium text-emerald-800 shadow-sm">
+                {activeGenerateMode === 'lab' ? (
+                  <FlaskConical className="h-4 w-4" />
+                ) : activeGenerateMode === 'assessment' ? (
+                  <FileQuestion className="h-4 w-4" />
+                ) : activeGenerateMode === 'course_blueprint' ? (
+                  <GraduationCap className="h-4 w-4" />
+                ) : activeGenerateMode === 'email' ? (
+                  <Mail className="h-4 w-4" />
+                ) : (
+                  <BookOpen className="h-4 w-4" />
+                )}
+                <span>{modeLabel}</span>
                 <button
                   type="button"
-                  onClick={() => selectGenerateMode('course_blueprint')}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-emerald-50"
+                  onClick={onClearGenerateMode}
+                  className="inline-flex h-5 w-5 items-center justify-center rounded-full text-emerald-700 hover:bg-emerald-100"
+                  aria-label={`Clear ${modeLabel}`}
                 >
-                  <GraduationCap className="h-4 w-4 text-emerald-600" />
-                  Course Plan
+                  <X className="h-3.5 w-3.5" />
                 </button>
-                <button
-                  type="button"
-                  onClick={() => selectGenerateMode('lesson_plan')}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-emerald-50"
-                >
-                  <BookOpen className="h-4 w-4 text-emerald-600" />
-                  Lesson Plan Preview
-                </button>
-                <button
-                  type="button"
-                  onClick={() => selectGenerateMode('lab')}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-emerald-50"
-                >
-                  <FlaskConical className="h-4 w-4 text-emerald-600" />
-                  Lab Preview
-                </button>
-                <button
-                  type="button"
-                  onClick={() => selectGenerateMode('assessment')}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-emerald-50"
-                >
-                  <FileQuestion className="h-4 w-4 text-emerald-600" />
-                  Assessment Preview
-                </button>
-                <button
-                  type="button"
-                  onClick={() => selectGenerateMode('email')}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-emerald-50"
-                >
-                  <Mail className="h-4 w-4 text-emerald-600" />
-                  Send Email
-                </button>
-              </div>
+              </span>
             )}
-          </div>
-          {activeGenerateMode !== 'email' && (
-            <ConnectorToggles
-              connectors={connectors}
-              onChange={onConnectorsChange}
-              disabled={disabled || sending}
-            />
-          )}
-        </div>
-        {activeGenerateMode && (
-          <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50/90 px-3 py-1.5 text-sm font-medium text-emerald-800 shadow-sm">
-            {activeGenerateMode === 'lab' ? (
-              <FlaskConical className="h-4 w-4" />
-            ) : activeGenerateMode === 'assessment' ? (
-              <FileQuestion className="h-4 w-4" />
-            ) : activeGenerateMode === 'course_blueprint' ? (
-              <GraduationCap className="h-4 w-4" />
-            ) : activeGenerateMode === 'email' ? (
-              <Mail className="h-4 w-4" />
-            ) : (
-              <BookOpen className="h-4 w-4" />
+            {connectors.web_search && (
+              <span className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50/90 px-3 py-1.5 text-sm font-medium text-sky-800 shadow-sm">
+                <Globe className="h-4 w-4" />
+                <span>Web search on</span>
+                <button
+                  type="button"
+                  onClick={() => onConnectorsChange('web_search', false)}
+                  className="inline-flex h-5 w-5 items-center justify-center rounded-full text-sky-700 hover:bg-sky-100"
+                  aria-label="Turn off web search"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </span>
             )}
-            <span>{modeLabel}</span>
-            <button
-              type="button"
-              onClick={onClearGenerateMode}
-              className="inline-flex h-5 w-5 items-center justify-center rounded-full text-emerald-700 hover:bg-emerald-100"
-              aria-label={`Clear ${modeLabel}`}
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
           </div>
         )}
         {pendingAttachments.length > 0 && (
@@ -253,17 +234,6 @@ export function ChatInput({
         {hasBlockingAttachment && (
           <p className="mb-1 text-xs text-amber-600">Remove the flagged attachment to send. Large files belong in Course Space, where they’re indexed for retrieval.</p>
         )}
-        {batchId && chatId && onOpenFilesPanel && (
-          <div className="mb-2">
-            <button
-              type="button"
-              onClick={onOpenFilesPanel}
-              className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white/80 px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-white active:scale-95"
-            >
-              <History className="h-3.5 w-3.5" /> Previous attachments
-            </button>
-          </div>
-        )}
         <div className="flex items-end gap-2 p-2 rounded-[28px] bg-white/55 border border-white/60 shadow-[0_8px_32px_rgba(15,23,42,0.08)]">
           <input
             ref={attachmentInputRef}
@@ -274,15 +244,111 @@ export function ChatInput({
             disabled={disabled || sending || attachmentsUploading}
             className="sr-only"
           />
-          <button
-            type="button"
-            onClick={() => attachmentInputRef.current?.click()}
-            disabled={disabled || sending || attachmentsUploading || pendingAttachments.length >= 5}
-            className="mb-0.5 ml-1 inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-slate-500 hover:bg-white/80 disabled:opacity-40"
-            aria-label="Attach files"
-          >
-            {attachmentsUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
-          </button>
+          <div className="relative" ref={menuRef}>
+            <button
+              type="button"
+              onClick={() => setMenuOpen((value) => !value)}
+              disabled={disabled || sending}
+              className="mb-0.5 ml-1 inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-slate-500 hover:bg-white/80 disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label="Add files, generate, or toggle web search"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+            >
+              {attachmentsUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-5 w-5" />}
+            </button>
+            {menuOpen && (
+              <div
+                role="menu"
+                className="absolute bottom-full left-0 z-30 mb-2 w-60 overflow-hidden rounded-2xl border border-white/60 bg-white/95 p-1 shadow-xl backdrop-blur-xl"
+              >
+                <button
+                  role="menuitem"
+                  type="button"
+                  onClick={openFilePicker}
+                  disabled={attachDisabled}
+                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm text-slate-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <Paperclip className="h-4 w-4 text-slate-500" />
+                  Add files or photos
+                </button>
+                {canUsePreviousAttachments && (
+                  <button
+                    role="menuitem"
+                    type="button"
+                    onClick={openPreviousAttachments}
+                    className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm text-slate-700 hover:bg-emerald-50"
+                  >
+                    <History className="h-4 w-4 text-slate-500" />
+                    Previous attachments
+                  </button>
+                )}
+                <div className="my-1 border-t border-slate-100" />
+                <button
+                  role="menuitem"
+                  type="button"
+                  onClick={() => selectGenerateMode('course_blueprint')}
+                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm text-slate-700 hover:bg-emerald-50"
+                >
+                  <GraduationCap className="h-4 w-4 text-emerald-600" />
+                  Course Plan
+                </button>
+                <button
+                  role="menuitem"
+                  type="button"
+                  onClick={() => selectGenerateMode('lesson_plan')}
+                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm text-slate-700 hover:bg-emerald-50"
+                >
+                  <BookOpen className="h-4 w-4 text-emerald-600" />
+                  Lesson Plan Preview
+                </button>
+                <button
+                  role="menuitem"
+                  type="button"
+                  onClick={() => selectGenerateMode('lab')}
+                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm text-slate-700 hover:bg-emerald-50"
+                >
+                  <FlaskConical className="h-4 w-4 text-emerald-600" />
+                  Lab Preview
+                </button>
+                <button
+                  role="menuitem"
+                  type="button"
+                  onClick={() => selectGenerateMode('assessment')}
+                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm text-slate-700 hover:bg-emerald-50"
+                >
+                  <FileQuestion className="h-4 w-4 text-emerald-600" />
+                  Assessment Preview
+                </button>
+                <div className="my-1 border-t border-slate-100" />
+                <button
+                  role="menuitem"
+                  type="button"
+                  onClick={() => selectGenerateMode('email')}
+                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm text-slate-700 hover:bg-emerald-50"
+                >
+                  <Mail className="h-4 w-4 text-emerald-600" />
+                  Send Email
+                </button>
+                {activeGenerateMode !== 'email' && (
+                  <>
+                    <div className="my-1 border-t border-slate-100" />
+                    <button
+                      role="menuitemcheckbox"
+                      aria-checked={connectors.web_search}
+                      type="button"
+                      onClick={toggleWebSearch}
+                      disabled={disabled || sending}
+                      className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm text-slate-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <Globe className={`h-4 w-4 ${connectors.web_search ? 'text-sky-600' : 'text-slate-500'}`} />
+                      <span className="flex-1">Web search</span>
+                      {connectors.web_search && <Check className="h-4 w-4 text-sky-600" />}
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
           <textarea
             ref={textareaRef}
             rows={1}

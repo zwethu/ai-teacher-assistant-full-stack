@@ -611,14 +611,14 @@ export function WebSourcesList({
           const supportText = source.supports || citedText || ''
           const isGroundedLink = source.link_type === 'google_grounding_redirect'
           return (
-            <li key={source.url} className="flex gap-2 text-xs leading-5">
-              <span className="font-semibold text-emerald-700">[{source.index}]</span>
+            <li key={source.url} className="flex gap-2 rounded-xl border border-white/50 bg-white/40 p-2.5 text-xs leading-5 shadow-sm backdrop-blur-md">
+              <span className="font-semibold text-slate-400">[{source.index}]</span>
               <SourceFavicon domain={visibleDomain} url={source.url} className="mt-0.5 h-4 w-4 flex-shrink-0 rounded-sm" />
               <div className="min-w-0">
                 <div className="font-medium text-slate-800">{source.title}</div>
                 {visibleDomain && <div className="truncate text-slate-500">{visibleDomain}{isGroundedLink && <span className="ml-1 text-slate-400">· Google grounded link</span>}</div>}
                 {supportText && <div className="text-slate-600 line-clamp-2">{supportText}</div>}
-                <a href={source.url} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 rounded-md border border-emerald-200 px-2 py-1 font-medium text-emerald-700 hover:bg-emerald-50"><ExternalLink className="h-3 w-3" />Open source</a>
+                <a href={source.url} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 rounded-md border border-white/60 bg-white/40 px-2 py-1 font-medium text-slate-600 shadow-sm backdrop-blur-md transition-colors hover:bg-white/70"><ExternalLink className="h-3 w-3" />Open source</a>
               </div>
             </li>
           )
@@ -632,7 +632,7 @@ export function CitationSourceModal({ source, citedText, onClose }: { source: We
   useModalLifecycle(onClose)
   const supportText = source.supports || citedText
   const visibleDomain = source.display_domain || source.domain
-  return createPortal(<div className="fixed inset-0 z-[360] flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={`Source ${source.index}`} onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><div className="w-full max-w-md rounded-2xl border border-white/60 bg-white p-5 shadow-2xl"><div className="flex items-start justify-between gap-3"><div><div className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Source [{source.index}]</div><h2 className="mt-1 text-lg font-semibold text-slate-900">{source.title}</h2>{visibleDomain && <p className="mt-1 flex items-center gap-1.5 text-sm text-slate-500"><SourceFavicon domain={visibleDomain} url={source.url} className="h-4 w-4 flex-shrink-0 rounded-sm" />{visibleDomain}</p>}</div><button type="button" onClick={onClose} className="rounded-full p-2 text-slate-500 hover:bg-slate-100" aria-label="Close source popup"><X className="h-4 w-4" /></button></div>{supportText && <p className="mt-4 text-sm leading-6 text-slate-600">{supportText}</p>}{source.link_type === 'google_grounding_redirect' && <p className="mt-3 text-xs text-slate-400">Google grounded link</p>}<a href={source.url} target="_blank" rel="noreferrer" className="mt-5 inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-emerald-700"><ExternalLink className="h-4 w-4" />Open source</a></div></div>, document.body)
+  return createPortal(<div className="fixed inset-0 z-[360] flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={`Source ${source.index}`} onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><div className="w-full max-w-md rounded-2xl border border-white/60 bg-white/80 p-5 shadow-2xl backdrop-blur-xl"><div className="flex items-start justify-between gap-3"><div><div className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Source [{source.index}]</div><h2 className="mt-1 text-lg font-semibold text-slate-900">{source.title}</h2>{visibleDomain && <p className="mt-1 flex items-center gap-1.5 text-sm text-slate-500"><SourceFavicon domain={visibleDomain} url={source.url} className="h-4 w-4 flex-shrink-0 rounded-sm" />{visibleDomain}</p>}</div><button type="button" onClick={onClose} className="rounded-full p-2 text-slate-500 hover:bg-slate-100" aria-label="Close source popup"><X className="h-4 w-4" /></button></div>{supportText && <p className="mt-4 text-sm leading-6 text-slate-600">{supportText}</p>}{source.link_type === 'google_grounding_redirect' && <p className="mt-3 text-xs text-slate-400">Google grounded link</p>}<a href={source.url} target="_blank" rel="noreferrer" className="mt-5 inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-emerald-700"><ExternalLink className="h-4 w-4" />Open source</a></div></div>, document.body)
 }
 
 export function SourcesModal({ queries, sources, citations, markdownSources, onClose }: { queries: string[]; sources: WebSourceMetadata[]; citations: ReturnType<typeof normalizeWebCitations>; markdownSources: string; onClose: () => void }) {
@@ -702,7 +702,7 @@ export function MarkdownBlock({ content, webSources = [], onCitationSelect }: { 
               <button
                 type="button"
                 onClick={() => onCitationSelect?.(source)}
-                className="mx-0.5 inline-flex max-w-[14rem] items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 align-baseline text-xs font-medium text-emerald-700 no-underline hover:bg-emerald-100"
+                className="mx-0.5 inline-flex max-w-[14rem] items-center gap-1 rounded-full border border-white/60 bg-white/40 px-1.5 py-0.5 align-baseline text-xs font-medium text-slate-700 no-underline shadow-sm backdrop-blur-md transition-colors hover:bg-white/70"
                 title={`${source.title} — ${source.display_domain || source.domain}`}
               >
                 <SourceFavicon domain={source.display_domain || source.domain} url={source.url} className="h-3 w-3 flex-shrink-0 rounded-sm" />

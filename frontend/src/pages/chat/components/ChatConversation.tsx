@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import type { ChangeEvent, ClipboardEvent, KeyboardEvent } from 'react'
 import type { ChatMessage } from '../../../entity/Chat'
-import { BookOpen, Check, FileQuestion, FileText, FlaskConical, Globe, GraduationCap, History, Image as ImageIcon, Loader2, Mail, Paperclip, Plus, Send, X } from 'lucide-react'
+import { BookOpen, Check, FileQuestion, FileText, FlaskConical, Gamepad2, Globe, GraduationCap, History, Image as ImageIcon, Loader2, Mail, Paperclip, Plus, Send, X } from 'lucide-react'
 import { MessageRow, ThinkingIndicator } from './MessageRow'
 import { type ConnectorsState } from './ConnectorToggles'
 import type { RunUiState } from '../runTypes'
 import type { PendingChatAttachment } from '../hooks/useChatPage'
 import type { ChatAttachmentListItem, ChatAttachmentSnapshot } from '../../../entity/Chat'
 
-export type GenerateMode = 'lesson_plan' | 'lab' | 'assessment' | 'course_blueprint' | 'email'
+export type GenerateMode = 'lesson_plan' | 'lab' | 'assessment' | 'course_blueprint' | 'email' | 'game'
 
 type Props = {
   input: string
@@ -109,6 +109,8 @@ export function ChatInput({
         ? 'Course Plan'
       : activeGenerateMode === 'email'
         ? 'Email'
+      : activeGenerateMode === 'game'
+        ? 'Study Game'
       : 'Lesson Plan Preview'
   const placeholder =
     activeGenerateMode === 'lesson_plan'
@@ -121,6 +123,8 @@ export function ChatInput({
           ? 'Describe the course plan you want, e.g. a 12-week plan focused on applied data skills...'
         : activeGenerateMode === 'email'
           ? 'Describe the email you want, e.g. remind students about the Friday quiz deadline...'
+        : activeGenerateMode === 'game'
+          ? 'Attach a PDF, then describe the game, e.g. a matching game from these lecture notes...'
         : 'Message your teaching assistant...'
 
   const attachmentStatus = (attachment: PendingChatAttachment) => {
@@ -156,6 +160,8 @@ export function ChatInput({
                   <GraduationCap className="h-4 w-4" />
                 ) : activeGenerateMode === 'email' ? (
                   <Mail className="h-4 w-4" />
+                ) : activeGenerateMode === 'game' ? (
+                  <Gamepad2 className="h-4 w-4" />
                 ) : (
                   <BookOpen className="h-4 w-4" />
                 )}
@@ -318,6 +324,15 @@ export function ChatInput({
                 >
                   <FileQuestion className="h-4 w-4 text-emerald-600" />
                   Assessment Preview
+                </button>
+                <button
+                  role="menuitem"
+                  type="button"
+                  onClick={() => selectGenerateMode('game')}
+                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm text-slate-700 hover:bg-emerald-50"
+                >
+                  <Gamepad2 className="h-4 w-4 text-emerald-600" />
+                  Study Game
                 </button>
                 <div className="my-1 border-t border-slate-100" />
                 <button

@@ -81,8 +81,14 @@ _SAVE_DRAFT_WORKFLOWS = {
 # outline->approve->full pending-artifact flow but never requires a `week` and never uses
 # the one-shot save_draft path (its terminal step is save-blueprint, not doc export).
 _COURSE_BLUEPRINT_WORKFLOWS = {"course_blueprint", "course_blueprint.generate"}
+# Game is single-shot: no research/outline HITL, no week, and no Google export. It uses the
+# pending-artifact path only so the "Create game" button reuses the same claim/hash/export
+# lock the other terminals do — its terminal write is a gameSessions doc.
+_GAME_WORKFLOWS = {"game", "game.generate"}
 _WEEK_REQUIRED_WORKFLOWS = _SAVE_DRAFT_WORKFLOWS
-_PENDING_ARTIFACT_WORKFLOWS = _SAVE_DRAFT_WORKFLOWS | _COURSE_BLUEPRINT_WORKFLOWS
+_PENDING_ARTIFACT_WORKFLOWS = (
+    _SAVE_DRAFT_WORKFLOWS | _COURSE_BLUEPRINT_WORKFLOWS | _GAME_WORKFLOWS
+)
 
 
 def _validate_invoke_request(body: AgentInvokeRequest) -> None:

@@ -30,6 +30,10 @@ from services.artifact_export_validation import (
     ArtifactExportCoverageError,
     validate_export_coverage,
 )
+from services.artifact_renderers.game_markdown import (
+    RENDERER_VERSION as GAME_MARKDOWN_RENDERER_VERSION,
+    render_game_markdown,
+)
 from services.artifact_renderers.lab_markdown import (
     RENDERER_VERSION as LAB_MARKDOWN_RENDERER_VERSION,
     render_lab_markdown,
@@ -118,6 +122,8 @@ def _render_preview_markdown(artifact_type: str, payload: dict[str, Any], fallba
         return render_quiz_markdown(payload), QUIZ_MARKDOWN_RENDERER_VERSION
     if artifact_type == "course_blueprint":
         return render_course_blueprint_markdown(payload), "course_blueprint_markdown.v1"
+    if artifact_type == "game":
+        return render_game_markdown(payload), GAME_MARKDOWN_RENDERER_VERSION
     return fallback, "agent_final_text.v1"
 
 

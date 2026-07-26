@@ -6,6 +6,7 @@ import {
   ArtifactExportButton,
   ArtifactPreviewCard,
   BlueprintSaveButton,
+  GameCreateButton,
   OutlineApprovalCard,
 } from '../../pages/chat/components/MessageRow'
 import { ThinkingPanel } from '../../pages/chat/components/run/ThinkingPanel'
@@ -133,6 +134,7 @@ export function GenerationRunView({
             <ArtifactPreviewCard content={activeMessage.content} metadata={activeMessage.metadata || {}} />
             <ArtifactExportButton batchId={batch.id} msg={activeMessage} />
             <BlueprintSaveButton batchId={batch.id} msg={activeMessage} onSaved={onBlueprintSaved} />
+            <GameCreateButton batchId={batch.id} msg={activeMessage} />
             <div className="flex flex-wrap items-center gap-2 pt-1">
               {runState && <RunInspector run={runState} />}
               {stage === 'preview' && refineTrigger('Refine this draft')}

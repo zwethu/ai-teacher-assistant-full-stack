@@ -43,6 +43,7 @@ from routers.chats import router as chats_router
 from routers.course_blueprint import router as course_blueprint_router
 from routers.email import router as email_router
 from routers.files import router as files_router
+from routers.game import router as game_router
 from services.maintenance_scheduler import shutdown_scheduler, start_scheduler
 
 _frontend_url = (os.getenv("FRONTEND_URL") or "http://localhost:5173").rstrip("/")
@@ -66,6 +67,7 @@ app.include_router(artifacts_router)
 app.include_router(files_router)
 app.include_router(chats_router)
 app.include_router(course_blueprint_router)
+app.include_router(game_router)
 app.include_router(email_router, prefix="", tags=["email"])
 app.include_router(agent_router, prefix="/agent", tags=["agent"])
 

@@ -33,7 +33,17 @@ import type { RunUiState } from '../pages/chat/runTypes'
 
 export type PendingChatAttachment = ChatAttachment & { previewUrl?: string }
 
-export type GenerationWorkflow = 'lesson_plan' | 'assessment' | 'lab' | 'course_blueprint'
+export type GenerationWorkflow =
+  | 'lesson_plan'
+  | 'assessment'
+  | 'lab'
+  | 'course_blueprint'
+  | 'game'
+
+// Game is single-shot: no research/outline/approval. It must send an empty
+// workflow_stage or the backend's outline branch fires, finds no game outline, and the
+// run ends in outline_extract.failed instead of staging a game.
+const SINGLE_SHOT_WORKFLOWS = new Set<GenerationWorkflow>(['game'])
 
 export type GenerateParams = {
   workflowType: GenerationWorkflow
@@ -464,8 +474,10 @@ export function useGenerationRun(batch: Batch | null, persistKey?: string) {
       if (!batch || sending) return
       const activeChat = await ensureChat()
       if (!activeChat) return
-      setActivePhase('outline')
-      if (persistIdRef.current) writeGenerationRun(persistIdRef.current, { activePhase: 'outline' })
+      const singleShot = SINGLE_SHOT_WORKFLOWS.has(workflowType)
+      const phase = singleShot ? 'full' : 'outline'
+      setActivePhase(phase)
+      if (persistIdRef.current) writeGenerationRun(persistIdRef.current, { activePhase: phase })
       const attachmentsForMessage = [...pendingAttachments]
       const attachmentIds = attachmentsForMessage.map((a) => a.attachment_id)
       const started = await startRun(
@@ -476,7 +488,7 @@ export function useGenerationRun(batch: Batch | null, persistKey?: string) {
             batch_id: batch.id,
             chat_id: activeChat.chat_id,
             workflow_type: `${workflowType}.generate`,
-            workflow_stage: 'outline',
+            workflow_stage: singleShot ? '' : 'outline',
             pending_artifact: true,
             save_draft: false,
             week,

@@ -620,7 +620,7 @@ export function useChatPage() {
         const payload = buildGenerationRequest(
           generateMode, batchId, chatId, content, connectors, attachmentIds,
         )
-        const result = generateMode === 'course_blueprint'
+        const result = generateMode === 'course_blueprint' || generateMode === 'game'
           ? await invokeAgent(payload)
           : generateMode === 'lab'
           ? await generateLab('', payload)
@@ -1022,6 +1022,7 @@ export function useChatPage() {
     if (
       message.metadata?.pending_exportable === true ||
       message.metadata?.pending_savable_blueprint === true ||
+      message.metadata?.pending_savable_game === true ||
       message.metadata?.pending_email_sendable === true
     ) {
       setActiveGenerateMode(null)

@@ -42,10 +42,27 @@ function buildMessage(f: typeof INITIAL_FORM): string {
     `Difficulty: ${f.difficulty}`,
     `Teaching approach: ${f.approach}`,
     `Lesson plan type: ${f.planType}`,
+    // Required: the agent's clarification gate blocks research until prior_knowledge
+    // is present and specific, so this line is always sent.
+    `Prior knowledge: ${f.priorKnowledge.trim()}`,
   )
-  if (f.priorKnowledge.trim()) lines.push(`Prior knowledge: ${f.priorKnowledge.trim()}`)
   if (f.instructions.trim()) lines.push(`Additional instructions: ${f.instructions.trim()}`)
   return lines.join('\n')
+}
+
+// Required inputs only — topic and additional instructions are optional, so a blank
+// one never blocks generation.
+function missingRequiredInputs(f: typeof INITIAL_FORM, hasBatch: boolean): string[] {
+  const missing: string[] = []
+  if (!hasBatch) missing.push('a space')
+  if (!(Number(f.week) >= 1)) missing.push('a week number')
+  if (!f.priorKnowledge.trim()) missing.push('prior knowledge')
+  return missing
+}
+
+function joinReadable(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? ''
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
 }
 
 export default function LessonPlans() {
@@ -84,6 +101,11 @@ export default function LessonPlans() {
   async function handleGenerate(e: FormEvent) {
     e.preventDefault()
     if (!selectedBatch || run.sending) return
+    const blockers = missingRequiredInputs(form, true)
+    if (blockers.length > 0) {
+      showToast('error', `Add ${joinReadable(blockers)} before generating.`)
+      return
+    }
     await run.generate({
       workflowType: 'lesson_plan',
       message: buildMessage(form),
@@ -94,6 +116,7 @@ export default function LessonPlans() {
 
   // Keep the page form-first: the progress panel only appears once a run starts.
   const started = run.messages.length > 0 || Boolean(run.currentRunId)
+  const missing = missingRequiredInputs(form, Boolean(selectedBatch))
 
   return (
     <div>
@@ -195,9 +218,10 @@ export default function LessonPlans() {
           </div>
 
           <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-1.5">Prior knowledge (optional)</label>
-            <textarea rows={2} value={form.priorKnowledge}
+            <label className="block text-sm font-semibold text-slate-700 mb-1.5">Prior knowledge</label>
+            <textarea rows={2} required value={form.priorKnowledge}
               onChange={(e) => setForm((f) => ({ ...f, priorKnowledge: e.target.value }))}
+              placeholder="What students already know before this lesson, e.g. basic spreadsheet and database concepts"
               className="block w-full rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500 resize-y" />
           </div>
 
@@ -214,11 +238,18 @@ export default function LessonPlans() {
             Course-Space files for the selected space are always used.
           </p>
 
-          <button type="submit" disabled={run.sending || !selectedBatch}
-            className="inline-flex w-full items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm disabled:opacity-60">
-            {run.sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-            Generate outline
-          </button>
+          <div>
+            <button type="submit" disabled={run.sending || missing.length > 0}
+              className="inline-flex w-full items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm transition-colors disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none disabled:cursor-not-allowed">
+              {run.sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+              Generate outline
+            </button>
+            {missing.length > 0 && !run.sending && (
+              <p className="mt-2 text-center text-xs text-slate-500">
+                Add {joinReadable(missing)} to continue.
+              </p>
+            )}
+          </div>
         </form>
       )}
 

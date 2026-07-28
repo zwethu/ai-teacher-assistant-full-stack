@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ExternalLink,
   FileText,
+  Gamepad2,
   Image as ImageIcon,
   Link2,
   Loader2,
@@ -13,10 +14,11 @@ import {
 } from 'lucide-react'
 import type { ChatAttachmentListItem, ChatMessage } from '../../../entity/Chat'
 import { deleteChatAttachment, getChatAttachmentContent, listChatAttachments } from '../../../services/chatService'
+import { deleteGame, listGames, type GameSession } from '../../../services/gameService'
 import { collectUniqueChatWebLinks } from '../utils/webCitations'
 import { SourceFavicon } from './SourceFavicon'
 
-export type ChatSidePanelSection = 'links' | 'files'
+export type ChatSidePanelSection = 'links' | 'files' | 'games'
 
 type Props = {
   open: boolean
@@ -78,6 +80,25 @@ function isUnsentAttachment(item: ChatAttachmentListItem): boolean {
   return !String(item.message_id || '').trim()
 }
 
+function formatShortDate(value?: string | null): string {
+  if (!value) return ''
+  const date = new Date(value)
+  return Number.isNaN(date.getTime())
+    ? ''
+    : date.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+}
+
+/** Games are retired on their own TTL, so the panel warns before one disappears. */
+function formatExpiry(value?: string | null): string {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const days = Math.ceil((date.getTime() - Date.now()) / 86_400_000)
+  if (days < 0) return 'expired'
+  if (days === 0) return 'expires today'
+  return `expires in ${days} day${days === 1 ? '' : 's'}`
+}
+
 export function ChatSidePanel({
   open,
   onClose,
@@ -97,6 +118,14 @@ export function ChatSidePanel({
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({})
   const thumbnailUrlsRef = useRef<string[]>([])
+  const loadedChatKeyRef = useRef('')
+  // Games belong to the batch, not the chat, so they load and reset on batchId alone.
+  const [gamesOpen, setGamesOpen] = useState(false)
+  const [games, setGames] = useState<GameSession[]>([])
+  const [gamesLoading, setGamesLoading] = useState(false)
+  const [gamesError, setGamesError] = useState('')
+  const [deletingGameId, setDeletingGameId] = useState<string | null>(null)
+  const loadedGamesBatchRef = useRef('')
 
   const links = useMemo(() => collectUniqueChatWebLinks(messages), [messages])
 
@@ -107,8 +136,14 @@ export function ChatSidePanel({
       if (initialSection === 'files') {
         setFilesOpen(true)
         setLinksOpen(false)
+        setGamesOpen(false)
       } else if (initialSection === 'links') {
         setLinksOpen(true)
+        setFilesOpen(false)
+        setGamesOpen(false)
+      } else if (initialSection === 'games') {
+        setGamesOpen(true)
+        setLinksOpen(false)
         setFilesOpen(false)
       }
       return () => cancelAnimationFrame(frame)
@@ -178,6 +213,36 @@ export function ChatSidePanel({
     thumbnailUrlsRef.current = []
   }, [batchId, chatId])
 
+  useEffect(() => {
+    if (!open || !gamesOpen) return
+    if (loadedGamesBatchRef.current === batchId && games.length > 0) return
+
+    let cancelled = false
+    async function load() {
+      setGamesLoading(true)
+      setGamesError('')
+      try {
+        const data = await listGames(batchId)
+        if (cancelled) return
+        setGames(data)
+        loadedGamesBatchRef.current = batchId
+      } catch {
+        if (!cancelled) setGamesError('Games are unavailable.')
+      } finally {
+        if (!cancelled) setGamesLoading(false)
+      }
+    }
+    void load()
+    return () => {
+      cancelled = true
+    }
+  }, [open, gamesOpen, batchId, games.length])
+
+  useEffect(() => {
+    loadedGamesBatchRef.current = ''
+    setGames([])
+  }, [batchId])
+
   async function handleDelete(item: ChatAttachmentListItem) {
     if (!isUnsentAttachment(item)) return
     setDeletingId(item.attachment_id)
@@ -200,6 +265,19 @@ export function ChatSidePanel({
     }
   }
 
+  async function handleDeleteGame(game: GameSession) {
+    setDeletingGameId(game.gameId)
+    setGamesError('')
+    try {
+      await deleteGame(batchId, game.gameId)
+      setGames((prev) => prev.filter((entry) => entry.gameId !== game.gameId))
+    } catch {
+      setGamesError('Could not delete that game.')
+    } finally {
+      setDeletingGameId(null)
+    }
+  }
+
   if (!rendered) return null
 
   return createPortal(
@@ -217,12 +295,14 @@ export function ChatSidePanel({
         }`}
         role="dialog"
         aria-modal="true"
-        aria-label="Chat links and files"
+        aria-label="Chat links, files, and games"
       >
         <header className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
           <div>
             <h2 className="text-sm font-semibold text-slate-900">Chat resources</h2>
-            <p className="text-xs text-slate-500">Web links and files from this conversation.</p>
+            <p className="text-xs text-slate-500">
+              Links and files from this conversation, plus games from this batch.
+            </p>
           </div>
           <button
             type="button"
@@ -359,6 +439,67 @@ export function ChatSidePanel({
                           </button>
                         )}
                       </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </AccordionSection>
+
+          <AccordionSection
+            title="Games"
+            icon={<Gamepad2 className="h-4 w-4" />}
+            open={gamesOpen}
+            onToggle={() => setGamesOpen((value) => !value)}
+            count={games.length}
+          >
+            <p className="mb-3 text-[10px] leading-4 text-slate-500">
+              Study games created from this batch — not just this chat. Each game keeps its
+              term/definition pairs until it expires.
+            </p>
+            {gamesLoading ? (
+              <div className="flex items-center gap-2 py-3 text-xs text-slate-500">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Loading games…
+              </div>
+            ) : gamesError ? (
+              <p className="text-xs text-red-600">{gamesError}</p>
+            ) : games.length === 0 ? (
+              <p className="text-xs text-slate-500">
+                No games yet. Attach a PDF and pick Study Game from the ⊕ menu to create one.
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {games.map((game) => {
+                  const created = formatShortDate(game.createdAt)
+                  const expiry = formatExpiry(game.expiresAt)
+                  return (
+                    <li
+                      key={game.gameId}
+                      className="flex items-center gap-2 rounded-lg border border-slate-100 p-2"
+                    >
+                      <Gamepad2 className="h-5 w-5 flex-shrink-0 text-emerald-600" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-xs font-medium text-slate-700">{game.title}</p>
+                        <p className="text-[11px] text-slate-400">
+                          {game.itemCount} pair{game.itemCount === 1 ? '' : 's'}
+                          {created ? ` · created ${created}` : ''}
+                          {expiry ? ` · ${expiry}` : ''}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void handleDeleteGame(game)}
+                        disabled={deletingGameId === game.gameId}
+                        className="flex-shrink-0 rounded-md p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+                        aria-label={`Delete ${game.title}`}
+                      >
+                        {deletingGameId === game.gameId ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-3.5 w-3.5" />
+                        )}
+                      </button>
                     </li>
                   )
                 })}

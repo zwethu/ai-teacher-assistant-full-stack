@@ -36,6 +36,14 @@
         {"fieldPath": "status", "order": "ASCENDING"},
         {"fieldPath": "send_at", "order": "ASCENDING"}
       ]
+    },
+    {
+      "collectionGroup": "gameSessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "batchId", "order": "ASCENDING"},
+        {"fieldPath": "lecturerId", "order": "ASCENDING"}
+      ]
     }
   ],
   "fieldOverrides": [

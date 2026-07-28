@@ -9,6 +9,7 @@ import {
   FileText,
   FileQuestion,
   FlaskConical,
+  Gamepad2,
   Loader2,
   Mail,
   Map as MapIcon,
@@ -58,6 +59,7 @@ import { RunDetails } from './run/RunDetails'
 import { ThinkingPanel } from './run/ThinkingPanel'
 import { CourseBlueprintReviewModal } from './CourseBlueprintReviewModal'
 import type { CourseBlueprint } from '../../../services/courseBlueprintService'
+import { createGameFromRun } from '../../../services/gameService'
 import { normalizeCourseBlueprintRecommendation, saveBlueprintFromRun } from '../../../services/courseBlueprintService'
 import { SuggestedCourseBlueprintModal } from './SuggestedCourseBlueprintModal'
 
@@ -231,6 +233,7 @@ export function MessageRow({
             )}
             {!isUser && batchId && <ArtifactExportButton batchId={batchId} msg={msg} />}
             {!isUser && batchId && <BlueprintSaveButton batchId={batchId} msg={msg} />}
+            {!isUser && batchId && <GameCreateButton batchId={batchId} msg={msg} />}
             {!isUser && batchId && <EmailActionButtons batchId={batchId} msg={msg} />}
           </div>
         )}
@@ -426,12 +429,15 @@ export function ArtifactPreviewCard({
   const isLab = artifactType === 'lab'
   const isQuiz = artifactType === 'quiz'
   const isCourseBlueprint = artifactType === 'course_blueprint'
+  const isGame = artifactType === 'game'
   const label = isLab
     ? 'Lab Preview'
     : isQuiz
       ? 'Assessment Preview'
       : isCourseBlueprint
         ? 'Course Plan Preview'
+        : isGame
+          ? 'Study Game Preview'
         : 'Lesson Plan Preview'
   const fallbackTitle = isLab
     ? 'Generated lab preview'
@@ -439,6 +445,8 @@ export function ArtifactPreviewCard({
       ? 'Generated assessment preview'
       : isCourseBlueprint
         ? 'Generated course plan preview'
+        : isGame
+          ? 'Generated study game'
         : 'Generated lesson plan preview'
   const title =
     metadataText(metadata.artifact_title) || extractFirstMarkdownHeading(content) || fallbackTitle
@@ -447,7 +455,7 @@ export function ArtifactPreviewCard({
     ? `Week ${String(week)}`
     : ''
   const summary = extractPreviewSummary(content)
-  const Icon = isLab ? FlaskConical : isQuiz ? FileQuestion : isCourseBlueprint ? MapIcon : BookOpen
+  const Icon = isLab ? FlaskConical : isQuiz ? FileQuestion : isCourseBlueprint ? MapIcon : isGame ? Gamepad2 : BookOpen
 
   useEffect(() => {
     if (!open) return
@@ -796,6 +804,62 @@ export function BlueprintSaveButton({ batchId, msg, onSaved }: { batchId: string
         >
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
           Save as course plan
+        </button>
+      )}
+      {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+    </div>
+  )
+}
+
+export function GameCreateButton({ batchId, msg }: { batchId: string; msg: ChatMessage }) {
+  const metadata = msg.metadata || {}
+  const savable = metadata.pending_savable_game === true
+  const runId = String(msg.run_id || '')
+  const chatId = msg.chat_id
+  const contentHash = String(metadata.pending_artifact_content_hash || '')
+  const itemCount =
+    typeof metadata.game_item_count === 'number' ? metadata.game_item_count : 0
+
+  const [creating, setCreating] = useState(false)
+  const [created, setCreated] = useState<{ gameId: string; itemCount: number } | null>(null)
+  const [error, setError] = useState('')
+
+  if (!savable && !created) return null
+
+  async function handleCreate() {
+    if (!chatId || !runId) return
+    setError('')
+    setCreating(true)
+    try {
+      const game = await createGameFromRun(batchId, chatId, runId, contentHash)
+      setCreated({ gameId: game.gameId, itemCount: game.itemCount })
+    } catch (err) {
+      const maybe = err as { response?: { data?: { detail?: unknown } }; message?: string }
+      const detail = maybe.response?.data?.detail
+      setError(
+        typeof detail === 'string' ? detail : maybe.message || 'Could not create the game. Please retry.',
+      )
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  return (
+    <div className="mt-2">
+      {created ? (
+        <span className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-700">
+          <Gamepad2 className="h-4 w-4" />
+          Game created{created.itemCount ? ` · ${created.itemCount} pairs` : ''}
+        </span>
+      ) : (
+        <button
+          type="button"
+          onClick={handleCreate}
+          disabled={creating || !chatId || !runId}
+          className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
+        >
+          {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Gamepad2 className="h-4 w-4" />}
+          Create game{itemCount ? ` (${itemCount} pairs)` : ''}
         </button>
       )}
       {error && <p className="mt-1 text-xs text-red-600">{error}</p>}

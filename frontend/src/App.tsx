@@ -8,6 +8,7 @@ import Assessments from './pages/Assessments'
 import LessonPlans from './pages/LessonPlans'
 import Batches from './pages/batches'
 import Email from './pages/Email'
+import Games from './pages/Games'
 import ChatHistory from './pages/ChatHistory'
 
 export default function App() {
@@ -26,6 +27,7 @@ export default function App() {
             <Route path="/assessments" element={<Assessments />} />
             <Route path="/lesson-plans" element={<LessonPlans />} />
             <Route path="/email" element={<Email />} />
+            <Route path="/games" element={<Games />} />
           </Route>
         </Route>
 

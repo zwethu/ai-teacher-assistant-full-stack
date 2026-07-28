@@ -7,6 +7,7 @@ import {
   BookOpen,
   ChevronDown,
   Clock,
+  Gamepad2,
   LogOut,
   Mail,
   Menu,
@@ -31,6 +32,7 @@ const NAV_ITEMS: {
   { to: '/lesson-plans', label: 'Lesson Plans', icon: BookOpen },
   { to: '/assessments', label: 'Assessments', icon: BarChart3 },
   { to: '/email', label: 'Send Emails', icon: Mail },
+  { to: '/games', label: 'Games', icon: Gamepad2 },
   { to: '/chat-history', label: 'Sessions', icon: Clock },
 ]
 

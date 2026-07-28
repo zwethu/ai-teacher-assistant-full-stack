@@ -42,6 +42,7 @@ from fastapi import BackgroundTasks, HTTPException, status
 
 from entity.Batch import BatchModel
 from entity.CourseBlueprint import CourseBlueprintContent
+from entity.GameSession import MAX_GAME_ITEMS, MIN_GAME_ITEMS
 from services.agent_engine_client import get_agent_engine_resource_name, stream_agent_response
 from services.agent_platform_sessions import get_agent_session_state
 from services.agent_artifact_context import build_agent_artifact_manifest
@@ -796,6 +797,53 @@ def extract_course_blueprint_full_from_state(state: dict[str, Any]) -> dict[str,
     return raw
 
 
+def extract_game_full_from_state(
+    state: dict[str, Any], run_id: str
+) -> dict[str, Any] | None:
+    """Return a term/definition game staged by the game agent, only if THIS run staged it.
+
+    Same run-scoped guard as ``extract_email_full_from_state``: session state is
+    long-lived per chat, so a stale ``game_full`` must never resurface a "Create game"
+    button on an unrelated message. The game agent stamps ``staged_in_run`` in
+    stage_game_session; we require it to match the run being finalized.
+
+    The agent already validated against GameFull, but this is agent-authored input on
+    the way into a backend write, so the pairs are re-cleaned and re-bounded here.
+    """
+    active_type = str(state.get("active_artifact_type") or "").strip()
+    if active_type and active_type != "game":
+        return None
+
+    raw = _state_payload(state, "game_full")
+    if not isinstance(raw, dict):
+        return None
+    if str(raw.get("staged_in_run") or "") != str(run_id or ""):
+        return None
+
+    title = str(raw.get("title") or "").strip()
+    if not title:
+        return None
+
+    items: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for entry in raw.get("items") or []:
+        if not isinstance(entry, dict):
+            continue
+        term = str(entry.get("term") or "").strip()
+        definition = str(entry.get("definition") or "").strip()
+        if not term or not definition:
+            continue
+        key = term.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append({"term": term, "definition": definition})
+
+    if len(items) < MIN_GAME_ITEMS:
+        return None
+    return {"title": title, "items": items[:MAX_GAME_ITEMS]}
+
+
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
@@ -1101,6 +1149,10 @@ def maybe_store_pending_artifact_from_session(
         "quiz.generate": ("quiz", extract_quiz_full_from_state),
         "course_blueprint": ("course_blueprint", extract_course_blueprint_full_from_state),
         "course_blueprint.generate": ("course_blueprint", extract_course_blueprint_full_from_state),
+        # Game is run-scoped (the agent stamps staged_in_run), so its extractor needs the
+        # run id the other artifact extractors don't take.
+        "game": ("game", lambda s: extract_game_full_from_state(s, run_id)),
+        "game.generate": ("game", lambda s: extract_game_full_from_state(s, run_id)),
     }
     selected = candidates.get(normalized_workflow)
     if not selected:
@@ -1122,9 +1174,10 @@ def maybe_store_pending_artifact_from_session(
         )
         return None
 
-    # Course planning is course-level (no week); other artifacts are week-scoped.
+    # Course planning is course-level and a game is scoped to the attached PDF; both are
+    # weekless. Everything else is week-scoped and must match the requested week.
     payload_week = _coerce_week(payload.get("week"))
-    if artifact_type != "course_blueprint":
+    if artifact_type not in {"course_blueprint", "game"}:
         expected_week = _coerce_week(requested_week)
         if expected_week is not None and payload_week != expected_week:
             raise RuntimeError(
@@ -1144,7 +1197,7 @@ def maybe_store_pending_artifact_from_session(
         "artifact_type": artifact_type,
         "workflow_type": artifact_type,
         "week": payload_week,
-        "title": str(payload.get("title") or {"lesson_plan": "Lesson Plan", "lab": "Lab", "quiz": "Assessment", "course_blueprint": "Course Plan"}[artifact_type]),
+        "title": str(payload.get("title") or {"lesson_plan": "Lesson Plan", "lab": "Lab", "quiz": "Assessment", "course_blueprint": "Course Plan", "game": "Study Game"}[artifact_type]),
         "content_json": payload,
         "content_hash": content_hash(payload),
         "preview_markdown": preview_markdown,
@@ -1192,25 +1245,33 @@ def _pending_artifact_message_metadata(pending: dict[str, Any] | None) -> dict[s
         return {}
     artifact_type = str(pending.get("artifact_type") or "")
     is_blueprint = artifact_type == "course_blueprint"
+    is_game = artifact_type == "game"
     export_target = (
         "course_blueprint" if is_blueprint
+        else "game" if is_game
         else "google_forms" if artifact_type == "quiz"
         else "google_docs"
     )
-    return {
+    metadata = {
         "pending_artifact_id": str(pending.get("pending_artifact_id") or ""),
         "pending_artifact_type": artifact_type,
         "pending_artifact_week": pending.get("week"),
         "pending_artifact_content_hash": str(pending.get("content_hash") or ""),
-        # Blueprint terminal is "save a course-plan version", not a Google export.
-        "pending_exportable": not is_blueprint,
+        # Blueprint and game terminals are backend Firestore writes ("save a course-plan
+        # version" / "create the game"), not Google Docs/Forms exports.
+        "pending_exportable": not (is_blueprint or is_game),
         "pending_savable_blueprint": is_blueprint,
+        "pending_savable_game": is_game,
         "pending_export_target": export_target,
         "artifact_type": artifact_type,
         "artifact_title": str(pending.get("title") or ""),
         "artifact_preview_card": True,
         "week": pending.get("week"),
     }
+    if is_game:
+        content = pending.get("content_json") if isinstance(pending.get("content_json"), dict) else {}
+        metadata["game_item_count"] = len(content.get("items") or [])
+    return metadata
 
 
 def render_email_preview_markdown(

@@ -6,7 +6,6 @@ import { ChatInput, ChatMessagesPanel } from './ChatConversation'
 import { ChatPageHeader } from './ChatPageHeader'
 import { ChatSidePanel, type ChatSidePanelSection } from './ChatSidePanel'
 import { ChatWelcomeScreen } from './ChatWelcomeScreen'
-import { BatchSelectorBar } from './BatchSelectorBar'
 import { NoBatchesView } from './NoBatchesView'
 
 type Props = Pick<
@@ -14,7 +13,6 @@ type Props = Pick<
   | 'selectedBatch'
   | 'batches'
   | 'batchesLoading'
-  | 'setSelectedBatch'
   | 'activeChat'
   | 'messages'
   | 'messagesLoading'
@@ -60,7 +58,6 @@ export function ChatLayout(props: Props) {
     selectedBatch,
     batches,
     batchesLoading,
-    setSelectedBatch,
     activeChat,
     messages,
     messagesLoading,
@@ -219,14 +216,6 @@ export function ChatLayout(props: Props) {
         )}
 
         <div className="z-20 flex flex-col flex-shrink-0 bg-transparent">
-          {!isRouteInvalid && routeHydration !== 'hydrating' && (batchesLoading || batches.length > 0 || selectedBatch) && (
-            <BatchSelectorBar
-              batches={batches}
-              batchesLoading={batchesLoading}
-              selectedBatch={selectedBatch}
-              onSelectBatch={setSelectedBatch}
-            />
-          )}
           <ChatInput
             input={input}
             sending={sending}

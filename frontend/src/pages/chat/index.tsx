@@ -11,7 +11,6 @@ export default function Chat() {
         selectedBatch={state.selectedBatch}
         batches={state.batches}
         batchesLoading={state.batchesLoading}
-        setSelectedBatch={state.setSelectedBatch}
         activeChat={state.activeChat}
         messages={state.messages}
         messagesLoading={state.messagesLoading}

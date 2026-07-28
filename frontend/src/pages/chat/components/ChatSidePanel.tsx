@@ -97,7 +97,6 @@ export function ChatSidePanel({
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({})
   const thumbnailUrlsRef = useRef<string[]>([])
-  const loadedChatKeyRef = useRef('')
 
   const links = useMemo(() => collectUniqueChatWebLinks(messages), [messages])
 
@@ -140,8 +139,6 @@ export function ChatSidePanel({
 
   useEffect(() => {
     if (!open || !filesOpen) return
-    const key = `${batchId}:${chatId}`
-    if (loadedChatKeyRef.current === key && items.length > 0) return
 
     let cancelled = false
     async function load() {
@@ -151,7 +148,6 @@ export function ChatSidePanel({
         const data = await listChatAttachments(batchId, chatId)
         if (cancelled) return
         setItems(data)
-        loadedChatKeyRef.current = key
         for (const item of data.filter((value) => value.attachment_kind === 'image' && value.thumbnail_available).slice(0, 20)) {
           try {
             const blob = await getChatAttachmentContent(batchId, chatId, item.attachment_id, true)
@@ -173,10 +169,9 @@ export function ChatSidePanel({
     return () => {
       cancelled = true
     }
-  }, [open, filesOpen, batchId, chatId, items.length])
+  }, [open, filesOpen, batchId, chatId])
 
   useEffect(() => {
-    loadedChatKeyRef.current = ''
     setItems([])
     setThumbnails({})
     thumbnailUrlsRef.current.forEach((url) => URL.revokeObjectURL(url))

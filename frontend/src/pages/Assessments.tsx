@@ -19,6 +19,7 @@ const QUIZ_MODES: Array<{ value: string; label: string }> = [
 const DIFFICULTIES = ['easy', 'medium', 'hard']
 
 const INITIAL_FORM = {
+  title: '',
   topic: '',
   week: 1,
   totalQuestions: 10,
@@ -30,9 +31,22 @@ const INITIAL_FORM = {
 }
 
 function buildMessage(f: typeof INITIAL_FORM): string {
-  const lines = [`Generate a quiz/assessment for week ${f.week}.`]
+  const lines = [
+    `Generate a quiz/assessment for week ${f.week}.`,
+    'Standalone form submission: all required fields below are confirmed. Do not ask clarifying questions; proceed with the assessment workflow.',
+  ]
+  if (f.title.trim()) lines.push(`Preferred assessment title: ${f.title.trim()}`)
+  else {
+    lines.push(
+      'Preferred assessment title: not specified — auto-name the quiz. If an active Course Plan exists, derive the title from that week\'s theme/assessment idea; otherwise name it from the topic and course.',
+    )
+  }
   if (f.topic.trim()) lines.push(`Topic: ${f.topic.trim()}`)
-  else lines.push('Topic: not specified — choose a suitable topic for this week, using the course plan if one exists.')
+  else {
+    lines.push(
+      'Topic: not specified — choose a suitable topic for this week from the active Course Plan week guidance if available; otherwise pick a suitable topic for the course.',
+    )
+  }
   lines.push(
     `Number of questions: ${f.totalQuestions}`,
     `Question mode: ${f.quizMode}`,
@@ -40,7 +54,25 @@ function buildMessage(f: typeof INITIAL_FORM): string {
   )
   lines.push(f.hasTimeLimit ? `Time limit: ${f.timeLimit} minutes` : 'Time limit: none (no strict time limit).')
   if (f.instructions.trim()) lines.push(`Additional instructions: ${f.instructions.trim()}`)
+  lines.push(
+    'If course_blueprint_status is active, you MUST reference the Course Plan (especially course_blueprint_week_plan and assessment strategy) when choosing topic/title and aligning questions.',
+    'If no lesson plan artifact exists for this week, proceed with Course Plan + course materials without asking for confirmation.',
+  )
   return lines.join('\n')
+}
+
+function missingRequiredInputs(f: typeof INITIAL_FORM, hasBatch: boolean): string[] {
+  const missing: string[] = []
+  if (!hasBatch) missing.push('a space')
+  if (!(Number(f.week) >= 1)) missing.push('a week number')
+  if (!(Number(f.totalQuestions) >= 1)) missing.push('a question count')
+  if (f.hasTimeLimit && !(Number(f.timeLimit) >= 1)) missing.push('a time limit')
+  return missing
+}
+
+function joinReadable(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? ''
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
 }
 
 export default function Assessments() {
@@ -79,6 +111,11 @@ export default function Assessments() {
   async function handleGenerate(e: FormEvent) {
     e.preventDefault()
     if (!selectedBatch || run.sending) return
+    const blockers = missingRequiredInputs(form, true)
+    if (blockers.length > 0) {
+      showToast('error', `Add ${joinReadable(blockers)} before generating.`)
+      return
+    }
     await run.generate({
       workflowType: 'assessment',
       message: buildMessage(form),
@@ -89,6 +126,7 @@ export default function Assessments() {
 
   // Keep the page form-first: the progress panel only appears once a run starts.
   const started = run.messages.length > 0 || Boolean(run.currentRunId)
+  const missing = missingRequiredInputs(form, Boolean(selectedBatch))
 
   return (
     <div>
@@ -144,6 +182,14 @@ export default function Assessments() {
           </div>
 
           <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1.5">Assessment name (optional)</label>
+            <input type="text" value={form.title}
+              onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+              placeholder="Leave blank — agent names it from the course plan or topic"
+              className="block w-full rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500" />
+          </div>
+
+          <div>
             <label className="block text-sm font-semibold text-slate-700 mb-1.5">Topic (optional)</label>
             <input type="text" value={form.topic}
               onChange={(e) => setForm((f) => ({ ...f, topic: e.target.value }))}
@@ -176,7 +222,7 @@ export default function Assessments() {
             </label>
             {form.hasTimeLimit && (
               <div className="mt-2 flex items-center gap-2">
-                <input type="number" min={1} value={form.timeLimit}
+                <input type="number" min={1} required value={form.timeLimit}
                   onChange={(e) => setForm((f) => ({ ...f, timeLimit: Number(e.target.value || 1) }))}
                   className="w-28 rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500" />
                 <span className="text-sm text-slate-500">minutes</span>
@@ -197,11 +243,18 @@ export default function Assessments() {
             Course-Space files for the selected space are always used.
           </p>
 
-          <button type="submit" disabled={run.sending || !selectedBatch}
-            className="inline-flex w-full items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm disabled:opacity-60">
-            {run.sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-            Generate outline
-          </button>
+          <div>
+            <button type="submit" disabled={run.sending || missing.length > 0}
+              className="inline-flex w-full items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm transition-colors disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none disabled:cursor-not-allowed">
+              {run.sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+              Generate outline
+            </button>
+            {missing.length > 0 && !run.sending && (
+              <p className="mt-2 text-center text-xs text-slate-500">
+                Add {joinReadable(missing)} to continue.
+              </p>
+            )}
+          </div>
         </form>
       )}
 

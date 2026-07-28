@@ -431,18 +431,20 @@ function GameGenerator({ batch, onCreated }: { batch: Batch; onCreated: () => vo
         />
       </div>
 
-      <div className="mt-4 flex items-center gap-3">
+      <div className="mt-4">
         <button
           type="button"
           onClick={() => void handleGenerate()}
           disabled={run.sending || !hasSource}
-          className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+          className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-emerald-700 shadow-sm transition-colors disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none disabled:cursor-not-allowed"
         >
           {run.sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
           Generate game
         </button>
-        {!hasSource && (
-          <span className="text-xs text-slate-500">Upload a document or pick saved work first.</span>
+        {!hasSource && !run.sending && (
+          <p className="mt-2 text-center text-xs text-slate-500">
+            Upload a document or pick saved work to continue.
+          </p>
         )}
       </div>
     </section>

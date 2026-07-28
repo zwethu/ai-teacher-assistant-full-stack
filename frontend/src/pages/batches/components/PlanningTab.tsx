@@ -124,12 +124,15 @@ function GeneratePlanPanel({
   const [instructions, setInstructions] = useState('')
   const [web, setWeb] = useState(true)
   const started = run.messages.length > 0 || Boolean(run.currentRunId)
+  const missing: string[] = []
+  if (!(Number(horizon) >= 1)) missing.push('a planning horizon')
 
   async function handleGenerate() {
-    if (run.sending) return
+    if (run.sending || missing.length > 0) return
     const lines = [
       `Generate a course plan (blueprint) for ${batch.course_name}.`,
       `Planning horizon: ${horizon} weeks.`,
+      'Standalone form submission: required fields are confirmed. Do not ask clarifying questions for planning horizon; proceed with begin_course_blueprint_workflow.',
     ]
     if (instructions.trim()) lines.push(`Instructions: ${instructions.trim()}`)
     await run.generate({ workflowType: 'course_blueprint', message: lines.join('\n'), webSearch: web })
@@ -149,7 +152,7 @@ function GeneratePlanPanel({
           <div className="space-y-4 p-6">
             <div className="flex items-center gap-4">
               <label className="text-sm font-medium text-slate-700">Planning horizon (weeks)
-                <input type="number" min={1} max={52} value={horizon} onChange={(e) => setHorizon(Number(e.target.value || 1))}
+                <input type="number" min={1} max={52} required value={horizon} onChange={(e) => setHorizon(Number(e.target.value || 1))}
                   className="ml-2 w-24 rounded-md border border-slate-300 px-2 py-1.5 text-sm" />
               </label>
               <label className="inline-flex items-center gap-2 text-sm text-slate-700">
@@ -162,12 +165,15 @@ function GeneratePlanPanel({
                 className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
             </label>
             <GenerationAttachments run={run} />
-            <div className="flex justify-end">
-              <button onClick={() => void handleGenerate()} disabled={run.sending}
-                className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60">
+            <div className="flex flex-col items-end gap-2">
+              <button onClick={() => void handleGenerate()} disabled={run.sending || missing.length > 0}
+                className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed">
                 {run.sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
                 Generate outline
               </button>
+              {missing.length > 0 && !run.sending && (
+                <p className="text-xs text-slate-500">Add {missing.join(', ')} to continue.</p>
+              )}
             </div>
           </div>
         ) : (

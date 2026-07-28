@@ -21,6 +21,7 @@ const PLAN_TYPES = [
 ]
 
 const INITIAL_FORM = {
+  title: '',
   topic: '',
   week: 1,
   grade: GRADES[0],
@@ -33,9 +34,23 @@ const INITIAL_FORM = {
 }
 
 function buildMessage(f: typeof INITIAL_FORM): string {
-  const lines = [`Generate a lesson plan for week ${f.week}.`]
+  const lines = [
+    `Generate a lesson plan for week ${f.week}.`,
+    // Standalone form already collected required fields — do not ask follow-up questions.
+    'Standalone form submission: all required fields below are confirmed. Do not ask clarifying questions; proceed to begin_lesson_plan_workflow.',
+  ]
+  if (f.title.trim()) lines.push(`Preferred lesson plan title: ${f.title.trim()}`)
+  else {
+    lines.push(
+      'Preferred lesson plan title: not specified — auto-name the lesson plan. If an active Course Plan exists, derive the title from that week\'s theme/goal; otherwise name it from the topic and course.',
+    )
+  }
   if (f.topic.trim()) lines.push(`Topic: ${f.topic.trim()}`)
-  else lines.push('Topic: not specified — choose a suitable topic for this week, using the course plan if one exists.')
+  else {
+    lines.push(
+      'Topic: not specified — choose a suitable topic for this week from the active Course Plan week guidance if available; otherwise pick a suitable topic for the course.',
+    )
+  }
   lines.push(
     `Grade/level: ${f.grade}`,
     `Duration: ${f.duration} minutes`,
@@ -47,6 +62,9 @@ function buildMessage(f: typeof INITIAL_FORM): string {
     `Prior knowledge: ${f.priorKnowledge.trim()}`,
   )
   if (f.instructions.trim()) lines.push(`Additional instructions: ${f.instructions.trim()}`)
+  lines.push(
+    'If course_blueprint_status is active, you MUST reference the Course Plan (especially course_blueprint_week_plan) when choosing topic/title and aligning objectives.',
+  )
   return lines.join('\n')
 }
 
@@ -176,6 +194,14 @@ export default function LessonPlans() {
                 {DURATIONS.map((d) => <option key={d} value={d}>{d}</option>)}
               </select>
             </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1.5">Lesson plan name (optional)</label>
+            <input type="text" value={form.title}
+              onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+              placeholder="Leave blank — agent names it from the course plan or topic"
+              className="block w-full rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500" />
           </div>
 
           <div>

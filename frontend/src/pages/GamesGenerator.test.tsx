@@ -87,7 +87,7 @@ describe('Games — source picker', () => {
     await waitFor(() => expect(listArtifacts).toHaveBeenCalledWith('batch-1', { current: true }))
     const button = screen.getByRole('button', { name: /Generate game/ })
     expect(button.hasAttribute('disabled')).toBe(true)
-    expect(screen.getByText(/Upload a document or pick saved work first/)).toBeTruthy()
+    expect(screen.getByText(/Upload a document or pick saved work to continue/)).toBeTruthy()
   })
 
   it('offers saved lesson plans, labs, and assessments as input', async () => {

@@ -17,9 +17,18 @@ import { Spinner } from '../../../design-system'
 
 export type PreviewKind = 'image' | 'text' | 'pdf' | 'other'
 
+/**
+ * Anything with enough shape to preview. `ChatAttachmentSnapshot` (on a message)
+ * and `ChatAttachmentListItem` (in the resources panel) differ only by
+ * `promotion_allowed`, which nothing here reads.
+ */
+export type PreviewableAttachment = Omit<ChatAttachmentSnapshot, 'promotion_allowed'> & {
+  promotion_allowed?: false
+}
+
 const TEXT_EXTENSIONS = /\.(md|markdown|txt|csv|json|ya?ml|log)$/i
 
-export function previewKind(attachment: ChatAttachmentSnapshot): PreviewKind {
+export function previewKind(attachment: PreviewableAttachment): PreviewKind {
   if (attachment.attachment_kind === 'image') return 'image'
   if (attachment.content_type === 'application/pdf') return 'pdf'
   if (attachment.content_type.startsWith('text/') || TEXT_EXTENSIONS.test(attachment.file_name)) {
@@ -41,7 +50,7 @@ export function formatBytes(bytes: number): string {
  * composer and the standalone generation forms.
  */
 export function attachmentStatusLabel(
-  attachment: ChatAttachmentSnapshot & { vision_status?: string },
+  attachment: PreviewableAttachment & { vision_status?: string },
 ): string {
   if (attachment.status === 'too_large') return 'too large — add to Course Space'
   if (attachment.status === 'processing') return 'processing…'
@@ -60,7 +69,7 @@ function KindIcon({ kind, className = 'h-4 w-4' }: { kind: PreviewKind; classNam
 }
 
 /** Short uppercase badge, as in the composer cards. */
-function formatBadge(attachment: ChatAttachmentSnapshot): string {
+function formatBadge(attachment: PreviewableAttachment): string {
   const ext = attachment.file_name.split('.').pop() || ''
   return ext.slice(0, 4).toUpperCase()
 }
@@ -135,7 +144,7 @@ export function AttachmentThumbnail({
 }: {
   batchId?: string
   chatId?: string
-  attachment: ChatAttachmentSnapshot
+  attachment: PreviewableAttachment
   className?: string
 }) {
   const kind = previewKind(attachment)
@@ -184,7 +193,7 @@ export function AttachmentViewer({
 }: {
   batchId?: string
   chatId?: string
-  attachment: ChatAttachmentSnapshot
+  attachment: PreviewableAttachment
   onClose: () => void
 }) {
   const kind = previewKind(attachment)
@@ -353,7 +362,7 @@ export function AttachmentCard({
 }: {
   batchId?: string
   chatId?: string
-  attachment: ChatAttachmentSnapshot
+  attachment: PreviewableAttachment
   /** Human status, surfaced in the tooltip rather than printed on the tile. */
   status?: string
   onOpen: () => void

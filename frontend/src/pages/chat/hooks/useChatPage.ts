@@ -1096,13 +1096,18 @@ export function useChatPage() {
     if (status === 'done' || status === 'failed' || status === 'cancelled') {
       settledRunIdsRef.current.add(runId)
     }
-    setRunStates((prev) => ({
-      ...prev,
-      [runId]: {
-        ...(prev[runId] || { events: [], steps: {} }),
-        status,
-      },
-    }))
+    setRunStates((prev) => {
+      // A stop the lecturer asked for is final. A late 'failed' arriving from a
+      // resubscribe must not relabel their deliberate stop as a crash.
+      if (prev[runId]?.status === 'cancelled' && status !== 'cancelled') return prev
+      return {
+        ...prev,
+        [runId]: {
+          ...(prev[runId] || { events: [], steps: {} }),
+          status,
+        },
+      }
+    })
     anchorToBottomDuringLiveUpdate()
   }
 

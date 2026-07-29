@@ -3,20 +3,19 @@ import { createPortal } from 'react-dom'
 import {
   ChevronDown,
   ExternalLink,
-  FileText,
   Gamepad2,
-  Image as ImageIcon,
   Link2,
   Paperclip,
   Trash2,
   X,
 } from 'lucide-react'
 import type { ChatAttachmentListItem, ChatMessage } from '../../../entity/Chat'
-import { deleteChatAttachment, getChatAttachmentContent, listChatAttachments } from '../../../services/chatService'
+import { deleteChatAttachment, listChatAttachments } from '../../../services/chatService'
 import { deleteGame, listGames, type GameSession } from '../../../services/gameService'
 import { collectUniqueChatWebLinks } from '../utils/webCitations'
 import { SourceFavicon } from './SourceFavicon'
 import { Spinner } from '../../../design-system'
+import { AttachmentThumbnail, AttachmentViewer } from './AttachmentPreview'
 
 export type ChatSidePanelSection = 'links' | 'files' | 'games'
 
@@ -140,9 +139,8 @@ export function ChatSidePanel({
   const [items, setItems] = useState<ChatAttachmentListItem[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [preview, setPreview] = useState<ChatAttachmentListItem | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [thumbnails, setThumbnails] = useState<Record<string, string>>({})
-  const thumbnailUrlsRef = useRef<string[]>([])
   const loadedChatKeyRef = useRef('')
   // Games belong to the batch, not the chat, so they load and reset on batchId alone.
   const [gamesOpen, setGamesOpen] = useState(false)
@@ -194,11 +192,6 @@ export function ChatSidePanel({
     }
   }, [open, onClose, isWideViewport])
 
-  useEffect(() => () => {
-    thumbnailUrlsRef.current.forEach((url) => URL.revokeObjectURL(url))
-    thumbnailUrlsRef.current = []
-  }, [])
-
   useEffect(() => {
     if (!open || !filesOpen) return
     const key = `${batchId}:${chatId}`
@@ -221,17 +214,6 @@ export function ChatSidePanel({
         // Thumbnails are decoration: the list is already usable, so stop the
         // spinner before fetching them rather than after.
         setLoading(false)
-        for (const item of data.filter((value) => value.attachment_kind === 'image' && value.thumbnail_available).slice(0, 20)) {
-          try {
-            const blob = await getChatAttachmentContent(batchId, chatId, item.attachment_id, true)
-            if (cancelled) return
-            const url = URL.createObjectURL(blob)
-            thumbnailUrlsRef.current.push(url)
-            setThumbnails((prev) => ({ ...prev, [item.attachment_id]: url }))
-          } catch {
-            /* metadata remains usable */
-          }
-        }
       } catch {
         if (cancelled) return
         setError('Chat files are unavailable.')
@@ -250,9 +232,7 @@ export function ChatSidePanel({
   useEffect(() => {
     loadedChatKeyRef.current = ''
     setItems([])
-    setThumbnails({})
-    thumbnailUrlsRef.current.forEach((url) => URL.revokeObjectURL(url))
-    thumbnailUrlsRef.current = []
+    setPreview(null)
   }, [batchId, chatId])
 
   useEffect(() => {
@@ -291,15 +271,6 @@ export function ChatSidePanel({
     try {
       await deleteChatAttachment(batchId, chatId, item.attachment_id)
       setItems((prev) => prev.filter((entry) => entry.attachment_id !== item.attachment_id))
-      const thumb = thumbnails[item.attachment_id]
-      if (thumb) {
-        URL.revokeObjectURL(thumb)
-        setThumbnails((prev) => {
-          const next = { ...prev }
-          delete next[item.attachment_id]
-          return next
-        })
-      }
     } catch {
       setError('Could not delete that file. Only unsent files can be removed.')
     } finally {
@@ -409,21 +380,32 @@ export function ChatSidePanel({
                       key={item.attachment_id}
                       className="flex items-center gap-2 rounded-lg border border-slate-100 p-2"
                     >
-                      {thumbnails[item.attachment_id] ? (
-                        <img
-                          src={thumbnails[item.attachment_id]}
-                          alt=""
-                          className="h-9 w-9 rounded object-cover"
+                      {/* Same affordance as the composer: the preview is the
+                          control, and tapping it opens the full viewer. Images
+                          and PDFs both have a server-rendered thumbnail, so
+                          AttachmentThumbnail handles the fallback itself. */}
+                      <button
+                        type="button"
+                        onClick={() => setPreview(item)}
+                        className="flex-shrink-0 overflow-hidden rounded-lg border border-white/70 bg-white/70 shadow-sm transition-transform hover:scale-[1.04]"
+                        aria-label={`Preview ${item.file_title || item.file_name}`}
+                        title={item.file_title || item.file_name}
+                      >
+                        <AttachmentThumbnail
+                          batchId={batchId}
+                          chatId={chatId}
+                          attachment={item}
+                          className="h-11 w-11"
                         />
-                      ) : item.attachment_kind === 'image' ? (
-                        <ImageIcon className="h-5 w-5 flex-shrink-0 text-sky-600" />
-                      ) : (
-                        <FileText className="h-5 w-5 flex-shrink-0 text-violet-600" />
-                      )}
+                      </button>
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-xs font-medium text-slate-700">
+                        <button
+                          type="button"
+                          onClick={() => setPreview(item)}
+                          className="block w-full truncate text-left text-xs font-medium text-slate-700 hover:text-violet-700"
+                        >
                           {item.file_title || item.file_name}
-                        </p>
+                        </button>
                         <p className="text-[11px] text-slate-400">
                           {item.attachment_kind === 'image'
                             ? `chat-only · vision ${item.vision_status === 'ready' ? 'ready' : item.vision_status}`
@@ -532,6 +514,17 @@ export function ChatSidePanel({
             )}
           </AccordionSection>
         </div>
+
+      {/* Same viewer the composer uses, so a file opens identically whether it
+          is being attached or looked up later. */}
+      {preview && (
+        <AttachmentViewer
+          batchId={batchId}
+          chatId={chatId}
+          attachment={preview}
+          onClose={() => setPreview(null)}
+        />
+      )}
     </>
   )
 

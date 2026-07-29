@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import type { ChangeEvent, ClipboardEvent, KeyboardEvent } from 'react'
 import type { ChatMessage } from '../../../entity/Chat'
-import { FileText, Globe, Image as ImageIcon, Send, Square, X } from 'lucide-react'
+import { Globe, Send, Square, X } from 'lucide-react'
 import { MessageRow, ThinkingIndicator } from './MessageRow'
 import { type ConnectorsState } from './ConnectorToggles'
 import type { RunUiState } from '../runTypes'
 import type { PendingChatAttachment } from '../hooks/useChatPage'
-import type { ChatAttachmentListItem, ChatAttachmentSnapshot } from '../../../entity/Chat'
+import type { ChatAttachmentListItem } from '../../../entity/Chat'
 import { Spinner, IconButton } from '../../../design-system'
+import type { PreviewableAttachment } from './AttachmentPreview'
 import { AttachmentCard, AttachmentViewer, attachmentStatusLabel } from './AttachmentPreview'
 import type { GenerateMode } from './ComposerSurface'
 import {
@@ -88,7 +89,7 @@ export function ChatInput({
   onOpenFilesPanel,
 }: Props) {
   const [menuOpen, setMenuOpen] = useState(false)
-  const [previewAttachment, setPreviewAttachment] = useState<ChatAttachmentSnapshot | null>(null)
+  const [previewAttachment, setPreviewAttachment] = useState<PreviewableAttachment | null>(null)
   const attachmentInputRef = useRef<HTMLInputElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
 
@@ -133,22 +134,6 @@ export function ChatInput({
       }`}
     >
       <div className="max-w-3xl mx-auto">
-        {referencedAttachments.length > 0 && (
-          <div className="mb-2 flex flex-wrap gap-2">
-            {referencedAttachments.map((attachment) => (
-              <div key={attachment.attachment_id} className="flex max-w-xs items-center gap-2 rounded-xl border border-violet-200 bg-violet-50/80 p-2 shadow-sm">
-                {attachment.attachment_kind === 'image' ? <ImageIcon className="h-5 w-5 flex-shrink-0 text-sky-600" /> : <FileText className="h-5 w-5 flex-shrink-0 text-violet-600" />}
-                <div className="min-w-0">
-                  <p className="truncate text-xs font-medium text-slate-700">{attachment.file_title || attachment.file_name}</p>
-                  <p className="text-[11px] text-slate-400">Earlier attachment</p>
-                </div>
-                <button type="button" onClick={() => onRemoveReferenced(attachment.attachment_id)} className="rounded p-1 text-slate-400 hover:bg-slate-100" aria-label={`Remove ${attachment.file_title || attachment.file_name}`}>
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
         {attachmentErrors.map((error) => <p key={error} className="mb-1 text-xs text-red-600">{error}</p>)}
         {pendingAttachments.some((attachment) => attachment.status === 'processing') && (
           <p className="mb-1 text-xs text-slate-500">Some attachments are still processing — you can send now, and the assistant may note a file isn't ready yet.</p>
@@ -176,8 +161,23 @@ export function ChatInput({
         <ComposerSurface>
           {/* Attachments live inside the composer now, so the box grows to hold
               them instead of them floating above it. */}
-          {pendingAttachments.length > 0 && (
+          {(pendingAttachments.length > 0 || referencedAttachments.length > 0) && (
             <div className="flex flex-wrap gap-2 px-1 pb-1 pt-2">
+              {/* Re-referenced earlier files sit in the same row as newly
+                  attached ones and look identical — from the lecturer's side
+                  they are the same act. They cannot be previewed-and-removed
+                  differently just because of where they came from. */}
+              {referencedAttachments.map((attachment) => (
+                <AttachmentCard
+                  key={`ref-${attachment.attachment_id}`}
+                  batchId={batchId}
+                  chatId={chatId}
+                  attachment={attachment}
+                  status="earlier attachment"
+                  onOpen={() => setPreviewAttachment(attachment)}
+                  onRemove={() => onRemoveReferenced(attachment.attachment_id)}
+                />
+              ))}
               {pendingAttachments.map((attachment) => (
                 <AttachmentCard
                   key={attachment.attachment_id}

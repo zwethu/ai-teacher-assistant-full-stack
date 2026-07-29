@@ -1606,6 +1606,9 @@ async def _run_agent_background(
                 session_state=session_state,
             )
         ) as agent_stream:
+            # Ripping the stream out from under the SDK can surface as an error
+            # from aclose()/the iterator. When the lecturer asked for the stop,
+            # that is expected teardown noise, not a failed run.
             async for chunk in agent_stream:
                 if time.monotonic() >= cancel_poll_deadline:
                     cancel_poll_deadline = time.monotonic() + CANCEL_POLL_SECONDS
@@ -1634,6 +1637,38 @@ async def _run_agent_background(
                     final_length=streamed_length,
                     response_started=True,
                 )
+
+        if cancelled_mid_stream:
+            logger.info(
+                "run_id=%s cancelled mid-stream after %d chunks — closing the stream",
+                run_id,
+                chunk_index,
+            )
+            emit_backend_event(
+                "run.cancelled",
+                status="cancelled",
+                title="Request cancelled",
+                kind="message",
+                detail={"chunks_streamed": chunk_index},
+            )
+            finalize_open_run_steps(run_id, "cancelled")
+            set_run_status(run_id, "cancelled")
+            return
+
+        # Stop can also land where the mid-stream poll never fired — the stream
+        # ended (or yielded nothing) first. Check before the empty-text guard
+        # below, or a stop with no output raises and is reported as a failure.
+        if is_agent_run_cancelled(batch_id=batch_id, chat_id=chat_id, run_id=run_id):
+            logger.info("run_id=%s cancelled by the lecturer — discarding the answer", run_id)
+            emit_backend_event(
+                "run.cancelled",
+                status="cancelled",
+                title="Request cancelled",
+                kind="message",
+            )
+            finalize_open_run_steps(run_id, "cancelled")
+            set_run_status(run_id, "cancelled")
+            return
 
         final_text = "".join(final_text_parts)
         write_stream_meta(
@@ -1874,38 +1909,6 @@ async def _run_agent_background(
                 citation_exc,
             )
 
-        if cancelled_mid_stream:
-            logger.info(
-                "run_id=%s cancelled mid-stream after %d chunks — closing the stream",
-                run_id,
-                chunk_index,
-            )
-            emit_backend_event(
-                "run.cancelled",
-                status="cancelled",
-                title="Request cancelled",
-                kind="message",
-                detail={"chunks_streamed": chunk_index},
-            )
-            finalize_open_run_steps(run_id, "cancelled")
-            set_run_status(run_id, "cancelled")
-            return
-
-        # The lecturer may have pressed Stop while the agent was working. The
-        # upstream call cannot be aborted, so the answer is discarded here
-        # instead: nothing is written to Firestore and the run stays cancelled.
-        if is_agent_run_cancelled(batch_id=batch_id, chat_id=chat_id, run_id=run_id):
-            logger.info("run_id=%s cancelled by the lecturer — discarding the answer", run_id)
-            emit_backend_event(
-                "run.cancelled",
-                status="cancelled",
-                title="Request cancelled",
-                kind="message",
-            )
-            finalize_open_run_steps(run_id, "cancelled")
-            set_run_status(run_id, "cancelled")
-            return
-
         # Persist assistant message to Firestore
         try:
             final_msg = add_message(
@@ -1963,6 +1966,25 @@ async def _run_agent_background(
         logger.info("gateway background done run_id=%s chars=%d", run_id, len(final_text))
 
     except Exception as exc:
+        # A stop the lecturer asked for must never surface as a failure. Tearing
+        # the Agent Engine stream down mid-flight can raise from the SDK, and
+        # the post-stream path has its own guards (e.g. "no assistant text")
+        # that a cancellation trivially trips. Settle as cancelled instead.
+        if cancelled_mid_stream:
+            logger.info("run_id=%s cancelled; ignoring teardown error: %s", run_id, exc)
+            try:
+                emit_backend_event(
+                    "run.cancelled",
+                    status="cancelled",
+                    title="Request cancelled",
+                    kind="message",
+                    detail={"chunks_streamed": chunk_index},
+                )
+                finalize_open_run_steps(run_id, "cancelled")
+                set_run_status(run_id, "cancelled")
+            except Exception as cancel_exc:
+                logger.warning("Cancel finalisation failed run_id=%s: %s", run_id, cancel_exc)
+            return
         logger.error("gateway background failed run_id=%s: %s", run_id, exc)
         try:
             write_stream_meta(

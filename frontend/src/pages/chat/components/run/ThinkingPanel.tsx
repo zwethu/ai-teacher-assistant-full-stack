@@ -70,8 +70,9 @@ export function ThinkingPanel({ events, runStatus, expandable = true }: Props) {
     if (showPlaceholder) return 'Waiting for agent working notes...'
     if (!hasEvents) return ''
 
-    if (runStatus === 'done' || runStatus === 'failed') {
-      // Finished: report the duration, not the last thought.
+    if (runStatus === 'done' || runStatus === 'failed' || runStatus === 'cancelled') {
+      // Finished — including stopped by the lecturer. Report the duration, not
+      // whatever thought happened to be last.
       return thoughtSummary(thinkingEvents)
     }
 

@@ -833,8 +833,17 @@ export function useChatPage() {
         ...prev,
         [runId]: { ...(prev[runId] || {}), status: 'cancelled' } as RunUiState,
       }))
-      // Drop the placeholder assistant bubble; the run produced no answer.
-      setMessages((prev) => prev.filter((item) => item.message_id !== `pending-${runId}`))
+      // Keep the placeholder and settle it, rather than deleting it. Removing
+      // the bubble left the turn looking like the request had simply vanished;
+      // the lecturer needs to see that THEY stopped it. MessageRow reads the
+      // run's 'cancelled' status to label it.
+      setMessages((prev) =>
+        prev.map((item) =>
+          item.message_id === `pending-${runId}` || (item.pending && item.run_id === runId)
+            ? { ...item, pending: false, status: 'done' as const }
+            : item,
+        ),
+      )
       setCurrentRunId(null)
       setSending(false)
       setCancelling(false)

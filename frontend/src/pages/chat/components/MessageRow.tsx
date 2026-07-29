@@ -1,21 +1,22 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  RefreshCw,
-  Download,
-  Copy,
-  Check,
   BookOpen,
   CalendarClock,
+  Check,
+  CircleSlash,
+  Copy,
+  Download,
   ExternalLink,
-  FileText,
   FileQuestion,
+  FileText,
   FlaskConical,
   Gamepad2,
   Mail,
   Map as MapIcon,
   Maximize2,
   Pencil,
+  RefreshCw,
   Save,
   Send,
   X,
@@ -109,6 +110,9 @@ export function MessageRow({
   const isFinal = !msg.pending && msg.status !== 'pending'
   const isPending = Boolean(msg.pending || msg.status === 'pending')
   const isFailed = msg.status === 'failed' || run?.status === 'failed'
+  // The lecturer pressed Stop. Whatever streamed first is discarded server-side,
+  // so this replaces the body rather than annotating it.
+  const isCancelled = run?.status === 'cancelled'
   // Run created but held until its attachments finish processing.
   const isAwaitingAttachments = run?.status === 'awaiting_attachments'
   const shouldUseArtifactCard = isGeneratedArtifactPreviewMessage(msg, isPending)
@@ -155,7 +159,15 @@ export function MessageRow({
               </div>
             )}
             <div className={run ? 'mt-3' : ''}>
-              {isFailed && !msg.content ? (
+              {isCancelled ? (
+                <div className="flex items-start gap-2 text-sm text-slate-600">
+                  <CircleSlash className="mt-0.5 h-4 w-4 flex-shrink-0 text-slate-400" />
+                  <span>
+                    You stopped this request.
+                    {msg.content ? ' Everything generated before that was discarded.' : ''}
+                  </span>
+                </div>
+              ) : isFailed && !msg.content ? (
                 <p className="text-sm text-slate-600">
                   The agent run failed before producing a final response.
                 </p>

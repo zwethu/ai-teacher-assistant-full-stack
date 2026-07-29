@@ -113,7 +113,7 @@ describe('chat attachment composer', () => {
     fireEvent.click(screen.getByRole('button', { name: /Add files, generate/ }))
     fireEvent.click(screen.getByRole('menuitem', { name: /Previous attachments/ }))
     expect(onOpenFilesPanel).toHaveBeenCalledTimes(1)
-    expect(screen.queryByText(/available in this chat for 7 days/)).toBeNull()
+    expect(screen.queryByText(/available in this chat for 30 days/)).toBeNull()
     expect(listChatAttachments).not.toHaveBeenCalled()
   })
 

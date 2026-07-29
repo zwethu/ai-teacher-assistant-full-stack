@@ -202,7 +202,13 @@ export function ChatSidePanel({
   useEffect(() => {
     if (!open || !filesOpen) return
     const key = `${batchId}:${chatId}`
-    if (loadedChatKeyRef.current === key && items.length > 0) return
+    if (loadedChatKeyRef.current === key) return
+    // Claim the key up front. This effect used to depend on `items.length`, so
+    // its own setItems re-triggered it: the cleanup cancelled the in-flight
+    // load mid thumbnail-fetch, its `finally` skipped setLoading(false) because
+    // `cancelled` was true, and the re-run then bailed on the guard — leaving
+    // "Loading files…" on screen forever.
+    loadedChatKeyRef.current = key
 
     let cancelled = false
     async function load() {
@@ -212,7 +218,9 @@ export function ChatSidePanel({
         const data = await listChatAttachments(batchId, chatId)
         if (cancelled) return
         setItems(data)
-        loadedChatKeyRef.current = key
+        // Thumbnails are decoration: the list is already usable, so stop the
+        // spinner before fetching them rather than after.
+        setLoading(false)
         for (const item of data.filter((value) => value.attachment_kind === 'image' && value.thumbnail_available).slice(0, 20)) {
           try {
             const blob = await getChatAttachmentContent(batchId, chatId, item.attachment_id, true)
@@ -225,7 +233,10 @@ export function ChatSidePanel({
           }
         }
       } catch {
-        if (!cancelled) setError('Chat files are unavailable.')
+        if (cancelled) return
+        setError('Chat files are unavailable.')
+        // Allow a retry: the key must not stay claimed after a failure.
+        loadedChatKeyRef.current = ''
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -234,7 +245,7 @@ export function ChatSidePanel({
     return () => {
       cancelled = true
     }
-  }, [open, filesOpen, batchId, chatId, items.length])
+  }, [open, filesOpen, batchId, chatId])
 
   useEffect(() => {
     loadedChatKeyRef.current = ''
@@ -377,7 +388,7 @@ export function ChatSidePanel({
             count={items.length}
           >
             <p className="mb-3 text-[10px] leading-4 text-slate-500">
-              Chat files stay available in this chat for 7 days, then are removed. They are not saved to Course Space.
+              Chat files stay available in this chat for 30 days, then are removed. They are not saved to Course Space.
               Images remain chat-only. Sent files can be referenced again but not deleted here.
             </p>
             {loading ? (

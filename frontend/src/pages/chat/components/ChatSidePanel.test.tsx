@@ -7,16 +7,18 @@ import type { ChatAttachmentListItem } from '../../../entity/Chat'
 import { ChatSidePanel } from './ChatSidePanel'
 
 const listChatAttachments = vi.fn()
+const getChatAttachmentContent = vi.fn()
 
 vi.mock('../../../services/chatService', () => ({
   deleteChatAttachment: vi.fn(),
-  getChatAttachmentContent: vi.fn(),
+  getChatAttachmentContent: (...args: unknown[]) => getChatAttachmentContent(...args),
   listChatAttachments: (...args: unknown[]) => listChatAttachments(...args),
 }))
 
 afterEach(() => {
   cleanup()
   listChatAttachments.mockReset()
+  getChatAttachmentContent.mockReset()
 })
 
 const imageAttachment: ChatAttachmentListItem = {
@@ -63,6 +65,35 @@ describe('ChatSidePanel', () => {
 
     expect(await screen.findByText('schedule.png')).toBeTruthy()
     await waitFor(() => expect(screen.queryByText('Loading files…')).toBeNull())
+    expect(listChatAttachments).toHaveBeenCalledTimes(1)
+  })
+
+  it('clears the loader even when thumbnails are fetched afterwards', async () => {
+    // The regression: fetching a thumbnail awaits AFTER setItems, so the effect
+    // (which depended on items.length) re-ran, cancelled the in-flight load,
+    // and its `finally` skipped setLoading(false) because `cancelled` was true.
+    // The re-run then bailed on the loaded-key guard, so the spinner never
+    // cleared. Only reproducible when there is a thumbnail to fetch.
+    listChatAttachments.mockResolvedValueOnce([
+      { ...imageAttachment, thumbnail_available: true },
+    ])
+    getChatAttachmentContent.mockResolvedValue(new Blob(['x'], { type: 'image/png' }))
+
+    render(
+      <ChatSidePanel
+        open
+        onClose={vi.fn()}
+        batchId="batch-1"
+        chatId="chat-1"
+        messages={[]}
+        initialSection="files"
+        onReferenceAttachment={vi.fn()}
+      />,
+    )
+
+    expect(await screen.findByText('schedule.png')).toBeTruthy()
+    await waitFor(() => expect(screen.queryByText('Loading files…')).toBeNull())
+    // And the list is fetched once, not on a loop.
     expect(listChatAttachments).toHaveBeenCalledTimes(1)
   })
 })

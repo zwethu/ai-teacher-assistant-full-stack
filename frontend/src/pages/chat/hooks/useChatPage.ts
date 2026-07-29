@@ -657,8 +657,18 @@ export function useChatPage() {
       ? carriedAttachmentIds
       : attachmentsForMessage.map((item) => item.attachment_id)
 
+    const referencedForMessage = [...referencedAttachments]
+
+    // Empty the composer NOW, not when the run starts. `startRunInChat` awaits
+    // the POST that creates the message, so clearing afterwards left the text
+    // and attachment tiles sitting there — disabled — for the whole round trip,
+    // which reads as the composer having frozen. The optimistic user message is
+    // already on screen by then, so the composer has nothing left to hold.
     setInput('')
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
+    setPendingAttachments([])
+    setReferencedAttachments([])
+    setAttachmentErrors([])
     const generateMode = activeGenerateMode
     const started = await startRunInChat({
       batchId,
@@ -693,9 +703,12 @@ export function useChatPage() {
     })
     if (started) {
       attachmentsForMessage.forEach((item) => item.previewUrl && URL.revokeObjectURL(item.previewUrl))
-      setPendingAttachments([])
-      setReferencedAttachments([])
-      setAttachmentErrors([])
+    } else {
+      // The send failed, so give the composer its contents back rather than
+      // silently swallowing the lecturer's text and files.
+      setInput(typedContent)
+      setPendingAttachments(attachmentsForMessage)
+      setReferencedAttachments(referencedForMessage)
     }
   }
 

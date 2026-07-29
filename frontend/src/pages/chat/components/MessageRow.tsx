@@ -28,7 +28,7 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import 'katex/dist/katex.min.css'
 import { ThinkingRow, Spinner, Button } from '../../../design-system'
-import type { ChatAttachmentSnapshot, ChatMessage } from '../../../entity/Chat'
+import type { ChatMessage } from '../../../entity/Chat'
 import { startGoogleOAuth } from '../../../services/authService'
 import {
   exportPendingQuizToGoogleForms,
@@ -59,7 +59,12 @@ import { ThinkingPanel } from './run/ThinkingPanel'
 import { createGameFromRun } from '../../../services/gameService'
 import { saveBlueprintFromRun } from '../../../services/courseBlueprintService'
 import { EXPORT_FORMAT_LABELS, exportMessage, type ChatExportFormat } from '../../../services/chatService'
-import { AttachmentThumbnail, AttachmentViewer } from './AttachmentPreview'
+import type { PreviewableAttachment } from './AttachmentPreview'
+import {
+  AttachmentThumbnail,
+  AttachmentViewer,
+  attachmentFromReference,
+} from './AttachmentPreview'
 import { EXPORT_FORMATS, EXPORT_FORMAT_ICONS } from './exportFormatIcons'
 
 // Referenced prior attachments are conveyed to the agent as an id mention appended to the
@@ -132,19 +137,21 @@ export function MessageRow({
                 {body}
               </div>
             )}
-            {references.length > 0 && (
-              <div className="mt-1 flex flex-wrap justify-end gap-2">
-                {references.map((ref) => (
-                  <div key={ref.id} className="flex items-center gap-2 rounded-xl border border-violet-200 bg-violet-50/80 px-2.5 py-1.5 shadow-sm">
-                    <FileText className="h-4 w-4 flex-shrink-0 text-violet-600" />
-                    <span className="max-w-[220px] truncate text-xs font-medium text-slate-700">{ref.title}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-            {batchId && msg.attachments && msg.attachments.length > 0 && (
-              <MessageAttachments batchId={batchId} chatId={msg.chat_id} attachments={msg.attachments} />
-            )}
+            {/* Re-referenced files render exactly like freshly attached ones:
+                same preview, same tap-to-view. They are the same file, so the
+                sent message should not distinguish them by provenance. Real
+                attachments win on id collisions — they carry full metadata. */}
+            {batchId && (() => {
+              const attached = msg.attachments || []
+              const attachedIds = new Set(attached.map((item) => item.attachment_id))
+              const referenced = references
+                .filter((ref) => !attachedIds.has(ref.id))
+                .map((ref) => attachmentFromReference(ref.id, ref.title))
+              const all = [...attached, ...referenced]
+              return all.length > 0 ? (
+                <MessageAttachments batchId={batchId} chatId={msg.chat_id} attachments={all} />
+              ) : null
+            })()}
           </div>
           )
         })() : (
@@ -243,9 +250,9 @@ function MessageAttachments({
 }: {
   batchId: string
   chatId: string
-  attachments: ChatAttachmentSnapshot[]
+  attachments: PreviewableAttachment[]
 }) {
-  const [preview, setPreview] = useState<ChatAttachmentSnapshot | null>(null)
+  const [preview, setPreview] = useState<PreviewableAttachment | null>(null)
 
   return (
     <div className="mt-2 flex flex-wrap justify-end gap-2">

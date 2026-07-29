@@ -37,6 +37,39 @@ export function previewKind(attachment: PreviewableAttachment): PreviewKind {
   return 'other'
 }
 
+const IMAGE_EXTENSIONS = /\.(png|jpe?g|webp|heic|heif|gif|bmp)$/i
+
+/**
+ * Build a previewable attachment from a re-reference, which carries only an id
+ * and a filename.
+ *
+ * A referenced file is the same file — it should look and open exactly like a
+ * freshly attached one on the sent message, not degrade to a name chip. The
+ * kind is inferred from the extension, which is all `previewKind` needs; the
+ * bytes are fetched by id like any other attachment.
+ */
+export function attachmentFromReference(id: string, title: string): PreviewableAttachment {
+  const isImage = IMAGE_EXTENSIONS.test(title)
+  const isPdf = /\.pdf$/i.test(title)
+  return {
+    attachment_id: id,
+    file_name: title,
+    file_title: title,
+    content_type: isImage
+      ? `image/${(title.split('.').pop() || 'png').toLowerCase().replace('jpg', 'jpeg')}`
+      : isPdf
+        ? 'application/pdf'
+        : 'text/plain',
+    size_bytes: 0,
+    attachment_kind: isImage ? 'image' : 'document',
+    status: 'ready',
+    token_estimate: 0,
+    parse_status: 'skipped',
+    vision_status: 'skipped',
+    thumbnail_available: isImage || isPdf,
+  }
+}
+
 export function formatBytes(bytes: number): string {
   if (!bytes) return ''
   if (bytes < 1024) return `${bytes} B`

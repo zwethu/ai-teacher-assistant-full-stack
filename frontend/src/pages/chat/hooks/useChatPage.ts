@@ -212,6 +212,10 @@ export function useChatPage() {
   // Set when Stop is pressed during a retry's pre-run window, where there is
   // no run_id to cancel yet.
   const retryAbortedRef = useRef(false)
+  // Runs this client has seen settle. The chat record's cached active_run_id
+  // outlives the run, so without this the resubscribe effect below keeps
+  // treating a finished run as live every time `messages` changes.
+  const settledRunIdsRef = useRef<Set<string>>(new Set())
   const pendingAttachmentsRef = useRef<PendingChatAttachment[]>([])
   useEffect(() => { pendingAttachmentsRef.current = pendingAttachments }, [pendingAttachments])
 
@@ -526,7 +530,12 @@ export function useChatPage() {
     const chatId = activeChat.chat_id
     const runIds = collectRunIds(messages, activeChat)
 
-    if (activeChat.active_run_id) {
+    // active_run_id is the chat record's cached value and is NOT cleared when a
+    // run ends, so it alone cannot mean "still running". This effect re-runs on
+    // every `messages` change — including the ones cancelling produces — and
+    // without the settled check it re-armed the composer's Stop button and
+    // resubscribed the run the user had just stopped.
+    if (activeChat.active_run_id && !settledRunIdsRef.current.has(activeChat.active_run_id)) {
       setCurrentRunId(activeChat.active_run_id)
       // The run outlives the page: after a reload it is still streaming, so the
       // composer has to come back as Stop rather than Send. subscribeToRun's
@@ -813,7 +822,13 @@ export function useChatPage() {
       // Settle locally anyway: leaving the composer stuck in "sending" is worse
       // than a run that keeps going silently.
     } finally {
+      settledRunIdsRef.current.add(runId)
       unsubscribeFromRun(runId)
+      // Drop it from the cached chat too, so nothing downstream reads this run
+      // as the chat's live one.
+      setActiveChat((prev) =>
+        prev && prev.active_run_id === runId ? { ...prev, active_run_id: undefined } : prev,
+      )
       setRunStates((prev) => ({
         ...prev,
         [runId]: { ...(prev[runId] || {}), status: 'cancelled' } as RunUiState,
@@ -1069,6 +1084,9 @@ export function useChatPage() {
   }
 
   function updateRunStatus(runId: string, status: AgentRunStatus) {
+    if (status === 'done' || status === 'failed' || status === 'cancelled') {
+      settledRunIdsRef.current.add(runId)
+    }
     setRunStates((prev) => ({
       ...prev,
       [runId]: {

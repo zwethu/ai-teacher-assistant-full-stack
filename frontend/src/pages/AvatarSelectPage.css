@@ -19,6 +19,7 @@
 }
 
 .avatar-select-card {
+  position: relative;
   background: rgba(255, 255, 255, 0.72);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
@@ -50,10 +51,12 @@
   font-weight: 700;
 }
 
-/* Sound control sits top-right of the card, out of the reading path. */
+/* Sound control pinned to the top-right corner, out of the reading path. */
 .avatar-select-card .music-toggle {
-  align-self: flex-end;
-  margin-bottom: -12px;
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  z-index: 4;
 }
 
 .avatar-select-grid {
@@ -84,8 +87,9 @@
   height: 100%;
 }
 
-/* Category tints (which pet), lightest step of each ramp. */
-.avatar-option--cat { background: var(--g-cream-200); }
+/* Brand tints (which pet): pink for cat, blue for dog — this is the one
+   screen that shows both brands side by side, so the choice reads by colour. */
+.avatar-option--cat { background: var(--g-rose-200); }
 .avatar-option--dog { background: var(--g-sky-200); }
 
 .avatar-option:hover {
@@ -93,7 +97,9 @@
   box-shadow: var(--g-shadow-md);
 }
 
-/* One selection colour for both, matching in-game selection. */
+/* Each card carries its own `theme-cat`/`theme-dog` class, so --g-select and
+   --g-select-ring resolve to THAT pet's brand — the dog is ringed in blue, the
+   cat in pink, matching what the player sees in-game after picking. */
 .avatar-option.is-selected {
   border-color: var(--g-select);
   box-shadow: 0 0 0 5px var(--g-select-ring), 0 12px 28px var(--g-select-ring);
@@ -151,7 +157,7 @@
 
 .avatar-option.is-selected .avatar-check {
   background: #fff;
-  color: var(--g-sky-700);
+  color: var(--g-cocoa-700);
 }
 
 .avatar-continue-btn {
@@ -182,7 +188,7 @@
 .avatar-continue-btn:disabled {
   opacity: 0.85;
   cursor: not-allowed;
-  background: var(--g-cocoa-200);
-  color: var(--g-cocoa-500);
+  background: var(--g-disabled-bg);
+  color: var(--g-disabled-ink);
   box-shadow: none;
 }

@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { CheckCircle, Question, Lightbulb } from '@phosphor-icons/react';
 import type { GameItem, AnswerRecord, BehaviorSignals } from '../../../types/catGame.types';
 import CardBird from '../CardBird';
-import { playSnap } from '../juice';
+import { playSnap, playUnsnap } from '../juice';
 
 type Card = {
   id: string;
@@ -21,6 +21,8 @@ type Props = {
    *  instead of counting every untouched card as wrong. */
   countUnplaced?: boolean;
   sidebar?: ReactNode;
+  /** "Round X of Y" node, shown in the footer's top row (left of Submit). */
+  roundIndicator?: ReactNode;
   onCorrect: () => void;
   onWrong: () => void;
   onComplete: (answers: AnswerRecord[], signals: BehaviorSignals) => void;
@@ -30,7 +32,7 @@ function shuffle<T>(arr: T[]): T[] {
   return [...arr].sort(() => Math.random() - 0.5);
 }
 
-export default function MatchAndTreat({ items, timeUp, countUnplaced = true, sidebar, onCorrect, onWrong, onComplete }: Props) {
+export default function MatchAndTreat({ items, timeUp, countUnplaced = true, sidebar, roundIndicator, onCorrect, onWrong, onComplete }: Props) {
   const [cards, setCards] = useState<Card[]>([]);
   const [selected, setSelected] = useState<Card | null>(null);
   const [matchStates, setMatchStates] = useState<Record<string, MatchState>>({});
@@ -83,9 +85,12 @@ export default function MatchAndTreat({ items, timeUp, countUnplaced = true, sid
 
     if (matchStates[card.pairId] === 'matched') return;
 
+    // Clicking a wrong pair breaks it open for another go — same dismissal as
+    // the ✕, so it gets the same cue.
     if (matchStates[card.pairId] === 'wrong') {
       const partnerId    = playerPairs[card.id];
       const partnerPairId = cards.find(c => c.id === partnerId)?.pairId;
+      if (partnerId) playUnsnap();
       setMatchStates(prev => {
         const next = { ...prev, [card.pairId]: 'unmatched' as MatchState };
         if (partnerPairId) next[partnerPairId] = 'unmatched';
@@ -127,6 +132,7 @@ export default function MatchAndTreat({ items, timeUp, countUnplaced = true, sid
   function unpair(card: Card) {
     recordFirstAction();
     const partnerId = playerPairs[card.id];
+    if (partnerId) playUnsnap();
     setPlayerPairs(prev => {
       const next = { ...prev };
       if (partnerId) delete next[partnerId];
@@ -160,11 +166,10 @@ export default function MatchAndTreat({ items, timeUp, countUnplaced = true, sid
 
     totalWrongPairsRef.current += wrongCount;
 
-    const newlyCorrectIds = termCards
-      .filter(tc => newMatchStates[tc.pairId] === 'matched' && matchStates[tc.pairId] !== 'matched')
-      .map(tc => tc.pairId);
-    if (newlyCorrectIds.length > 0) {
-      setCelebrating(new Set(newlyCorrectIds));
+    // The flock flies only when the WHOLE round comes back clean — birds on
+    // each newly-matched pair made a half-right board feel like a win.
+    if (wrongCount === 0) {
+      setCelebrating(new Set(termCards.map(tc => tc.pairId)));
       setTimeout(() => setCelebrating(new Set()), 2000);
     }
 
@@ -192,7 +197,9 @@ export default function MatchAndTreat({ items, timeUp, countUnplaced = true, sid
     if (wrongCount === 0) {
       finishedRef.current = true;
       const signals = buildSignals();
-      setTimeout(() => onComplete(answers, signals), 800);
+      // Long enough for the flock + fanfare to land before the page turns —
+      // at the old 800ms the celebration was cut off mid-flight.
+      setTimeout(() => onComplete(answers, signals), 1800);
     }
   }
 
@@ -274,23 +281,15 @@ export default function MatchAndTreat({ items, timeUp, countUnplaced = true, sid
       </div>
 
         <div className="mode-footer">
-          <div className="mode-footer-info">
-            <div className="question-progress">
-              Pairs connected: {termCards.filter(tc => playerPairs[tc.id]).length} / {termCards.length}
-            </div>
-            <div className="match-hint">
-              Click any card, then click its match
-            </div>
-          </div>
+          <div className="mode-footer-round">{roundIndicator}</div>
           <button
             type="submit"
             className="submit-btn"
             onClick={handleSubmit}
             disabled={!allPaired}
+            title={allPaired ? undefined : `Pair all ${termCards.length} items first`}
           >
-            {allPaired
-              ? <><CheckCircle size={18} weight="fill" /> Submit Answers</>
-              : `Pair all ${termCards.length} items first`}
+            <CheckCircle size={18} weight="fill" /> Submit Answers
           </button>
         </div>
       </div>

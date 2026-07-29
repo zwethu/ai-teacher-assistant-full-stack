@@ -41,7 +41,7 @@ export default function GameModeSelectPage({ session, nickname, playerUid, avata
   const navigate = useNavigate();
   const [selected, setSelected] = useState<GameMode | null>(null);
   const [loading, setLoading] = useState(false);
-  useMusic('menu');
+  useMusic(avatar);
 
   async function handleStart() {
     if (!selected) return;
@@ -62,7 +62,7 @@ export default function GameModeSelectPage({ session, nickname, playerUid, avata
   }
 
   return (
-    <div className="mode-select-bg">
+    <div className={`mode-select-bg theme-${avatar}`}>
       <div className="mode-select-card">
         <MusicToggle />
         <CatSprite mood="playful" species={avatar} />

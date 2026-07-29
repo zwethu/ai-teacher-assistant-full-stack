@@ -27,6 +27,18 @@
   font-family: 'Nunito', 'Segoe UI', sans-serif;
 }
 
+/* Wrong answer → the whole screen jolts (paired with the phone buzz in
+   juice.ts playWrong). Scaling up ~2% alongside the offset keeps the
+   container's own background covering the viewport, so the shift can't expose
+   a strip of bare page at the edges. Motion only — it says "not yet", it
+   doesn't say WHICH pair was wrong. */
+.cat-game-container--shake {
+  animation: screenShake 0.5s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cat-game-container--shake { animation: none; }
+}
+
 /* Reading order follows the Z the eye actually takes:
      1 top-left     .mode-side      status + avatar (who/how long)
      2 top-right    .mode-board     the cards (the work)
@@ -44,12 +56,16 @@
   max-height: 100%;
 }
 
+/* Bottom-aligned, not vertically centred: the hint → pet → round stack sits on
+   the same baseline as the bottom of the board instead of floating mid-column. */
 .mode-side {
   flex: 0 0 250px;
   width: 250px;
+  align-self: flex-end;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: flex-end;
   gap: 12px;
 }
 
@@ -76,13 +92,17 @@
   overflow-y: auto;
 }
 
+/* order:-1 lifts this row to the TOP of the board column (not the global
+   screen top). "Round X of Y" sits left, Submit right, spaced apart. */
 .mode-footer {
+  order: -1;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 20px;
   padding: 0 4px;
 }
+.mode-footer-round { display: flex; align-items: center; min-width: 0; }
 
 .mode-footer-info {
   display: flex;
@@ -98,7 +118,9 @@
 @media (max-width: 900px) {
   .cat-game-container { align-items: flex-start; overflow-y: auto; padding: 16px; }
   .mode-layout { flex-direction: column; gap: 16px; max-height: none; }
-  .mode-side { flex: none; width: 100%; max-width: 420px; }
+  /* Stacked layout: the cross axis is horizontal here, so flex-end would shove
+     the pet to the right edge — recentre it. */
+  .mode-side { flex: none; width: 100%; max-width: 420px; align-self: center; }
   .mode-main { width: 100%; max-width: 560px; }
   .mode-board { max-height: none; overflow: visible; }
   .mode-footer { flex-direction: column; align-items: stretch; gap: 10px; }
@@ -155,16 +177,252 @@
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  border: 2px solid var(--g-peach-300);
+  /* Brand-tinted like its neighbour the Guide pill — a cocoa icon here read as
+     a brown control sitting in a pink/blue corner. */
+  border: 2px solid var(--g-rose-300);
   background: rgba(255, 255, 255, 0.82);
   backdrop-filter: blur(8px);
-  color: var(--g-cocoa-500);
+  color: var(--g-accent-hover);
   cursor: pointer;
   box-shadow: var(--g-shadow-sm);
   transition: transform 0.15s ease, color 0.2s, border-color 0.2s;
 }
-.music-toggle:hover { transform: scale(1.08); color: var(--g-cocoa-700); border-color: var(--g-peach-400); }
-.music-toggle[aria-pressed='true'] { color: var(--g-cocoa-300); }
+.music-toggle:hover { transform: scale(1.08); color: var(--g-accent); border-color: var(--g-accent); }
+/* Muted = the same brand hue, dialled down — still reads as "off". */
+.music-toggle[aria-pressed='true'] { color: var(--g-rose-300); }
+
+/* Pinned to the top-right corner of the board, matching the result page. */
+.game-mute {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  z-index: 4;
+}
+
+/* Timer pinned to the top-left corner of the board. */
+.game-timer-corner {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  z-index: 4;
+}
+
+/* ─── Game guide (how-to-play) ─── */
+/* A friendly "?" pill in the top-right corner, just left of the mute toggle.
+   Brand-tinted so it flips pink/blue with the species theme. */
+.game-guide-btn {
+  position: absolute;
+  top: 18px;
+  right: 64px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  padding: 0 15px 0 12px;
+  border-radius: 40px;
+  border: 2px solid var(--g-rose-300);
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: blur(8px);
+  color: var(--g-accent-hover);
+  font-family: 'Nunito', inherit;
+  font-size: 0.86rem;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: var(--g-shadow-sm);
+  transition: transform 0.15s ease, border-color 0.2s, color 0.2s;
+}
+.game-guide-btn:hover {
+  transform: scale(1.06);
+  border-color: var(--g-accent);
+  color: var(--g-accent);
+}
+.game-guide-btn-label { line-height: 1; }
+@media (max-width: 560px) {
+  .game-guide-btn-label { display: none; }   /* just the "?" on small screens */
+  .game-guide-btn { padding: 0; width: 38px; justify-content: center; }
+}
+
+.guide-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(74, 45, 24, 0.42);
+  backdrop-filter: blur(3px);
+  animation: fadeIn 0.2s ease;
+}
+.guide-modal {
+  position: relative;
+  width: 100%;
+  max-width: 460px;
+  max-height: 90vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--g-surface);
+  border-radius: 26px;
+  border-top: 6px solid var(--g-accent);
+  padding: 24px 22px 20px;
+  box-shadow: var(--g-shadow-lg);
+  animation: guidePop 0.32s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  /* Thin, brand-tinted scrollbar (never the chunky default) for the rare
+     small-screen overflow. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--g-rose-300) transparent;
+}
+.guide-modal::-webkit-scrollbar { width: 7px; }
+.guide-modal::-webkit-scrollbar-track { background: transparent; margin: 14px 0; }
+.guide-modal::-webkit-scrollbar-thumb {
+  background: var(--g-rose-300);
+  border-radius: 8px;
+}
+.guide-modal::-webkit-scrollbar-thumb:hover { background: var(--g-accent); }
+.guide-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: var(--g-rose-100);
+  color: var(--g-accent-hover);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.2s;
+}
+.guide-close:hover { transform: scale(1.1); background: var(--g-rose-200); }
+
+.guide-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; padding-right: 34px; }
+.guide-badge {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--g-rose-200);
+  color: var(--g-accent-hover);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.guide-kicker {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--g-accent);
+}
+.guide-title {
+  margin: 2px 0 0;
+  font-size: 1.28rem;
+  font-weight: 900;
+  color: var(--g-cocoa-900);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.guide-goal {
+  margin: 0 0 12px;
+  padding: 9px 13px;
+  border-radius: 14px;
+  background: var(--g-rose-100);
+  color: var(--g-ink);
+  font-size: 0.92rem;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.guide-goal svg { color: var(--g-butter-700); flex: 0 0 auto; }
+
+.guide-steps {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.guide-steps li {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--g-ink);
+  line-height: 1.45;
+}
+.guide-step-num {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--g-accent);
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 900;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1px;
+}
+
+.guide-tips {
+  border-top: 1.5px dashed var(--g-rose-200);
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.guide-tips-head {
+  margin: 0 0 2px;
+  font-size: 0.74rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--g-ink-soft);
+}
+.guide-tip {
+  margin: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--g-ink-soft);
+  line-height: 1.4;
+}
+.guide-tip svg { color: var(--g-accent); flex: 0 0 auto; margin-top: 1px; }
+
+.guide-got-it {
+  margin-top: 14px;
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 18px;
+  background: var(--g-accent);
+  color: #fff;
+  font-family: 'Nunito', inherit;
+  font-size: 1rem;
+  font-weight: 900;
+  cursor: pointer;
+  box-shadow: var(--g-shadow-sm);
+  transition: transform 0.15s ease, background 0.2s;
+}
+.guide-got-it:hover { transform: translateY(-2px); background: var(--g-accent-hover); }
+
+@keyframes guidePop {
+  0%   { opacity: 0; transform: translateY(16px) scale(0.94); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
 /* Demo-only skip (`?demo=1`). Deliberately neutral chrome, not rose: the
    submit button is the one primary action on this screen. */
@@ -215,6 +473,9 @@
   filter: drop-shadow(0 6px 12px rgba(107, 67, 38, 0.14));
 }
 .cat-sprite--result .cat-lottie { width: 190px; height: 190px; }
+/* Bigger pet on the game board — the freed-up left column has room now. */
+.cat-sprite--game .cat-lottie { width: 210px; height: 210px; }
+.cat-sprite--game .cat-shadow { width: 118px; }
 .cat-lottie > * { width: 100% !important; height: 100% !important; }
 
 /* The cat artwork sits smaller inside its 500x500 canvas than the dog does
@@ -224,16 +485,23 @@
    still reserves the layout space so nothing collides. */
 .cat-sprite--cat .cat-lottie { width: 200px; height: 200px; }
 .cat-sprite--cat.cat-sprite--result .cat-lottie { width: 250px; height: 250px; }
+.cat-sprite--cat.cat-sprite--game .cat-lottie { width: 280px; height: 280px; }
 .cat-sprite--cat .cat-shadow { width: 104px; }
+.cat-sprite--cat.cat-sprite--game .cat-shadow { width: 150px; }
 
 .cat-mood-happy    .cat-lottie { animation: catBounce 0.6s ease; }
 .cat-mood-confused .cat-lottie { animation: catWobble 0.6s ease; }
 .cat-mood-playful  .cat-lottie { animation: catSpin   0.6s ease; }
 
+/* order:-1 floats the bubble ABOVE the pet (the shadow is order:3, the lottie
+   the default 0), so the hint reads as the pet speaking and the cone below
+   points back down at it. */
 .cat-speech-bubble {
-  order: 0;
+  --bubble-border: var(--g-rose-300);
+  order: -1;
+  margin-bottom: 14px;   /* room for the cone */
   background: white;
-  border: 2.5px solid var(--g-rose-300);
+  border: 2.5px solid var(--bubble-border);
   border-radius: 20px;
   padding: 5px 14px;
   font-size: 0.88rem;
@@ -244,24 +512,65 @@
   animation: bubblePop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
   position: relative;
 }
+/* The gap under the bubble is NOT what the margin above says it is: each pet's
+   Lottie canvas has empty space baked in above the drawing, and the cat's box
+   is the biggest (280px at game size) with the smallest drawing in it — the
+   lying-down pose sits in the lower half of its canvas. So the bubble is pulled
+   back down by roughly that empty band. Tune these two numbers, not the 14px
+   margin, if the bubble ever drifts off the pet's head. */
+.cat-sprite--game.cat-sprite--cat .cat-speech-bubble { margin-bottom: -78px; }
+.cat-sprite--game.cat-sprite--dog .cat-speech-bubble { margin-bottom: -6px; }
+
+/* The persistent hint is longer than a mood label — let it wrap into a tidy
+   little speech balloon instead of one long line. */
+.cat-speech-bubble--hint {
+  white-space: normal;
+  max-width: 210px;
+  text-align: center;
+  line-height: 1.3;
+}
+/* Comic-style cone: TWO stacked triangles, not one. ::before is the outlined
+   cone in the border colour; ::after is a slightly smaller white one laid over
+   it, sitting 2.5px INSIDE the bubble (bottom: -8px spans -8..2.5) so it also
+   erases the bubble's own bottom border across the cone's mouth. Both share the
+   same 2:3 base:height slope, which is what keeps the rim an even width. */
+/* Off-centre on purpose — a tail hanging off one shoulder reads as comic
+   speech; dead-centre reads as a tooltip. The inner cone is 1px narrower per
+   side, so its `left` is +1px to keep the two on the same axis. */
+.cat-speech-bubble::before,
 .cat-speech-bubble::after {
   content: '';
   position: absolute;
-  bottom: -9px;
-  left: 50%;
-  transform: translateX(-50%);
-  border: 5px solid transparent;
-  border-top-color: var(--g-rose-300);
+  left: 26px;
+  width: 0;
+  height: 0;
+  border-left:  8px solid transparent;
+  border-right: 8px solid transparent;
+}
+.cat-speech-bubble::before {
+  bottom: -12px;
+  border-top: 12px solid var(--bubble-border);
+}
+.cat-speech-bubble::after {
+  bottom: -8px;
+  left: 27px;
+  border-left-width:  7px;
+  border-right-width: 7px;
+  border-top: 10.5px solid #fff;
 }
 
 /* ─── Round (page) indicator ─── */
-/* Progress through the deal, not through the questions — cocoa/neutral so it
-   never reads as a correctness signal. */
+/* Sits under the pet. Progress through the deal, not through the questions —
+   a quiet pill so it never reads as a correctness signal. */
 .page-indicator {
-  display: flex;
-  flex-direction: column;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
+  padding: 5px 14px;
+  border-radius: 40px;
+  border: 2px solid var(--g-rose-200);
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(8px);
+  box-shadow: var(--g-shadow-sm);
 }
 .page-indicator-text {
   font-size: 0.74rem;
@@ -269,23 +578,6 @@
   letter-spacing: 0.8px;
   text-transform: uppercase;
   color: var(--g-ink-soft);
-}
-.page-dots {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.page-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--g-cocoa-200);
-  transition: background 0.3s, transform 0.3s;
-}
-.page-dot--done    { background: var(--g-cocoa-300); }
-.page-dot--current {
-  background: var(--g-accent);
-  transform: scale(1.5);
 }
 
 /* ─── Mode pill ─── */
@@ -310,7 +602,7 @@
   border-radius: 28px;
   padding: 20px 18px;
   box-shadow: var(--g-shadow-lg);
-  border: 2px solid var(--g-cream-300);
+  border: 2px solid var(--g-rose-200);
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -329,9 +621,11 @@
 /* The one solid-rose element on the board — that's what makes it read as
    "the action" without needing a size or position gimmick. */
 .submit-btn {
-  padding: 13px 28px;
+  /* 11+2 / 26+2 keeps the filled and outlined states exactly the same size —
+     the transparent border here is what the disabled state colours in. */
+  padding: 11px 26px;
   min-width: 220px;
-  border: none;
+  border: 2px solid transparent;
   border-radius: 22px;
   background: var(--g-accent);
   color: white;
@@ -353,12 +647,21 @@
   background: var(--g-accent-hover);
   box-shadow: 0 9px 26px var(--g-accent-ring);
 }
+/* Not-yet-submittable = OUTLINED, not a paler fill: white body with a brand
+   hairline, so it stays legible on the patterned board and the solid-rose
+   filled state remains the only thing that reads as "press me". */
 .submit-btn:disabled {
-  background: var(--g-cocoa-200);
-  color: var(--g-cocoa-500);
+  background: var(--g-surface);
+  /* Washed-out brand tint so it reads as "blocked", while the filled rose
+     state stays the only thing that looks pressable. The label is brand-500
+     thinned ~half into white — paler than any ramp step between 300 and 500,
+     and still legible (flat rose-300 text on white is ~1.5:1 = invisible).
+     The plain rose-500 line is the fallback where color-mix isn't supported. */
+  border-color: var(--g-rose-200);
+  color: var(--g-rose-500);
+  color: color-mix(in srgb, var(--g-rose-500) 48%, #fff);
   box-shadow: none;
   cursor: not-allowed;
-  opacity: 0.85;
 }
 
 /* ─── Match & Treat grid ─── */
@@ -370,9 +673,9 @@
 .match-card {
   position: relative;
   padding: 10px 8px;
-  border: 2.5px solid var(--g-peach-300);
+  border: 2.5px solid var(--g-rose-200);
   border-radius: 16px;
-  background: var(--g-cream-100);
+  background: var(--g-surface);
   cursor: pointer;
   font-size: 0.8rem;
   font-weight: 800;
@@ -398,23 +701,23 @@
 /* State styles stay NEUTRAL — no colour cues that could hint at correctness. */
 .match-card:hover:not(.matched) {
   transform: translateY(-3px);
-  border-color: var(--g-cocoa-300);
+  border-color: var(--g-rose-300);
   box-shadow: var(--g-shadow-md);
 }
-/* Selection cue (which card you're holding) — sky, distinct from mint=correct.
-   Not a correctness hint: it only shows YOUR current pick. */
+/* Selection cue (which card you're holding) — neutral cocoa, distinct from
+   both mint=correct and the species brand. Only shows YOUR current pick. */
 .match-card.selected {
   border-color: var(--g-select);
-  background: var(--g-sky-200);
+  background: var(--g-select-bg);
   box-shadow: 0 0 0 4px var(--g-select-ring), 0 8px 20px var(--g-select-ring);
   transform: translateY(-3px) scale(1.05);
   z-index: 3;
 }
-/* Two cards linked but not yet submitted — the same sky family as .selected,
-   one step lighter, so "picked" reads as one idea at two strengths. */
+/* Two cards linked but not yet submitted — the same neutral family as
+   .selected, so "picked" reads as one idea at two strengths. */
 .match-card.paired-pending {
-  background: var(--g-sky-200);
-  border-color: var(--g-sky-300);
+  background: var(--g-select-bg);
+  border-color: var(--g-select);
   box-shadow: 0 0 0 2.5px var(--g-select-ring);
 }
 /* Confirmed-correct = mint celebration (post-submit feedback, not a during-play hint) */
@@ -428,8 +731,9 @@
   z-index: 2;
   animation: matchPop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
+/* Wrong = motion only (no colour change) so it never leaks WHICH pair is wrong. */
 .match-card.wrong-pair {
-  border-color: var(--g-cocoa-300);
+  border-color: var(--g-rose-200);
   animation: ropeShake 0.45s ease;
 }
 /* Faint corner watermark marking card TYPE (question vs answer) — not correctness */
@@ -437,7 +741,7 @@
   position: absolute;
   top: 4px;
   right: 5px;
-  color: var(--g-cocoa-300);
+  color: var(--g-rose-300);
   opacity: 0.4;
   pointer-events: none;
   line-height: 0;
@@ -463,7 +767,7 @@
   padding: 0;
   border-radius: 50%;
   border: 2px solid #fff;
-  background: var(--g-cocoa-500);
+  background: var(--g-rose-600);
   color: #fff;
   font-size: 0.68rem;
   font-weight: 900;
@@ -476,7 +780,7 @@
   box-shadow: var(--g-shadow-sm);
   transition: transform 0.15s ease, background 0.15s ease;
 }
-.match-remove-btn:hover { transform: scale(1.15); background: var(--g-cocoa-700); }
+.match-remove-btn:hover { transform: scale(1.15); background: var(--g-rose-700); }
 
 .match-hint {
   font-size: 0.78rem;
@@ -490,26 +794,36 @@
 
 /* ─── Rope & Link ─── */
 .rope-panel { padding: 16px 14px 14px; }
+/* ONE grid for both columns, and every node is placed on an explicit row (see
+   `gridRow` in RopeAndLink.tsx). Two independently-flowing columns let a
+   one-line term drift against a four-line definition, which is what made long
+   answers look ragged; sharing rows means each pair's row is as tall as its
+   taller card and every rope leaves and lands at a row centre. Terms are
+   narrower than definitions on purpose — they're the short side. */
 .rope-arena {
   position: relative;
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 48px;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: 10px 48px;
+  align-items: stretch;
   min-height: 220px;
   margin-top: 4px;
   touch-action: none;
   user-select: none;
 }
 .rope-svg { position: absolute; top: 0; left: 0; pointer-events: none; z-index: 2; overflow: visible; }
-.rope-col { display: flex; flex-direction: column; gap: 10px; z-index: 3; min-width: 0; }
+/* The column wrappers stay in the markup (refs, readability) but drop out of
+   layout so their nodes are direct grid items. */
+.rope-col { display: contents; }
 .rope-node {
   position: relative;
+  z-index: 3;
   width: 100%;
   min-height: 60px;
   padding: 10px 14px;
-  border: 2.5px solid var(--g-peach-300);
+  border: 2.5px solid var(--g-rose-200);
   border-radius: 16px;
-  background: var(--g-cream-100);
+  background: var(--g-surface);
   font-size: 0.85rem;
   font-weight: 800;
   color: var(--g-ink);
@@ -530,7 +844,20 @@
 }
 .rope-node:focus-visible { box-shadow: 0 0 0 3px var(--g-select-ring); }
 .rope-node[aria-disabled="true"] { cursor: default; pointer-events: none; }
-.rope-node-answer { cursor: default; }
+
+.rope-node-question { grid-column: 1; }
+/* Definitions are sentences, not labels: lighter weight, more leading, and
+   balanced wrapping so a 4-line card doesn't end on one orphaned word. At 800
+   weight a full paragraph reads as shouting. */
+.rope-node-answer {
+  grid-column: 2;
+  cursor: default;
+  font-weight: 700;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  text-wrap: balance;
+  padding: 12px 16px;
+}
 /* Explicit disconnect badge on a pending (connected, not-yet-submitted) node */
 .rope-disconnect-btn {
   position: absolute;
@@ -541,7 +868,7 @@
   padding: 0;
   border-radius: 50%;
   border: 2px solid #fff;
-  background: var(--g-cocoa-500);
+  background: var(--g-rose-600);
   color: #fff;
   font-size: 0.72rem;
   font-weight: 900;
@@ -554,24 +881,24 @@
   box-shadow: var(--g-shadow-sm);
   transition: transform 0.15s ease, background 0.15s ease;
 }
-.rope-disconnect-btn:hover { transform: scale(1.15); background: var(--g-cocoa-700); }
+.rope-disconnect-btn:hover { transform: scale(1.15); background: var(--g-rose-700); }
 .rope-disconnect-btn:active { transform: scale(0.95); }
 /* Neutral rope states — motion/opacity only, never colour-coded correctness. */
 .rope-node-question:hover:not(.rope-node-locked):not(.rope-node-pending) {
-  border-color: var(--g-cocoa-300);
+  border-color: var(--g-rose-300);
   transform: translateX(3px);
   box-shadow: var(--g-shadow-md);
 }
 .rope-node-dragging {
-  border-color: var(--g-cocoa-300);
-  box-shadow: 0 0 0 3px rgba(201, 169, 134, 0.4);
+  border-color: var(--g-rose-300);
+  box-shadow: 0 0 0 3px var(--g-select-ring);
   cursor: grabbing;
 }
-/* Connected-but-unsubmitted = sky, same "this is your pick" language as
+/* Connected-but-unsubmitted = neutral, same "this is your pick" language as
    .match-card.paired-pending. Not a correctness cue. */
 .rope-node-pending {
-  background: var(--g-sky-200);
-  border-color: var(--g-sky-300);
+  background: var(--g-select-bg);
+  border-color: var(--g-select);
   cursor: pointer;   /* tap to disconnect */
 }
 .rope-node-locked {
@@ -584,12 +911,12 @@
   cursor: default !important;
 }
 .rope-node-wrong {
-  border-color: var(--g-cocoa-300);
+  border-color: var(--g-rose-200);
   animation: ropeShake 0.5s ease;
 }
 .rope-shake {
   animation: ropeShake 0.5s ease;
-  border-color: var(--g-cocoa-300) !important;
+  border-color: var(--g-rose-200) !important;
 }
 .rope-hint {
   font-size: 0.78rem;
@@ -606,9 +933,10 @@
 .bucket-panel { padding: 16px 14px 14px; }
 .bucket-arena { position: relative; display: flex; flex-direction: column; gap: 16px; }
 
+/* Fixed 3 columns → 6 buckets read as a tidy 3×2 block (not a lopsided 4+2). */
 .bucket-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
 }
 .bucket {
@@ -617,14 +945,14 @@
   flex-direction: column;
   gap: 8px;
   padding: 10px 10px 12px;
-  border: 2.5px dashed var(--g-peach-300);
+  border: 2.5px dashed var(--g-rose-200);
   border-radius: 16px;
-  background: var(--g-cream-50);
+  background: var(--g-surface);
   min-height: 104px;
   transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s;
 }
 /* Neutral states — motion/opacity/✅ only, never colour-coded correctness. */
-.bucket-pending { border-style: solid; border-color: var(--g-sky-300); background: var(--g-sky-200); }
+.bucket-pending { border-style: solid; border-color: var(--g-select); background: var(--g-select-bg); }
 .bucket-correct {
   border-style: solid;
   border-color: var(--g-correct);
@@ -664,7 +992,7 @@
 .bucket-empty-hint {
   font-size: 0.7rem;
   font-weight: 700;
-  color: var(--g-cocoa-300);
+  color: var(--g-rose-500);
   letter-spacing: 0.3px;
 }
 .bucket-chip {
@@ -672,8 +1000,8 @@
   width: 100%;
   padding: 8px 10px;
   border-radius: 12px;
-  background: var(--g-cream-200);
-  border: 2px solid var(--g-peach-300);
+  background: var(--g-surface);
+  border: 2px solid var(--g-rose-200);
   font-size: 0.78rem;
   font-weight: 800;
   color: var(--g-ink);
@@ -694,7 +1022,7 @@
   padding: 0;
   border-radius: 50%;
   border: 2px solid #fff;
-  background: var(--g-cocoa-500);
+  background: var(--g-rose-600);
   color: #fff;
   font-size: 0.68rem;
   font-weight: 900;
@@ -707,34 +1035,47 @@
   box-shadow: var(--g-shadow-sm);
   transition: transform 0.15s ease, background 0.15s ease;
 }
-.bucket-remove-btn:hover { transform: scale(1.15); background: var(--g-cocoa-700); }
+.bucket-remove-btn:hover { transform: scale(1.15); background: var(--g-rose-700); }
 
+/* Answer cards sit in an even 3-column grid so every card is the SAME width
+   (no ragged last row of odd-width pills). Text wraps to a few lines inside. */
 .chip-tray {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
-  justify-content: center;
-  align-items: center;
   padding: 12px;
   border-radius: 16px;
-  background: var(--g-cream-100);
-  border: 2px dashed var(--g-peach-300);
+  background: var(--g-surface);
+  border: 2px dashed var(--g-rose-200);
   min-height: 60px;
 }
-.chip-tray-empty { font-size: 0.82rem; font-weight: 800; color: var(--g-ink-soft); display: inline-flex; align-items: center; gap: 5px; }
+.chip-tray-empty {
+  grid-column: 1 / -1;
+  justify-self: center;
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: var(--g-ink-soft);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
 .tray-chip {
-  padding: 9px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 58px;
+  padding: 9px 12px;
   border-radius: 14px;
-  background: var(--g-cream-200);
-  border: 2px solid var(--g-peach-300);
+  background: var(--g-surface);
+  border: 2px solid var(--g-rose-200);
   font-size: 0.8rem;
   font-weight: 800;
   color: var(--g-ink);
+  line-height: 1.3;
   cursor: grab;
   touch-action: none;
   user-select: none;
   text-align: center;
-  max-width: 100%;
   word-break: break-word;
   box-shadow: var(--g-shadow-sm);
   transition: transform 0.14s ease, box-shadow 0.14s ease;
@@ -747,17 +1088,17 @@
   transform: translate(-50%, -50%);
   padding: 9px 14px;
   border-radius: 14px;
-  background: var(--g-cream-200);
-  border: 2px solid var(--g-peach-400);
+  background: var(--g-surface);
+  border: 2px solid var(--g-rose-300);
   font-size: 0.8rem;
   font-weight: 800;
   color: var(--g-ink);
   pointer-events: none;
   z-index: 20;
-  white-space: nowrap;
-  max-width: 240px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  width: 190px;
+  text-align: center;
+  line-height: 1.3;
+  word-break: break-word;
   box-shadow: 0 8px 20px rgba(74, 45, 24, 0.28);
 }
 
@@ -774,9 +1115,21 @@
 }
 /* Medal tints stay in the warm family — a cool grey "silver" against a warm
    cream flow was the single most jarring colour in the old result screen. */
-.result-screen--gold   { background: var(--game-pattern) 0 0 / var(--game-pattern-size) repeat, #fff6e0; }
-.result-screen--silver { background: var(--game-pattern) 0 0 / var(--game-pattern-size) repeat, #f6f1ea; }
-.result-screen--bronze { background: var(--game-pattern) 0 0 / var(--game-pattern-size) repeat, var(--g-cream-200); }
+/* White background across all tiers — the medal card + confetti carry the
+   celebration; only the species-tinted paw wallpaper sits on top of white. */
+.result-screen--gold,
+.result-screen--silver,
+.result-screen--bronze { background: var(--game-pattern) 0 0 / var(--game-pattern-size) repeat, #ffffff; }
+
+/* Screen corner, not inside the card: the card is a two-column row whose top
+   edge is already occupied on both sides, and the toggle must be there before
+   the right column reveals. */
+.result-mute {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  z-index: 4;
+}
 
 .result-bird {
   position: absolute;
@@ -851,7 +1204,7 @@
 }
 .result-cat-wrap { display: flex; flex-direction: column; align-items: center; }
 
-.result-medal { display: flex; flex-direction: column; align-items: center; gap: 4px; animation: medalPop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.result-medal { display: flex; flex-direction: column; align-items: center; gap: 4px; animation: medalPop 0.75s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
 .result-medal-emoji { font-size: 3.2rem; line-height: 1; filter: drop-shadow(0 4px 8px rgba(74, 45, 24, 0.18)); }
 .result-medal-title { margin: 0; font-size: 1.4rem; font-weight: 900; }
 .result-medal--gold   .result-medal-title { color: var(--g-butter-700); }
@@ -864,10 +1217,10 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-  background: var(--g-cream-50);
+  background: var(--g-surface);
   border-radius: 18px;
   padding: 16px 18px;
-  border: 1.5px solid var(--g-cream-300);
+  border: 1.5px solid var(--g-rose-200);
 }
 .stat-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.92rem; }
 .stat-label { color: var(--g-ink-soft); font-weight: 700; display: inline-flex; align-items: center; gap: 6px; }
@@ -891,7 +1244,7 @@
 .restart-btn {
   background: white;
   color: var(--g-ink);
-  border: 2px solid var(--g-cream-300);
+  border: 2px solid var(--g-rose-300);
   border-radius: 22px;
   padding: 13px 36px;
   font-size: 1rem;
@@ -908,7 +1261,7 @@
 }
 .restart-btn:hover {
   transform: translateY(-3px);
-  border-color: var(--g-peach-400);
+  border-color: var(--g-rose-500);
   box-shadow: var(--g-shadow-md);
 }
 
@@ -950,6 +1303,36 @@
   animation-iteration-count: 1;
 }
 
+/* ─── Party-popper burst (birthday confetti cannon on medal reveal) ─── */
+.popper-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 4;
+}
+.popper-origin { position: absolute; width: 0; height: 0; }
+.popper-origin--left  { left: 8%;  bottom: 12%; }
+.popper-origin--right { right: 8%; bottom: 12%; }
+.popper-piece {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  opacity: 0;
+  transform: translate(0, 0) scale(0.5);
+  animation-name: popperBurst;
+  animation-timing-function: cubic-bezier(0.15, 0.65, 0.35, 1);
+  animation-iteration-count: 1;
+  animation-fill-mode: forwards;
+}
+.popper-piece--streamer { width: 5px; height: 16px; border-radius: 3px; }
+@media (prefers-reduced-motion: reduce) {
+  .popper-piece { animation: none; opacity: 0; }
+}
+
 /* ─── Keyframes ─── */
 @keyframes catBounce {
   0%, 100% { transform: translateY(0) scale(1); }
@@ -974,13 +1357,31 @@
   to   { transform: scale(1.07); }
 }
 @keyframes medalPop {
-  0%   { transform: scale(0.4); opacity: 0; }
-  70%  { transform: scale(1.15); }
-  100% { transform: scale(1); opacity: 1; }
+  0%   { transform: scale(0.2) rotate(-8deg); opacity: 0; }
+  55%  { transform: scale(1.28) rotate(4deg); opacity: 1; }
+  72%  { transform: scale(0.94) rotate(-2deg); }
+  86%  { transform: scale(1.08) rotate(1deg); }
+  100% { transform: scale(1) rotate(0deg); opacity: 1; }
+}
+/* Confetti-cannon arc: shoot out from the corner, up to a peak, then fall. */
+@keyframes popperBurst {
+  0%   { opacity: 1; transform: translate(0, 0) rotate(0deg) scale(0.5); }
+  12%  { opacity: 1; transform: translate(calc(var(--tx) * 0.35), calc(var(--ty) * 0.5)) rotate(calc(var(--rot) * 0.25)) scale(1); }
+  55%  { opacity: 1; transform: translate(calc(var(--tx) * 0.92), var(--ty)) rotate(calc(var(--rot) * 0.7)) scale(1); }
+  100% { opacity: 0; transform: translate(var(--tx), calc(var(--ty) + var(--fall))) rotate(var(--rot)) scale(0.95); }
 }
 @keyframes fadeSlideUp {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes screenShake {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  10%      { transform: translate3d(-8px, 2px, 0) scale(1.02) rotate(-0.5deg); }
+  25%      { transform: translate3d(7px, -3px, 0) scale(1.02) rotate(0.5deg); }
+  40%      { transform: translate3d(-6px, 2px, 0) scale(1.02) rotate(-0.35deg); }
+  55%      { transform: translate3d(5px, -2px, 0) scale(1.02) rotate(0.35deg); }
+  70%      { transform: translate3d(-3px, 1px, 0) scale(1.01) rotate(-0.2deg); }
+  85%      { transform: translate3d(2px, 0, 0) scale(1.01); }
 }
 @keyframes ropeShake {
   0%, 100% { transform: translateX(0); }

@@ -3,11 +3,14 @@
 The game ships with generated Web Audio themes so it has music with no assets.
 Drop a real file here and it takes over automatically — no code change:
 
-| File             | Plays on                          |
-| ---------------- | --------------------------------- |
-| `background.mp3` | Avatar select, mode select, lobby |
-| `cat-theme.mp3`  | In-game, cat avatar               |
-| `dog-theme.mp3`  | In-game, dog avatar               |
+| File      | Plays on                                                     |
+| --------- | ------------------------------------------------------------ |
+| `cat.mp3` | Everything cat: avatar preview, mode select, game, result     |
+| `dog.mp3` | Everything dog: avatar preview, mode select, game, result     |
+
+There is no separate lobby track. From avatar-select onward the music follows
+the chosen pet, and avatar-select previews whichever card is currently picked
+(cat before anything is picked).
 
 Requirements:
 
@@ -16,6 +19,9 @@ Requirements:
   content-type isn't audio — the dev server answers missing files with
   `index.html` and a `200`, so the type check is what detects "not there".
 - Should loop cleanly — playback uses `loop = true` with no crossfade.
+- If one track is quieter than the other, adjust `FILE_GAIN` in
+  `src/components/cat/music.ts` (1 = as recorded). That is the only place
+  per-file level lives.
 - Keep them quiet. The synth themes peak around 10% gain on purpose; music
   here sits under gameplay sound effects rather than competing with them.
 

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { PuzzlePiece, LinkSimple, Basket, FastForward } from '@phosphor-icons/react';
+import { FastForward } from '@phosphor-icons/react';
 import type {
   AnswerRecord, GameMode, GameItem, AvatarType,
   CatMood, BehaviorSignals, BehaviorSummary,
@@ -12,8 +12,9 @@ import RopeAndLink from './modes/RopeAndLink';
 import BucketFill from './modes/BucketFill';
 import ResultScreen from './ResultScreen';
 import MusicToggle from './MusicToggle';
+import GameGuide from './GameGuide';
 import PageSpinner from '../ui/PageSpinner';
-import { playCorrect, playWrong } from './juice';
+import { playRoundClear, playWrong } from './juice';
 import { useMusic } from './useMusic';
 import { saveAttempt, startTimedRun } from '../../lib/gameSession';
 import './CatGame.css';
@@ -97,8 +98,9 @@ export default function CatGame({
   const [skipped, setSkipped] = useState(false);
   const skipRef = useRef(false);
 
-  // Each avatar gets its own theme; the result screen drops back to the calm one.
-  useMusic(gameOver ? 'menu' : avatar);
+  // One theme per pet, held through the result screen — there's no separate
+  // lobby track to fall back to, and a switch mid-celebration reads as a glitch.
+  useMusic(avatar);
 
   // Answers/signals accumulate across pages in refs, not state: a page's
   // completion handler needs the running totals synchronously to decide
@@ -190,8 +192,29 @@ export default function CatGame({
     setTimeout(() => setCatMood('idle'), duration);
   }
 
-  function handleCorrect() { triggerMood('happy'); playCorrect(); }
-  function handleWrong()   { triggerMood('confused'); playWrong(); }
+  // ─── "Wrong" screen shake ────────────────────────────────────────────────
+  // The whole board jolts (and the phone buzzes, via playWrong) on a wrong
+  // submit. It's a whole-screen motion cue, not a colour one, so it doesn't
+  // point at WHICH pair was wrong — the per-card shake already does that, and
+  // colour-coding wrong is off-limits (it would coach the player).
+  const [shaking, setShaking] = useState(false);
+  const shakeTimerRef = useRef<number | undefined>(undefined);
+
+  function shakeScreen() {
+    // Drop the class and re-add it on the next frame, otherwise a second wrong
+    // submit while the class is still on wouldn't restart the animation.
+    setShaking(false);
+    requestAnimationFrame(() => requestAnimationFrame(() => setShaking(true)));
+    clearTimeout(shakeTimerRef.current);
+    shakeTimerRef.current = window.setTimeout(() => setShaking(false), 600);
+  }
+
+  useEffect(() => () => clearTimeout(shakeTimerRef.current), []);
+
+  // Modes call onCorrect only on a submit that comes back entirely clean, so
+  // this IS the round-cleared moment — hence the fanfare rather than a ping.
+  function handleCorrect() { triggerMood('happy'); playRoundClear(); }
+  function handleWrong()   { triggerMood('confused'); playWrong(); shakeScreen(); }
 
   async function finalize() {
     const collected = pageAnswersRef.current;
@@ -314,24 +337,24 @@ export default function CatGame({
     );
   }
 
-  const modePill =
-    gameMode === 'matching' ? (
-      <><PuzzlePiece size={17} weight="duotone" /> Match all pairs then submit!</>
-    ) : gameMode === 'ropelink' ? (
-      <><LinkSimple size={17} weight="duotone" /> Connect all terms then submit!</>
-    ) : (
-      <><Basket size={17} weight="duotone" /> Sort each item into its bucket!</>
-    );
+  // The mode hint rides in the pet's speech bubble (it "talks" the tip).
+  const hintText =
+    gameMode === 'matching' ? 'Tap a card, then tap its match!'
+    : gameMode === 'ropelink' ? 'Drag a term across to its match!'
+    : 'Drag each item into its bucket!';
 
-  // Left column of the Z: status (timer, sound) → avatar → what to do.
-  // The submit CTA deliberately lives at the END of the board column instead,
-  // so the eye finishes bottom-right rather than jumping back left.
+  // Rides in the board's top row, left of Submit. The left column is just the
+  // hint bubble + pet, sitting at the bottom of the row.
+  const roundIndicator = totalPages > 1 ? (
+    <div className="page-indicator" aria-live="polite">
+      <span className="page-indicator-text">Round {pageIndex + 1} of {totalPages}</span>
+    </div>
+  ) : null;
+
   const sidebar = (
     <>
-      <div className="mode-side-top">
-        <GameTimer remainingMs={remainingMs} timeLimitMs={timeLimitMs} />
-        <MusicToggle />
-        {demoMode && (
+      {demoMode && (
+        <div className="mode-side-top">
           <button
             type="button"
             className="demo-skip-btn"
@@ -340,27 +363,9 @@ export default function CatGame({
           >
             <FastForward size={16} weight="fill" /> Skip
           </button>
-        )}
-      </div>
-      <CatSprite mood={catMood} species={avatar} />
-      {totalPages > 1 && (
-        <div className="page-indicator" aria-live="polite">
-          <span className="page-indicator-text">Round {pageIndex + 1} of {totalPages}</span>
-          <span className="page-dots" aria-hidden="true">
-            {pages.map((_, i) => (
-              <span
-                key={i}
-                className={[
-                  'page-dot',
-                  i < pageIndex  ? 'page-dot--done'    : '',
-                  i === pageIndex ? 'page-dot--current' : '',
-                ].filter(Boolean).join(' ')}
-              />
-            ))}
-          </span>
         </div>
       )}
-      <div className="mode-pill">{modePill}</div>
+      <CatSprite mood={catMood} species={avatar} size="game" hint={hintText} />
     </>
   );
 
@@ -369,6 +374,8 @@ export default function CatGame({
   const pageItems = pages[pageIndex] ?? [];
   const modeProps = {
     sidebar,
+    roundIndicator,
+    avatar,
     items:      pageItems,
     timeUp,
     // A real timeout grades the whole board (unplaced = wrong); a demo skip
@@ -381,7 +388,12 @@ export default function CatGame({
   };
 
   return (
-    <div className="cat-game-container">
+    <div className={`cat-game-container theme-${avatar}${shaking ? ' cat-game-container--shake' : ''}`}>
+      <div className="game-timer-corner">
+        <GameTimer remainingMs={remainingMs} timeLimitMs={timeLimitMs} />
+      </div>
+      <MusicToggle className="game-mute" />
+      <GameGuide gameMode={gameMode} />
       {gameMode === 'matching' && <MatchAndTreat key={pageIndex} {...modeProps} />}
       {gameMode === 'ropelink' && <RopeAndLink   key={pageIndex} {...modeProps} />}
       {gameMode === 'bucket'   && <BucketFill    key={pageIndex} {...modeProps} />}

@@ -19,6 +19,7 @@
 }
 
 .mode-select-card {
+  position: relative;
   background: rgba(255, 255, 255, 0.72);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
@@ -54,10 +55,12 @@
   font-weight: 700;
 }
 
-/* Sound control sits top-right of the card, out of the reading path. */
+/* Sound control pinned to the top-right corner, out of the reading path. */
 .mode-select-card .music-toggle {
-  align-self: flex-end;
-  margin-bottom: -8px;
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  z-index: 4;
 }
 
 /* ─── Mode cards grid ─── */
@@ -87,14 +90,14 @@
   font-family: inherit;
 }
 
-/* Per-mode tints. These are CATEGORY colours (which game), not status — so
-   they're the lightest step of each ramp and never compete with the CTA. */
-.mode-option-card--matching { background: var(--g-cream-200); }
-.mode-option-card--ropelink { background: var(--g-sky-200); }
-.mode-option-card--bucket   { background: var(--g-mint-200); }
-/* Fallback for any card without a mode modifier */
-.mode-option-card:not([class*='--matching']):not([class*='--ropelink']) {
-  background: var(--g-rose-200);
+/* One light brand-tinted face for every mode (light pink for cat, light
+   blue for dog) — cohesive with the screen's brand, no stray category
+   colours. Selecting a card deepens to `--g-select-bg` + a brand ring. */
+.mode-option-card,
+.mode-option-card--matching,
+.mode-option-card--ropelink,
+.mode-option-card--bucket {
+  background: var(--g-rose-100);
 }
 
 .mode-option-card:hover {
@@ -159,8 +162,8 @@
 .mode-start-btn:disabled {
   opacity: 0.85;
   cursor: not-allowed;
-  background: var(--g-cocoa-200);
-  color: var(--g-cocoa-500);
+  background: var(--g-disabled-bg);
+  color: var(--g-disabled-ink);
   box-shadow: none;
 }
 

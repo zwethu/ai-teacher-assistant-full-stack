@@ -3,7 +3,9 @@ import { PawPrint, CheckCircle, Target, Timer, Hourglass, Medal, ArrowsClockwise
 import type { AnswerRecord, AvatarType, BehaviorSummary } from '../../types/catGame.types';
 import CatSprite from './CatSprite';
 import Confetti from './Confetti';
+import PartyPopper from './PartyPopper';
 import CertificateModal from './CertificateModal';
+import MusicToggle from './MusicToggle';
 import { computeMedal, formatDuration } from './medal';
 import { playWin } from './juice';
 
@@ -42,8 +44,15 @@ export default function ResultScreen({
   const spriteMood = medal.tier === 'bronze' ? 'idle' : 'happy';
 
   return (
-    <div className={`result-screen result-screen--${medal.tier}`}>
+    <div className={`result-screen result-screen--${medal.tier} theme-${species}`}>
       {show && celebrate && <Confetti />}
+      {/* The popper fires on EVERY tier (bronze included) — the medal always
+          deserves its pop-in moment; confetti/sound stay gated to celebrate. */}
+      {show && <PartyPopper />}
+
+      {/* Outside the `show` gate: the win chime and confetti fire here, so the
+          mute has to be reachable from the first frame, not after the reveal. */}
+      <MusicToggle className="result-mute" />
 
       <div className="result-card result-card--row">
         <div className="result-col result-col-left">

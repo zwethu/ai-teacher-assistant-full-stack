@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
-import { CheckCircle, Basket, HandPointing, Confetti } from '@phosphor-icons/react';
+import { CheckCircle, Confetti } from '@phosphor-icons/react';
 import type { GameItem, AnswerRecord, BehaviorSignals } from '../../../types/catGame.types';
 import CardBird from '../CardBird';
-import { playSnap } from '../juice';
+import { playSnap, playUnsnap } from '../juice';
 
 type Props = {
   items: GameItem[];
@@ -12,6 +12,8 @@ type Props = {
    *  instead of counting every empty bucket as wrong. */
   countUnplaced?: boolean;
   sidebar?: ReactNode;
+  /** "Round X of Y" node, shown in the footer's top row (left of Submit). */
+  roundIndicator?: ReactNode;
   onCorrect: () => void;
   onWrong: () => void;
   onComplete: (answers: AnswerRecord[], signals: BehaviorSignals) => void;
@@ -26,7 +28,7 @@ type Placement = {
   state: 'pending' | 'correct' | 'wrong';
 };
 
-export default function BucketFill({ items, timeUp, countUnplaced = true, sidebar, onCorrect, onWrong, onComplete }: Props) {
+export default function BucketFill({ items, timeUp, countUnplaced = true, sidebar, roundIndicator, onCorrect, onWrong, onComplete }: Props) {
   // Buckets keep their natural order (labelled by term); chips are shuffled.
   const shuffledChips = useMemo(() => [...items].sort(() => Math.random() - 0.5), [items]);
 
@@ -122,8 +124,11 @@ export default function BucketFill({ items, timeUp, countUnplaced = true, sideba
     setDragPos(null);
   }
 
+  // Take a chip back out to the tray. The cue only fires if it was actually
+  // still removable (a locked-correct chip stays put and stays silent).
   function removeChip(chipId: string) {
     recordFirstAction();
+    if (placements.some(p => p.chipId === chipId && p.state !== 'correct')) playUnsnap();
     setPlacements(prev => prev.filter(p => !(p.chipId === chipId && p.state !== 'correct')));
   }
 
@@ -135,7 +140,6 @@ export default function BucketFill({ items, timeUp, countUnplaced = true, sideba
 
     submitCountRef.current += 1;
     let wrongCount = 0;
-    const newlyCorrectIds: string[] = [];
     const answers: AnswerRecord[] = [];
     const updated: Placement[] = [];
 
@@ -148,12 +152,13 @@ export default function BucketFill({ items, timeUp, countUnplaced = true, sideba
       const isCorrect = items[p.bucketIndex].id === p.chipId;
       updated.push({ ...p, state: isCorrect ? 'correct' : 'wrong' });
       answers.push({ questionId: items[p.bucketIndex].id, correct: isCorrect });
-      if (isCorrect) newlyCorrectIds.push(items[p.bucketIndex].id);
-      else wrongCount++;
+      if (!isCorrect) wrongCount++;
     });
 
-    if (newlyCorrectIds.length > 0) {
-      setCelebrating(new Set(newlyCorrectIds));
+    // The flock flies only when the WHOLE round comes back clean — birds on
+    // each newly-correct item made a half-right board feel like a win.
+    if (wrongCount === 0) {
+      setCelebrating(new Set(items.map(i => i.id)));
       setTimeout(() => setCelebrating(new Set()), 2000);
     }
     totalWrongRef.current += wrongCount;
@@ -173,7 +178,9 @@ export default function BucketFill({ items, timeUp, countUnplaced = true, sideba
     if (wrongCount === 0) {
       finishedRef.current = true;
       const signals = buildSignals();
-      setTimeout(() => onComplete(answers, signals), 800);
+      // Long enough for the flock + fanfare to land before the page turns —
+      // at the old 800ms the celebration was cut off mid-flight.
+      setTimeout(() => onComplete(answers, signals), 1800);
     }
   }
 
@@ -197,7 +204,6 @@ export default function BucketFill({ items, timeUp, countUnplaced = true, sideba
   const chipText  = (chipId: string) => items.find(i => i.id === chipId)?.definition ?? '';
   const placedIds = new Set(placements.map(p => p.chipId));
   const trayChips = shuffledChips.filter(chip => !placedIds.has(chip.id));
-  const filledCount = placements.filter(p => p.state !== 'wrong').length;
 
   return (
     <form className="mode-layout" autoComplete="off" onSubmit={e => e.preventDefault()}>
@@ -296,25 +302,15 @@ export default function BucketFill({ items, timeUp, countUnplaced = true, sideba
       </div>
 
         <div className="mode-footer">
-          <div className="mode-footer-info">
-            <div className="question-progress">
-              Sorted: {filledCount} / {items.length}
-            </div>
-            <div className="rope-hint">
-              {dragChip !== null
-                ? <><Basket size={15} weight="duotone" /> Drop it in the right bucket!</>
-                : <><HandPointing size={15} weight="duotone" /> Drag each item into its bucket · tap ✕ to take it back</>}
-            </div>
-          </div>
+          <div className="mode-footer-round">{roundIndicator}</div>
           <button
             type="submit"
             className="submit-btn"
             onClick={handleSubmit}
             disabled={!allFilled}
+            title={allFilled ? undefined : `Fill all ${items.length} buckets first`}
           >
-            {allFilled
-              ? <><CheckCircle size={18} weight="fill" /> Submit Answers</>
-              : `Fill all ${items.length} buckets first`}
+            <CheckCircle size={18} weight="fill" /> Submit Answers
           </button>
         </div>
       </div>

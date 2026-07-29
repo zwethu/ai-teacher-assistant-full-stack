@@ -39,7 +39,7 @@ export default function CertificateModal({ onClose, ...data }: Props) {
   }
 
   return (
-    <div className="cert-modal-overlay" onClick={onClose}>
+    <div className={`cert-modal-overlay theme-${data.species}`} onClick={onClose}>
       <div className="cert-modal" onClick={e => e.stopPropagation()}>
         <div className="cert-scroll">
           <Certificate ref={ref} {...data} />

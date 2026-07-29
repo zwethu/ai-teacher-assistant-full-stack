@@ -104,7 +104,7 @@ export function ArtifactsTab({ artifacts, summary, loading, onRefresh, onDelete 
             href={summary.drive_root_folder_url}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+            className="inline-flex items-center gap-1.5 rounded-md bg-violet-600 px-3 py-2 text-sm font-medium text-white hover:bg-violet-700"
           >
             <ExternalLink className="w-4 h-4" />
             Open Drive Folder
@@ -165,7 +165,7 @@ export function ArtifactsTab({ artifacts, summary, loading, onRefresh, onDelete 
                       </span>
                       {artifact.week && <span className="text-xs text-slate-500">Week {artifact.week}</span>}
                       <span className="text-xs text-slate-500">v{String(artifact.version || 1).padStart(2, '0')}</span>
-                      {artifact.is_current && <span className="rounded bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">Current</span>}
+                      {artifact.is_current && <span className="rounded bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700">Current</span>}
                       {artifact.status && !artifact.is_current && <span className="rounded bg-slate-50 px-2 py-0.5 text-xs text-slate-500">{artifact.status}</span>}
                     </div>
                     <div className="mt-1 truncate text-sm font-semibold text-slate-900" title={artifact.drive_file_name || artifact.title}>
@@ -176,8 +176,8 @@ export function ArtifactsTab({ artifacts, summary, loading, onRefresh, onDelete 
                     )}
                   </div>
                   <div className="flex flex-wrap items-center gap-2 xl:justify-end">
-                    {url && <a href={url} target="_blank" rel="noreferrer" className="text-sm font-medium text-emerald-700 hover:underline">Open</a>}
-                    {studentUrl && <a href={studentUrl} target="_blank" rel="noreferrer" className="text-sm font-medium text-emerald-700 hover:underline">Student</a>}
+                    {url && <a href={url} target="_blank" rel="noreferrer" className="text-sm font-medium text-violet-700 hover:underline">Open</a>}
+                    {studentUrl && <a href={studentUrl} target="_blank" rel="noreferrer" className="text-sm font-medium text-violet-700 hover:underline">Student</a>}
                     {url && <button type="button" onClick={() => copyLink(url)} className="p-1.5 text-slate-500 hover:text-slate-800" title="Copy link"><Copy className="w-4 h-4" /></button>}
                     <button type="button" onClick={() => setVersionsKey(versionsKeyForRow)} className="text-sm text-slate-600 hover:text-slate-900">Versions</button>
                     <button type="button" onClick={() => onDelete(artifact)} className="p-1.5 text-slate-400 hover:text-red-600" title="Delete"><Trash2 className="w-4 h-4" /></button>

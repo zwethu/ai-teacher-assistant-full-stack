@@ -7,7 +7,6 @@ import {
   Gamepad2,
   Image as ImageIcon,
   Link2,
-  Loader2,
   Paperclip,
   Trash2,
   X,
@@ -17,6 +16,7 @@ import { deleteChatAttachment, getChatAttachmentContent, listChatAttachments } f
 import { deleteGame, listGames, type GameSession } from '../../../services/gameService'
 import { collectUniqueChatWebLinks } from '../utils/webCitations'
 import { SourceFavicon } from './SourceFavicon'
+import { Spinner } from '../../../design-system'
 
 export type ChatSidePanelSection = 'links' | 'files' | 'games'
 
@@ -28,6 +28,30 @@ type Props = {
   messages: ChatMessage[]
   initialSection?: ChatSidePanelSection | null
   onReferenceAttachment: (item: ChatAttachmentListItem) => void
+}
+
+/**
+ * True when there is room for three columns (nav + conversation + resources).
+ *
+ * Falls back to `true` where matchMedia is unavailable (jsdom does not
+ * implement it), so tests exercise the inline column — the primary layout.
+ */
+function useIsWideViewport(query = '(min-width: 1024px)'): boolean {
+  const [matches, setMatches] = useState(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return true
+    return window.matchMedia(query).matches
+  })
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined
+    const mql = window.matchMedia(query)
+    const onChange = () => setMatches(mql.matches)
+    setMatches(mql.matches)
+    mql.addEventListener('change', onChange)
+    return () => mql.removeEventListener('change', onChange)
+  }, [query])
+
+  return matches
 }
 
 function AccordionSection({
@@ -108,6 +132,7 @@ export function ChatSidePanel({
   initialSection = null,
   onReferenceAttachment,
 }: Props) {
+  const isWideViewport = useIsWideViewport()
   const [rendered, setRendered] = useState(false)
   const [visible, setVisible] = useState(false)
   const [linksOpen, setLinksOpen] = useState(false)
@@ -155,8 +180,10 @@ export function ChatSidePanel({
 
   useEffect(() => {
     if (!open) return
+    // Locking body scroll is overlay behaviour. As an inline column the panel is
+    // not modal — the conversation beside it must stay scrollable.
     const previous = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
+    if (!isWideViewport) document.body.style.overflow = 'hidden'
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose()
     }
@@ -165,7 +192,7 @@ export function ChatSidePanel({
       document.body.style.overflow = previous
       window.removeEventListener('keydown', onKey)
     }
-  }, [open, onClose])
+  }, [open, onClose, isWideViewport])
 
   useEffect(() => () => {
     thumbnailUrlsRef.current.forEach((url) => URL.revokeObjectURL(url))
@@ -282,25 +309,8 @@ export function ChatSidePanel({
     }
   }
 
-  if (!rendered) return null
-
-  return createPortal(
-    <div
-      className={`fixed inset-0 z-[200] flex justify-end transition-colors duration-300 ${
-        visible ? 'bg-slate-950/40 backdrop-blur-sm' : 'bg-transparent'
-      }`}
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose()
-      }}
-    >
-      <aside
-        className={`flex h-full w-full max-w-md flex-col overflow-hidden bg-white shadow-2xl transition-transform duration-300 ease-out ${
-          visible ? 'translate-x-0' : 'translate-x-full'
-        }`}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Chat links, files, and games"
-      >
+  const panelBody = (
+    <>
         <header className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
           <div>
             <h2 className="text-sm font-semibold text-slate-900">Chat resources</h2>
@@ -336,13 +346,13 @@ export function ChatSidePanel({
                       href={source.url}
                       target="_blank"
                       rel="noreferrer"
-                      className="group flex items-start gap-2 rounded-lg border border-slate-100 px-2.5 py-2 transition-colors hover:border-emerald-200 hover:bg-emerald-50/50"
+                      className="group flex items-start gap-2 rounded-lg border border-slate-100 px-2.5 py-2 transition-colors hover:border-violet-200 hover:bg-violet-50/50"
                     >
                       <SourceFavicon
                         domain={source.display_domain || source.domain}
                         url={source.url}
                         className="mt-0.5 h-4 w-4 flex-shrink-0 rounded-sm"
-                        fallback={<ExternalLink className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-slate-400 group-hover:text-emerald-600" />}
+                        fallback={<ExternalLink className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-slate-400 group-hover:text-violet-600" />}
                       />
                       <span className="min-w-0">
                         <span className="block truncate text-xs font-medium text-slate-800">
@@ -372,7 +382,7 @@ export function ChatSidePanel({
             </p>
             {loading ? (
               <div className="flex items-center gap-2 py-3 text-xs text-slate-500">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <Spinner size={14} />
                 Loading files…
               </div>
             ) : error ? (
@@ -397,7 +407,7 @@ export function ChatSidePanel({
                       ) : item.attachment_kind === 'image' ? (
                         <ImageIcon className="h-5 w-5 flex-shrink-0 text-sky-600" />
                       ) : (
-                        <FileText className="h-5 w-5 flex-shrink-0 text-emerald-600" />
+                        <FileText className="h-5 w-5 flex-shrink-0 text-violet-600" />
                       )}
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-xs font-medium text-slate-700">
@@ -423,7 +433,7 @@ export function ChatSidePanel({
                             onReferenceAttachment(item)
                             onClose()
                           }}
-                          className="rounded-md bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-700 transition-colors hover:bg-emerald-100"
+                          className="rounded-md bg-violet-50 px-2 py-1 text-[11px] font-medium text-violet-700 transition-colors hover:bg-violet-100"
                         >
                           Reference
                         </button>
@@ -436,7 +446,7 @@ export function ChatSidePanel({
                             aria-label={`Delete ${item.file_title || item.file_name}`}
                           >
                             {deletingId === item.attachment_id ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              <Spinner size={14} />
                             ) : (
                               <Trash2 className="h-3.5 w-3.5" />
                             )}
@@ -463,7 +473,7 @@ export function ChatSidePanel({
             </p>
             {gamesLoading ? (
               <div className="flex items-center gap-2 py-3 text-xs text-slate-500">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <Spinner size={14} />
                 Loading games…
               </div>
             ) : gamesError ? (
@@ -482,7 +492,7 @@ export function ChatSidePanel({
                       key={game.gameId}
                       className="flex items-center gap-2 rounded-lg border border-slate-100 p-2"
                     >
-                      <Gamepad2 className="h-5 w-5 flex-shrink-0 text-emerald-600" />
+                      <Gamepad2 className="h-5 w-5 flex-shrink-0 text-violet-600" />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-xs font-medium text-slate-700">{game.title}</p>
                         <p className="text-[11px] text-slate-400">
@@ -499,7 +509,7 @@ export function ChatSidePanel({
                         aria-label={`Delete ${game.title}`}
                       >
                         {deletingGameId === game.gameId ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          <Spinner size={14} />
                         ) : (
                           <Trash2 className="h-3.5 w-3.5" />
                         )}
@@ -511,8 +521,60 @@ export function ChatSidePanel({
             )}
           </AccordionSection>
         </div>
+    </>
+  )
+
+  // Rendered as a column OR as an overlay — never both. Doing it with CSS alone
+  // would leave two copies of the whole panel in the DOM, which duplicates every
+  // control and breaks any query that expects one.
+  if (isWideViewport) {
+    return (
+      // Wide screens: a real column beside the conversation, so the chat stays
+      // readable while resources are open. Width animates from 0, so the
+      // conversation gives up space rather than being covered.
+      <aside
+        className={`shrink-0 overflow-hidden transition-[width] duration-300 ease-out ${
+          open ? 'w-[360px]' : 'w-0'
+        }`}
+        aria-hidden={!open}
+        aria-label="Chat links, files, and games"
+      >
+        <div
+          className="maia-glass flex h-full w-[360px] flex-col overflow-hidden"
+          style={{ borderLeft: '1px solid var(--border-academic)' }}
+        >
+          {panelBody}
+        </div>
       </aside>
-    </div>,
-    document.body,
+    )
+  }
+
+  return (
+    <>
+      {/* Narrow: no room for three columns, so it stays an overlay. */}
+      {rendered &&
+        createPortal(
+          <div
+            className={`fixed inset-0 z-[200] flex justify-end transition-colors duration-300 ${
+              visible ? 'bg-slate-950/40 backdrop-blur-sm' : 'bg-transparent'
+            }`}
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) onClose()
+            }}
+          >
+            <aside
+              className={`flex h-full w-full max-w-md flex-col overflow-hidden bg-white shadow-2xl transition-transform duration-300 ease-out ${
+                visible ? 'translate-x-0' : 'translate-x-full'
+              }`}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Chat links, files, and games"
+            >
+              {panelBody}
+            </aside>
+          </div>,
+          document.body,
+        )}
+    </>
   )
 }

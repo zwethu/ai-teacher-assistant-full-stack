@@ -470,7 +470,7 @@ export function useBatchesPage() {
     const labNote = artifact.type === 'lab' ? '\n\nThis will delete both Lecturer Guide and Student Instructions.' : ''
     if (
       !window.confirm(
-        `Delete ${label}?\n\nThis removes the artifact record from PNAI and permanently deletes the Google Drive file. This cannot be undone.${labNote}`,
+        `Delete ${label}?\n\nThis removes the artifact record from MILA and permanently deletes the Google Drive file. This cannot be undone.${labNote}`,
       )
     ) {
       return

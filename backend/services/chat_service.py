@@ -352,6 +352,7 @@ def _attachment_snapshot(data: dict[str, Any]) -> dict[str, Any]:
         "parse_status": str(data.get("parse_status") or "skipped"),
         "vision_status": str(data.get("vision_status") or "skipped"),
         "thumbnail_available": bool(data.get("thumbnail_gcs_path")),
+        "page_count": int(data.get("page_count") or 0),
         "promotion_allowed": False,
     }
 
@@ -496,6 +497,37 @@ def list_messages(batch_id: str, chat_id: str, lecturer_id: str) -> list[dict[st
         _msg_to_dict(doc.id, doc.to_dict() or {})
         for doc in col.order_by("created_at").stream()
     ]
+
+
+def get_message(
+    batch_id: str, chat_id: str, lecturer_id: str, message_id: str
+) -> dict[str, Any] | None:
+    """Return one message, after the same ownership check as list_messages."""
+    if get_chat(batch_id, chat_id, lecturer_id) is None:
+        return None
+    snap = _messages_col(batch_id, chat_id).document(message_id).get()
+    if not snap.exists:
+        return None
+    return _msg_to_dict(snap.id, snap.to_dict() or {})
+
+
+def delete_message(batch_id: str, chat_id: str, lecturer_id: str, message_id: str) -> bool:
+    """Delete a single message.
+
+    Used by retry: the superseded assistant response is removed so the
+    conversation does not accumulate abandoned answers, and so the retry
+    survives a reload rather than reappearing from Firestore.
+
+    Returns False when the chat is not the lecturer's or the message is gone —
+    the caller turns that into a 404.
+    """
+    if get_chat(batch_id, chat_id, lecturer_id) is None:
+        return False
+    doc_ref = _messages_col(batch_id, chat_id).document(message_id)
+    if not doc_ref.get().exists:
+        return False
+    doc_ref.delete()
+    return True
 
 
 def update_chat_title(batch_id: str, chat_id: str, lecturer_id: str, title: str) -> bool:

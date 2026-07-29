@@ -1,27 +1,102 @@
 @import 'tailwindcss';
+@import './design-system/styles.css';
 
 @theme {
   --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
-  --font-serif: 'Playfair Display', ui-serif, Georgia, serif;
+  /* Plus Jakarta Sans carries display/headings and the brand. MILA retires
+     serif entirely — there is deliberately no --font-serif here. */
+  --font-display: 'Plus Jakarta Sans', 'Inter', ui-sans-serif, system-ui, sans-serif;
+
+  /* MLII royal purple overrides Tailwind's stock violet (#7c3aed) so that
+     `bg-violet-600`, `focus:ring-violet-500` … emit MILA's ramp and stay in
+     lockstep with the --violet-* custom properties in tokens/colors.css.
+     Utility classes and CSS variables must never drift apart. */
+  --color-violet-50: #f6f1fc;
+  --color-violet-100: #ece3f9;
+  --color-violet-200: #dacbf2;
+  --color-violet-300: #bba4e2;
+  --color-violet-400: #9d80cb;
+  --color-violet-500: #7d5fb3;
+  --color-violet-600: #5f489c;
+  --color-violet-700: #4f3b85;
+  --color-violet-800: #3f2f6b;
+  --color-violet-900: #2a1e52;
+
+  /* MLII gold — the insight accent (bead + pillar I). Accent only, never body text. */
+  --color-gold-50: #fef7e0;
+  --color-gold-200: #fbe49a;
+  --color-gold-400: #fcc018;
+  --color-gold-600: #e0a70c;
+}
+
+@layer base {
+  /* Quiet scrollbars, everywhere.
+     The platform default — a wide track with stepper arrows — is visually the
+     loudest thing on most screens and pulls the eye to the edge of whatever it
+     borders. This keeps the position cue but makes it a soft violet thumb
+     floating on a transparent track.
+
+     scrollbar-width / scrollbar-color are inherited, so setting them on <html>
+     reaches every element (Firefox). The ::-webkit-* pseudo-elements are not
+     inherited, hence the universal selector for Chromium and Safari.
+
+     .no-scrollbar still wins: a class beats `*`, and a rule on the element
+     beats an inherited value. */
+  html {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(187, 164, 226, 0.6) transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  *::-webkit-scrollbar-track,
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background-color: rgba(187, 164, 226, 0.6);
+    border-radius: 9999px;
+    /* transparent border + content-box clip gives the thumb breathing room */
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(157, 128, 203, 0.85);
+  }
+
+  /* the stepper arrows at each end of the track */
+  *::-webkit-scrollbar-button {
+    display: none;
+  }
 }
 
 @layer utilities {
+  /* These three class names predate the MILA import and are still used by
+     Login.tsx. They now resolve to MILA foundations, so existing surfaces
+     repaint without markup changes. Prefer the design system's own
+     .maia-* utilities (design-system/tokens/effects.css) for anything new. */
   .academic-bg {
-    background-color: #e0f1ff;
-    background-image: radial-gradient(#cde1fa 2px, transparent 2px);
+    background-color: var(--academic-bg);
+    background-image: radial-gradient(var(--academic-dot) 2px, transparent 2px);
     background-size: 32px 32px;
   }
 
   .login-card {
-    background: rgba(255, 255, 255, 0.9);
-    backdrop-filter: blur(20px);
-    border-left: 1px solid rgba(255, 255, 255, 0.3);
-    box-shadow: -10px 0 30px rgba(0, 0, 0, 0.05);
+    background: var(--surface-glass-strong);
+    backdrop-filter: blur(28px) saturate(1.7);
+    -webkit-backdrop-filter: blur(28px) saturate(1.7);
+    border-left: 1px solid var(--border-glass);
+    box-shadow: var(--shadow-glass-lg);
   }
 
   .hero-left-branding {
     position: relative;
-    background-color: #e0f1ff;
+    background-color: var(--academic-bg);
     overflow: hidden;
   }
 
@@ -31,8 +106,8 @@
     inset: 0;
     background: linear-gradient(
       135deg,
-      rgba(240, 249, 255, 0.85),
-      rgba(224, 241, 255, 0.6)
+      rgba(248, 244, 254, 0.85),
+      rgba(236, 227, 249, 0.6)
     );
     z-index: 1;
   }
@@ -40,6 +115,118 @@
   .hero-left-branding > * {
     position: relative;
     z-index: 2;
+  }
+
+  /* Live-text pulse for in-progress agent labels ("Working…", the current
+     thinking note).
+
+     These are the design system's own values, not new ones: Thinking.jsx ships
+     `mt-fade` on `.maia-think-row span` — opacity .65 ⇄ 1 over 7.2s ease-in-out,
+     deliberately the same 7.2s as the garland's bead walk so text and mark
+     breathe on the same beat. Components that render a `Thinking`/`ThinkingRow`
+     get that class for free; this utility exists only so labels *outside* those
+     components (RunDetails' "Working…") can stay on the same beat.
+
+     Do not replace this with a gradient sweep or similar — MILA's motion brief
+     is "quiet", and the pulse is what the system already uses. */
+  .mila-live-text {
+    animation: mila-live-text 7.2s ease-in-out infinite;
+  }
+
+  @keyframes mila-live-text {
+    0%,
+    100% {
+      opacity: 0.65;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .mila-live-text {
+      animation: none;
+      opacity: 1;
+    }
+  }
+
+  /* Thinking notes easing in — on expand, and as each new note streams in.
+     Keyed list items only animate when their DOM node is created, so existing
+     notes stay put and only genuinely new ones move. */
+  /* A new working note should be impossible to miss: it slides in from the
+     left with a slight overshoot-free ease-out, rather than nudging up 5px. */
+  .mila-thought-in {
+    animation: mila-thought-in 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  @keyframes mila-thought-in {
+    from {
+      opacity: 0;
+      transform: translate3d(-12px, 6px, 0) scale(0.96);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  /* The live summary line swaps text every time a new working note arrives, and
+     a bare text swap is invisible — you only notice the words already changed.
+     Keying the span on its own text remounts it, so this replays per note: the
+     new line rolls up into place and sharpens, the way a thought "lands".
+
+     Kept separate from .mila-thought-in because this is a swap in a fixed slot,
+     not an item entering a list — it travels vertically only, with no scale. */
+  .mila-thought-swap {
+    animation: mila-thought-swap 380ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  @keyframes mila-thought-swap {
+    from {
+      opacity: 0;
+      transform: translate3d(0, 9px, 0);
+      filter: blur(2px);
+    }
+    60% {
+      opacity: 1;
+    }
+    to {
+      opacity: 1;
+      transform: none;
+      filter: none;
+    }
+  }
+
+  /* The newest note also gets a violet wash and a leading rule that fade out,
+     so the eye is pulled to the line that just changed — not to the whole list.
+
+     This is a separate absolutely-positioned overlay rather than a second class
+     on the row itself. Swapping a class with a different animation-name on a
+     live element RESTARTS that animation, so putting the flash on the row would
+     make every previous note slide in again each time a new one arrived. An
+     overlay only mounts and unmounts, leaving the row's own animation alone. */
+  .mila-thought-flash {
+    animation: mila-thought-flash 1200ms ease-out both;
+  }
+
+  @keyframes mila-thought-flash {
+    from {
+      background-color: color-mix(in srgb, var(--color-violet-500) 16%, transparent);
+      box-shadow: inset 2px 0 0 var(--color-violet-500);
+    }
+    to {
+      background-color: transparent;
+      box-shadow: inset 2px 0 0 transparent;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .mila-thought-in,
+    .mila-thought-flash,
+    .mila-thought-swap {
+      animation: none;
+      filter: none;
+    }
   }
 
   .no-scrollbar::-webkit-scrollbar {

@@ -12,7 +12,7 @@ import {
 import axios from 'axios'
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import type { Batch } from '../../../entity/Batch'
-import type { Chat, ChatAttachment, ChatAttachmentListItem, ChatAttachmentSnapshot, ChatMessage } from '../../../entity/Chat'
+import type { Chat, ChatAttachment, ChatAttachmentListItem, ChatMessage } from '../../../entity/Chat'
 import { useAuth } from '../../../hooks/useAuth'
 import { getBatchById, listBatches } from '../../../services/batchService'
 import {
@@ -26,6 +26,8 @@ import {
   sendMessage,
   uploadChatAttachment,
   deleteChatAttachment,
+  cancelChatRun,
+  deleteMessage,
   updateChatTitle,
   type ChatRunRecord,
 } from '../../../services/chatService'
@@ -47,6 +49,11 @@ type ChatLocationState = {
   batchId?: string
   chatId?: string
   initialMessage?: string
+  /** Composer state chosen on the surface that started the chat. */
+  webSearch?: boolean
+  generateMode?: GenerateMode | null
+  /** Already uploaded into the new chat, to be sent with the first message. */
+  attachmentIds?: string[]
 }
 
 type ConnectorsState = {
@@ -112,6 +119,23 @@ function enrichMessages(data: ChatMessage[], chat: Chat): ChatMessage[] {
   })
 }
 
+/**
+ * True when a run already owns an assistant message, settled or still pending.
+ *
+ * The placeholder must not be re-added for a run that has already answered.
+ * Checking only for a *pending* message missed the settled case: after a retry
+ * the chat's cached `active_run_id` still names the finished run, so every
+ * re-render appended a second, empty assistant row — which rendered as a
+ * detached "Completed N steps" / "Thought for Xs" block under the real answer.
+ */
+export function runHasAssistantMessage(messages: ChatMessage[], runId: string): boolean {
+  const pendingId = `pending-${runId}`
+  return messages.some(
+    (msg) =>
+      msg.message_id === pendingId || (msg.role === 'assistant' && msg.run_id === runId),
+  )
+}
+
 function collectRunIds(messages: ChatMessage[], activeChat: Chat | null): string[] {
   const runIds = new Set<string>()
   const assistantMsgs = messages.filter((msg) => msg.role === 'assistant')
@@ -140,6 +164,7 @@ export function useChatPage() {
   const { batchId: routeBatchId, chatId: routeChatId } = useParams()
 
   const pendingInitialMessageRef = useRef<string | null>(null)
+  const pendingInitialAttachmentIdsRef = useRef<string[]>([])
   const runUnsubscribesRef = useRef<Record<string, () => void>>({})
   const runDeltaIndexesRef = useRef<Record<string, Set<number>>>({})
   const runFallbackTimerRef = useRef<number | null>(null)
@@ -179,6 +204,14 @@ export function useChatPage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const renameInputRef = useRef<HTMLInputElement>(null)
   // Latest pending (uploaded-but-unsent) attachments, for unmount cleanup.
+  // Attachment ids with a DELETE currently in flight, so a repeat click cannot
+  // issue a second request before React has dropped the item from state.
+  const removingAttachmentIdsRef = useRef<Set<string>>(new Set())
+  const [retryingMessageId, setRetryingMessageId] = useState<string | null>(null)
+  const [cancelling, setCancelling] = useState(false)
+  // Set when Stop is pressed during a retry's pre-run window, where there is
+  // no run_id to cancel yet.
+  const retryAbortedRef = useRef(false)
   const pendingAttachmentsRef = useRef<PendingChatAttachment[]>([])
   useEffect(() => { pendingAttachmentsRef.current = pendingAttachments }, [pendingAttachments])
 
@@ -251,6 +284,13 @@ export function useChatPage() {
     const routeState = location.state as ChatLocationState | null
     if (!routeState?.initialMessage) return
     pendingInitialMessageRef.current = routeState.initialMessage
+    pendingInitialAttachmentIdsRef.current = routeState.attachmentIds ?? []
+    // Safe to set here rather than race the send: this effect runs on mount,
+    // while the send waits for the chat and its messages to finish loading.
+    if (typeof routeState.webSearch === 'boolean') {
+      setConnectors((prev) => ({ ...prev, web_search: routeState.webSearch as boolean }))
+    }
+    if (routeState.generateMode) setActiveGenerateMode(routeState.generateMode)
     navigate(location.pathname, { replace: true, state: null })
   }, [location.pathname, location.state, navigate])
 
@@ -390,9 +430,7 @@ export function useChatPage() {
   function ensurePendingAssistantMessage(runId: string, chatId: string) {
     const pendingId = `pending-${runId}`
     setMessages((prev) => {
-      if (prev.some((msg) => msg.message_id === pendingId || (msg.pending && msg.run_id === runId))) {
-        return prev
-      }
+      if (runHasAssistantMessage(prev, runId)) return prev
       return [
         ...prev,
         {
@@ -490,6 +528,10 @@ export function useChatPage() {
 
     if (activeChat.active_run_id) {
       setCurrentRunId(activeChat.active_run_id)
+      // The run outlives the page: after a reload it is still streaming, so the
+      // composer has to come back as Stop rather than Send. subscribeToRun's
+      // status handlers clear this again when the run settles.
+      setSending(true)
       ensurePendingAssistantMessage(activeChat.active_run_id, chatId)
       subscribeToRun(activeChat.active_run_id, batchId, chatId, { withPolling: true })
     }
@@ -580,12 +622,17 @@ export function useChatPage() {
     return chat
   }
 
-  async function handleSend(text?: string) {
+  async function handleSend(text?: string, overrides?: { attachmentIds?: string[] }) {
     const typedContent = (text ?? input).trim()
     const refMentions = referencedAttachments
       .map((item) => `Please use the earlier attachment ${item.file_title || item.file_name}. Attachment ID: ${item.attachment_id}`)
       .join('\n')
-    const base = typedContent || (pendingAttachments.length ? 'Please review the attached file(s).' : '')
+    const carriedAttachmentIds = overrides?.attachmentIds ?? []
+    const base =
+      typedContent ||
+      (pendingAttachments.length || carriedAttachmentIds.length
+        ? 'Please review the attached file(s).'
+        : '')
     const content = [base, refMentions].filter(Boolean).join('\n\n')
     if (!content || !selectedBatch || sending || attachmentsUploading) return
 
@@ -597,7 +644,9 @@ export function useChatPage() {
     const batchId = selectedBatch.id
     const chatId = chat.chat_id
     const attachmentsForMessage = [...pendingAttachments]
-    const attachmentIds = attachmentsForMessage.map((item) => item.attachment_id)
+    const attachmentIds = carriedAttachmentIds.length
+      ? carriedAttachmentIds
+      : attachmentsForMessage.map((item) => item.attachment_id)
 
     setInput('')
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
@@ -638,6 +687,142 @@ export function useChatPage() {
       setPendingAttachments([])
       setReferencedAttachments([])
       setAttachmentErrors([])
+    }
+  }
+
+  /**
+   * Discard an assistant response and ask the same question again.
+   *
+   * The user's message is left alone — only the answer is removed, server-side
+   * as well as locally, so the retry survives a reload and the chat does not
+   * collect abandoned responses. The original request is then replayed through
+   * the normal send path so it picks up the same connectors and run wiring.
+   */
+  async function retryAssistantMessage(assistantMessage: ChatMessage) {
+    if (!selectedBatch || !activeChat || sending || retryingMessageId) return
+
+    const batchId = selectedBatch.id
+    const chatId = activeChat.chat_id
+
+    // The prompt is the nearest user message before this response.
+    const index = messages.findIndex((item) => item.message_id === assistantMessage.message_id)
+    if (index < 0) return
+    let prompt = ''
+    let userIndex = -1
+    for (let i = index - 1; i >= 0; i -= 1) {
+      if (messages[i].role === 'user') {
+        prompt = String(messages[i].content || '').trim()
+        userIndex = i
+        break
+      }
+    }
+    if (!prompt || userIndex < 0) return
+
+    retryAbortedRef.current = false
+    // Detach the run being replaced first. Its subscription and fallback poll
+    // would otherwise keep writing into a conversation it no longer describes.
+    if (assistantMessage.run_id) {
+      unsubscribeFromRun(assistantMessage.run_id)
+      stopFallbackTimers(assistantMessage.run_id)
+    }
+
+    setRetryingMessageId(assistantMessage.message_id)
+    // Mark the composer busy from the first tap, not from when the run starts.
+    // Deleting the old turn takes two round trips, and without this the composer
+    // sits there showing Send with nothing to stop.
+    setSending(true)
+
+    // Re-sending necessarily writes a fresh user message (POST /messages creates
+    // one), so the original turn is removed first — otherwise the prompt would
+    // appear twice. The question stays on screen throughout because the resend
+    // re-adds it immediately with the same text and attachments.
+    const originalUser = messages[userIndex]
+    const attachmentIds = (originalUser.attachments || [])
+      .map((item) => item.attachment_id)
+      .filter(Boolean)
+
+    try {
+      if (assistantMessage.message_id) {
+        await deleteMessage(batchId, chatId, assistantMessage.message_id)
+      }
+      if (originalUser.message_id) {
+        await deleteMessage(batchId, chatId, originalUser.message_id)
+      }
+    } catch {
+      // Leave the turn intact if it could not be removed — re-running now would
+      // leave two answers to the same question.
+      setRetryingMessageId(null)
+      setSending(false)
+      return
+    }
+
+    setMessages((prev) =>
+      prev.filter(
+        (item) =>
+          item.message_id !== assistantMessage.message_id &&
+          item.message_id !== originalUser.message_id,
+      ),
+    )
+
+    // Stopped while the old turn was being deleted. The deletes have already
+    // landed, so the turn stays gone — but no new run is started.
+    if (retryAbortedRef.current) {
+      retryAbortedRef.current = false
+      setRetryingMessageId(null)
+      setSending(false)
+      return
+    }
+
+    try {
+      await startRunInChat({
+        batchId,
+        chat: activeChat,
+        message: prompt,
+        invoke: async () => sendMessage(batchId, chatId, prompt, connectors, attachmentIds),
+        attachmentSnapshots: (originalUser.attachments || []) as PendingChatAttachment[],
+      })
+    } finally {
+      setRetryingMessageId(null)
+    }
+  }
+
+  /**
+   * Stop the run that is currently streaming.
+   *
+   * The server polls the cancel flag between streamed chunks and closes the
+   * Agent Engine stream, so the work genuinely stops; anything already streamed
+   * is discarded. Here we just stop listening and settle the UI.
+   */
+  async function cancelActiveRun() {
+    if (!selectedBatch || !activeChat || cancelling) return
+    if (!currentRunId) {
+      // A retry that has not reached its run yet: nothing to cancel server-side,
+      // so record the intent and let retryAssistantMessage bail before starting.
+      if (retryingMessageId) {
+        retryAbortedRef.current = true
+        setRetryingMessageId(null)
+        setSending(false)
+      }
+      return
+    }
+    const runId = currentRunId
+    setCancelling(true)
+    try {
+      await cancelChatRun(selectedBatch.id, activeChat.chat_id, runId)
+    } catch {
+      // Settle locally anyway: leaving the composer stuck in "sending" is worse
+      // than a run that keeps going silently.
+    } finally {
+      unsubscribeFromRun(runId)
+      setRunStates((prev) => ({
+        ...prev,
+        [runId]: { ...(prev[runId] || {}), status: 'cancelled' } as RunUiState,
+      }))
+      // Drop the placeholder assistant bubble; the run produced no answer.
+      setMessages((prev) => prev.filter((item) => item.message_id !== `pending-${runId}`))
+      setCurrentRunId(null)
+      setSending(false)
+      setCancelling(false)
     }
   }
 
@@ -732,14 +917,31 @@ export function useChatPage() {
   async function removePendingAttachment(attachmentId: string) {
     const removed = pendingAttachments.find((item) => item.attachment_id === attachmentId)
     if (!removed) return
+    // `pendingAttachments` only loses the item after the await below resolves,
+    // so a second invocation during that round-trip would sail past the guard
+    // above and fire a duplicate DELETE — the first returning 204 and the second
+    // 404, which surfaced as "Attachment not found" on a removal that worked.
+    if (removingAttachmentIdsRef.current.has(attachmentId)) return
+    removingAttachmentIdsRef.current.add(attachmentId)
     try {
       await deleteChatAttachment(removed.batch_id, removed.chat_id, attachmentId)
-      if (removed.previewUrl) URL.revokeObjectURL(removed.previewUrl)
-      setPendingAttachments((prev) => prev.filter((item) => item.attachment_id !== attachmentId))
     } catch (err) {
-      const detail = axios.isAxiosError(err) ? err.response?.data?.detail : ''
-      setAttachmentErrors([`${removed.file_name}: ${typeof detail === 'string' ? detail : 'Could not remove attachment; please retry.'}`])
+      // DELETE is idempotent: a 404 means it is already gone, which is exactly
+      // the outcome we wanted. Fall through and drop it from the UI.
+      const status = axios.isAxiosError(err) ? err.response?.status : undefined
+      if (status !== 404) {
+        const detail = axios.isAxiosError(err) ? err.response?.data?.detail : ''
+        setAttachmentErrors([`${removed.file_name}: ${typeof detail === 'string' ? detail : 'Could not remove attachment; please retry.'}`])
+        removingAttachmentIdsRef.current.delete(attachmentId)
+        return
+      }
     }
+    if (removed.previewUrl) URL.revokeObjectURL(removed.previewUrl)
+    setPendingAttachments((prev) => prev.filter((item) => item.attachment_id !== attachmentId))
+    // Clear any earlier complaint about this same file so a stale message does
+    // not outlive the attachment it referred to.
+    setAttachmentErrors((prev) => prev.filter((msg) => !msg.startsWith(`${removed.file_name}:`)))
+    removingAttachmentIdsRef.current.delete(attachmentId)
   }
 
   async function handleApproveOutline(message: ChatMessage) {
@@ -1136,11 +1338,20 @@ export function useChatPage() {
     setSending(false)
 
     if (!hasPending) {
-      return fetched.map((msg) =>
+      const settled = fetched.map((msg) =>
         msg.run_id
           ? { ...msg, status: msg.role === 'assistant' ? 'done' : msg.status, pending: false }
           : msg,
       )
+      // A poll for THIS run must not wipe a different run's in-flight message.
+      // Retry leaves the previous run's poll interval alive for a moment, and
+      // that poll returns server truth — which cannot yet contain the reply now
+      // streaming into the client. Without this the streamed text vanished
+      // mid-answer and only came back on reload.
+      const streamingElsewhere = previous.filter(
+        (msg) => msg.pending && !fetched.some((item) => item.message_id === msg.message_id),
+      )
+      return [...settled, ...streamingElsewhere]
     }
 
     const latestAssistant = fetchedAssistant.at(-1)
@@ -1169,8 +1380,13 @@ export function useChatPage() {
   useEffect(() => {
     if (!activeChat || !pendingInitialMessageRef.current || messagesLoading) return
     const message = pendingInitialMessageRef.current
+    const attachmentIds = pendingInitialAttachmentIdsRef.current
     pendingInitialMessageRef.current = null
-    void handleSend(message)
+    pendingInitialAttachmentIdsRef.current = []
+    // Passed explicitly rather than pushed through `pendingAttachments` state:
+    // these were uploaded on the previous page, and a setState here would not
+    // be visible to handleSend until the next render.
+    void handleSend(message, attachmentIds.length ? { attachmentIds } : undefined)
   }, [activeChat, messagesLoading, messages])
 
   function handleInputKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -1185,37 +1401,6 @@ export function useChatPage() {
     if (!el) return
     el.style.height = 'auto'
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`
-  }
-
-  function handleAskAboutAttachment(attachment: ChatAttachmentSnapshot) {
-    // Reference the earlier attachment as a chip (like the side-panel "Reference"
-    // action) rather than dumping raw "Attachment ID: …" text into the composer.
-    // The id mention is appended for the agent at send time (see the message build),
-    // and MessageRow strips it so the sent message also renders a chip.
-    const referenced: ChatAttachmentListItem = {
-      ...attachment,
-      message_id: '',
-      rag_status: 'skipped',
-      chunk_status: 'skipped',
-      embedding_status: 'skipped',
-      semantic_search_ready: false,
-      chunk_count: 0,
-      indexed_chars: 0,
-      ocr_status: 'not_needed',
-      rag_updated_at: null,
-      vision_source: 'none',
-      created_at: null,
-      expires_at: null,
-    }
-    referencePreviousAttachment(referenced)
-    setInput((prev) =>
-      prev.trim()
-        ? prev
-        : attachment.attachment_kind === 'image'
-          ? 'What is this image about?'
-          : 'Please summarize this file.',
-    )
-    requestAnimationFrame(() => textareaRef.current?.focus())
   }
 
   function startRename(chat: Chat) {
@@ -1343,10 +1528,13 @@ export function useChatPage() {
     renameInputRef,
     handleNewChat,
     handleSend,
+    cancelActiveRun,
+    cancelling,
+    retryAssistantMessage,
+    retryingMessageId,
     handleApproveOutline,
     handleInputKeyDown,
     handleTextareaInput,
-    handleAskAboutAttachment,
     startRename,
     commitRename,
     cancelRename,

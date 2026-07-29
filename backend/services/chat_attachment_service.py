@@ -251,6 +251,26 @@ def _thumbnail_bytes(data: bytes) -> bytes:
         return output.getvalue()
 
 
+def _pdf_thumbnail_bytes(data: bytes) -> bytes:
+    """Rasterise page 1 of a PDF to a JPEG thumbnail.
+
+    pypdfium2 rather than PyMuPDF (AGPL) or pdf2image (needs poppler installed):
+    it ships manylinux wheels, so it works in the slim API image with no apt layer.
+    """
+    import pypdfium2 as pdfium
+    from PIL import Image
+
+    document = pdfium.PdfDocument(io.BytesIO(data))
+    try:
+        image = document[0].render(scale=2).to_pil().convert("RGB")
+    finally:
+        document.close()
+    image.thumbnail(THUMBNAIL_MAX_SIZE)
+    output = io.BytesIO()
+    image.save(output, format="JPEG", quality=84, optimize=True)
+    return output.getvalue()
+
+
 def _vision_context(data: bytes, gcs_path: str, content_type: str) -> tuple[str, str, str, str, str]:
     model = (os.getenv("ATTACHMENT_VISION_MODEL") or "").strip()
     project = (os.getenv("GOOGLE_CLOUD_PROJECT") or "").strip()
@@ -287,6 +307,16 @@ def _content_sha256(data: bytes) -> str:
 def _pdf_page_count(data: bytes) -> int:
     from pypdf import PdfReader
     return max(1, len(PdfReader(io.BytesIO(data)).pages))
+
+
+def _safe_pdf_page_count(data: bytes, content_type: str) -> int:
+    """Page count for PDFs, 0 for anything else or when the file will not parse."""
+    if content_type != "application/pdf":
+        return 0
+    try:
+        return _pdf_page_count(data)
+    except Exception:
+        return 0
 
 
 def _estimate_document_tokens(data: bytes, content_type: str, extracted_chars: int) -> int:
@@ -382,6 +412,9 @@ def create_chat_attachment(
         "message_id": None, "lecturer_id": lecturer_id, "file_name": clean_name,
         "file_title": (file_title or clean_name).strip() or clean_name,
         "content_type": normalized_type, "size_bytes": len(data), "gcs_path": gcs_path,
+        # Page count for the PDF preview card. Computed here because the bytes
+        # are in hand; recomputing later would mean re-downloading from GCS.
+        "page_count": _safe_pdf_page_count(data, normalized_type),
         "thumbnail_gcs_path": None, "scope": "chat", "attachment_kind": kind,
         "status": "processing", "content_sha256": digest, "token_estimate": 0,
         "parse_status": "pending" if kind == "document" else "skipped",
@@ -428,12 +461,17 @@ def process_chat_attachment(batch_id: str, chat_id: str, attachment_id: str) -> 
     updates: dict[str, Any] = {"updated_at": SERVER_TIMESTAMP}
     try:
         data = download_bytes(str(doc.get("gcs_path") or ""))
-        if kind == "image":
+        # PDFs get a first-page thumbnail too, so the chat shows what the file
+        # actually is rather than a generic badge.
+        is_pdf = content_type == "application/pdf"
+        if kind == "image" or is_pdf:
             try:
                 thumb_path = chat_attachment_thumbnail_path(lecturer_id, batch_id, chat_id, attachment_id)
-                updates["thumbnail_gcs_path"] = upload_bytes(thumb_path, _thumbnail_bytes(data), "image/jpeg")
+                thumb = _pdf_thumbnail_bytes(data) if is_pdf else _thumbnail_bytes(data)
+                updates["thumbnail_gcs_path"] = upload_bytes(thumb_path, thumb, "image/jpeg")
             except Exception as exc:
                 logger.warning("Thumbnail generation failed attachment_id=%s: %s", attachment_id, exc)
+        if kind == "image":
             vision_status, vision_summary, ocr_text, vision_error, vision_source = _vision_context(
                 data, str(doc.get("gcs_path") or ""), content_type
             )
@@ -533,6 +571,7 @@ def _agent_safe_attachment(doc_id: str, data: dict[str, Any], include_context: b
         "vision_status": str(data.get("vision_status") or "skipped"),
         "vision_source": str(data.get("vision_source") or "none"),
         "thumbnail_available": bool(data.get("thumbnail_gcs_path")),
+        "page_count": int(data.get("page_count") or 0),
         "rag_status": str(data.get("rag_status") or "skipped"),
         "chunk_status": str(data.get("chunk_status") or "skipped"),
         "embedding_status": str(data.get("embedding_status") or "skipped"),
@@ -595,6 +634,41 @@ def get_chat_attachment_for_agent(batch_id: str, chat_id: str, lecturer_id: str,
     snap = attachment_ref(batch_id, chat_id, attachment_id).get(); data = snap.to_dict() or {}
     if not snap.exists or data.get("lecturer_id") != lecturer_id or data.get("scope") != "chat" or _is_expired(data): return None
     return _agent_safe_attachment(snap.id, data)
+
+
+def get_attachment_bytes(
+    batch_id: str, chat_id: str, attachment_id: str, lecturer_id: str, thumbnail: bool
+) -> tuple[bytes, str, str] | None:
+    """Return (data, content_type, file_name) for an attachment the lecturer owns.
+
+    Served through the API rather than as a redirect to a signed GCS URL: the
+    browser client sends `Authorization` with `withCredentials`, and it re-sends
+    both when following a cross-origin redirect. GCS cannot satisfy a
+    credentialed CORS request (its `Access-Control-Allow-Origin: *` is rejected
+    in credentials mode), so the fetch failed for every file type. Proxying keeps
+    it same-origin, which is also what makes previews work for text and PDFs and
+    not just images.
+    """
+    snap = attachment_ref(batch_id, chat_id, attachment_id).get()
+    data = snap.to_dict() or {}
+    if (
+        not snap.exists
+        or data.get("lecturer_id") != lecturer_id
+        or data.get("batch_id") != batch_id
+        or data.get("chat_id") != chat_id
+        or _is_expired(data)
+    ):
+        return None
+    path = data.get("thumbnail_gcs_path") if thumbnail else data.get("gcs_path")
+    if not path:
+        return None
+    try:
+        payload = download_bytes(str(path))
+    except Exception:
+        return None
+    # Thumbnails are always rendered images regardless of the source file type.
+    content_type = "image/jpeg" if thumbnail else str(data.get("content_type") or "application/octet-stream")
+    return payload, content_type, str(data.get("file_name") or "attachment")
 
 
 def get_attachment_url(batch_id: str, chat_id: str, attachment_id: str, lecturer_id: str, thumbnail: bool) -> str | None:

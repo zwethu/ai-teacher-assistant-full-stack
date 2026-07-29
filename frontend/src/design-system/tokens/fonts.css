@@ -1,0 +1,10 @@
+/* Webfonts for MILA: Inter (UI/body) + Plus Jakarta Sans (display/headings).
+   Served from Google Fonts via the @import in styles.css and the <link> in
+   index.html — no local binaries. Replace with self-hosted @font-face rules if
+   MFU requires offline serving.
+
+   Note: the upstream design-system file named "Playfair Display" here — a
+   leftover from the MAIA v2 era. MILA retires serif entirely ("no serif
+   anywhere"), and neither styles.css nor index.html ever loaded Playfair, so
+   the comment was stale rather than functional. Corrected during theme
+   alignment. */

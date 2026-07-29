@@ -1,4 +1,4 @@
-import { X } from 'lucide-react'
+import { Toast as MilaToast } from '../../design-system'
 import type { ToastMessage } from '../../types'
 
 interface ToastProps {
@@ -6,29 +6,23 @@ interface ToastProps {
   onDismiss: () => void
 }
 
+/**
+ * App toast — the design system's Toast in a fixed-position slot.
+ *
+ * The DS component supplies the frosted surface, the coloured accent edge and
+ * the status icon; this wrapper only decides where it sits. Success keeps
+ * emerald (MILA's one remaining role for it) and errors are red.
+ */
 export default function Toast({ toast, onDismiss }: ToastProps) {
   if (!toast) return null
 
-  const isError = toast.type === 'error'
-
   return (
-    <div
-      className={`fixed bottom-6 right-6 z-[100] max-w-sm rounded-xl border px-4 py-3 shadow-lg flex items-start gap-3 ${
-        isError
-          ? 'bg-red-50 border-red-200 text-red-800'
-          : 'bg-emerald-50 border-emerald-200 text-emerald-800'
-      }`}
-      role="status"
-    >
-      <p className="text-sm font-medium flex-1">{toast.message}</p>
-      <button
-        type="button"
-        onClick={onDismiss}
-        className="p-1 rounded-md hover:bg-black/5"
-        aria-label="Dismiss"
-      >
-        <X className="w-4 h-4" />
-      </button>
+    <div className="fixed bottom-6 right-6 z-[100] max-w-sm">
+      <MilaToast
+        type={toast.type === 'error' ? 'error' : 'success'}
+        message={toast.message}
+        onDismiss={onDismiss}
+      />
     </div>
   )
 }

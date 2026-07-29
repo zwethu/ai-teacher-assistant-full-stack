@@ -10,7 +10,7 @@ from services.attachment_constants import (
 
 
 def test_default_ttls():
-    assert get_chat_attachment_retention_days() == 7
+    assert get_chat_attachment_retention_days() == 30
     assert get_unsent_attachment_grace_hours() == 24
 
 

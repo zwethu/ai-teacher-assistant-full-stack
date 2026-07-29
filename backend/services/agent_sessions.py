@@ -256,6 +256,50 @@ def mark_agent_run_failed(
     )
 
 
+def mark_agent_run_cancelled(*, batch_id: str, chat_id: str, run_id: str) -> bool:
+    """Mark a run cancelled at the lecturer's request.
+
+    Terminal like done/failed. The agent call itself cannot be aborted — it runs
+    against Agent Engine — so this records the intent and the background worker
+    checks it before persisting, discarding the answer if it lands afterwards.
+
+    Returns False when the run is already terminal, so a late Stop cannot undo a
+    finished answer.
+    """
+    ref = _run_ref(batch_id, chat_id, run_id)
+    snap = ref.get()
+    if not snap.exists:
+        return False
+    if str((snap.to_dict() or {}).get("status") or "") in {"done", "failed", "cancelled"}:
+        return False
+
+    ref.update(
+        {
+            "status": "cancelled",
+            "cancelled_at": SERVER_TIMESTAMP,
+            "completed_at": SERVER_TIMESTAMP,
+            "updated_at": SERVER_TIMESTAMP,
+        }
+    )
+    _chat_ref(batch_id, chat_id).update(
+        {
+            "active_run_id": "",
+            "last_run_id": run_id,
+            "last_run_status": "cancelled",
+            "updated_at": SERVER_TIMESTAMP,
+        }
+    )
+    return True
+
+
+def is_agent_run_cancelled(*, batch_id: str, chat_id: str, run_id: str) -> bool:
+    """True when the lecturer stopped this run; the worker uses it to discard."""
+    snap = _run_ref(batch_id, chat_id, run_id).get()
+    if not snap.exists:
+        return False
+    return str((snap.to_dict() or {}).get("status") or "") == "cancelled"
+
+
 def mark_agent_run_draft_saved(
     *,
     batch_id: str,

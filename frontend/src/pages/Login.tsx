@@ -10,8 +10,10 @@ interface ModalProps {
 }
 
 import { Navigate } from 'react-router-dom'
+import { MilaLogo } from '../components/brand/MilaLogo'
 import { useAuth } from '../hooks/useAuth'
 import PageSpinner from '../components/ui/PageSpinner'
+import { Button } from '../design-system'
 
 function ModalBackdrop({ onClose }: ModalBackdropProps) {
   return (
@@ -31,9 +33,9 @@ function TermsModal({ open, onClose }: ModalProps) {
       <ModalBackdrop onClose={onClose} />
       <div className="absolute inset-0 flex items-center justify-center p-4 sm:p-6 md:p-8 pointer-events-none">
         <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden pointer-events-auto border border-white/20">
-          <div className="flex items-center justify-between p-6 border-b border-slate-200 bg-gradient-to-r from-emerald-50/50 to-white shrink-0">
+          <div className="flex items-center justify-between p-6 border-b border-slate-200 bg-gradient-to-r from-violet-50/50 to-white shrink-0">
             <div>
-              <h3 className="text-xl font-bold text-slate-900">PNai – Terms & Conditions</h3>
+              <h3 className="text-xl font-bold text-slate-900">MILA — terms and conditions</h3>
               <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mt-1">
                 Last updated: 2025
               </p>
@@ -48,36 +50,34 @@ function TermsModal({ open, onClose }: ModalProps) {
             </button>
           </div>
           <div className="flex-1 overflow-y-auto p-8 space-y-6 text-slate-700 text-sm leading-relaxed no-scrollbar">
-            <p className="font-semibold text-slate-800 italic border-l-4 border-emerald-500 pl-4 bg-emerald-50/30 py-4 rounded-r-xl">
-              By using PNai (Pyin Nyar AI), you agree to the following terms. Please read
-              them carefully before continuing.
+            <p className="font-semibold text-slate-800 italic border-l-4 border-violet-500 pl-4 bg-violet-50/30 py-4 rounded-r-xl">
+              By using MILA (MFU Intelligent Lecturer Assistant), you agree to the following
+              terms. Please read them before continuing.
             </p>
             <section className="space-y-2">
-              <h4 className="font-bold text-slate-900 text-base">1. Purpose of the Service</h4>
+              <h4 className="font-bold text-slate-900 text-base">1. Purpose of the service</h4>
               <p>
-                PNai is an AI-powered teaching assistant designed to help educators plan
-                lessons, create assessments, manage student batches, and communicate with
-                students using Google Workspace tools.
+                MILA helps you plan lessons, create assessments, manage student batches, and
+                communicate with students using Google Workspace tools.
               </p>
             </section>
             <section className="space-y-2">
-              <h4 className="font-bold text-slate-900 text-base">2. Account Access</h4>
+              <h4 className="font-bold text-slate-900 text-base">2. Account access</h4>
               <p>
-                To use PNai, you must sign in using a valid Google account. You are
-                responsible for maintaining the security of your account.
+                To use MILA, sign in with a valid Google account. You are responsible for
+                keeping your account secure.
               </p>
             </section>
             <section className="space-y-2">
-              <h4 className="font-bold text-slate-900 text-base">3. Google Services & Permissions</h4>
+              <h4 className="font-bold text-slate-900 text-base">3. Google services and permissions</h4>
               <p className="text-slate-600 italic">
-                PNai may request permission to access selected Google services such as Gmail,
-                Google Forms, and Google Calendar to support classroom workflows.
+                MILA may request access to selected Google services — Gmail, Google Forms, and
+                Google Calendar — to support classroom workflows.
               </p>
             </section>
-            <div className="bg-green-50 border-l-4 border-green-500 p-5 rounded-r-xl">
-              <p className="text-sm font-bold text-green-800">
-                By continuing to use PNai, you confirm that you understand and agree to these
-                Terms & Conditions.
+            <div className="bg-violet-50 border-l-4 border-violet-500 p-5 rounded-r-xl">
+              <p className="text-sm font-bold text-violet-800">
+                By continuing, you confirm that you understand and agree to these terms.
               </p>
             </div>
           </div>
@@ -89,13 +89,9 @@ function TermsModal({ open, onClose }: ModalProps) {
             >
               Cancel
             </button>
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 px-6 py-3 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-2xl transition shadow-md"
-            >
+            <Button type="button" onClick={onClose} size="lg" className="flex-1">
               Accept & Continue
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -111,11 +107,11 @@ function AboutModal({ open, onClose }: ModalProps) {
       <ModalBackdrop onClose={onClose} />
       <div className="absolute inset-0 flex items-center justify-center p-4 sm:p-6 md:p-8 pointer-events-none">
         <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden pointer-events-auto border border-white/20">
-          <div className="flex items-center justify-between p-6 border-b border-slate-200 bg-gradient-to-r from-emerald-50/50 to-white shrink-0">
+          <div className="flex items-center justify-between p-6 border-b border-slate-200 bg-gradient-to-r from-violet-50/50 to-white shrink-0">
             <div>
-              <h3 className="text-xl font-bold text-slate-900">About & Contact PNai</h3>
+              <h3 className="text-xl font-bold text-slate-900">About MILA</h3>
               <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mt-1">
-                Educator-First AI Assistant
+                Educator-first assistant
               </p>
             </div>
             <button
@@ -129,17 +125,20 @@ function AboutModal({ open, onClose }: ModalProps) {
           </div>
           <div className="flex-1 overflow-y-auto p-8 space-y-6 text-slate-700 text-sm leading-relaxed no-scrollbar">
             <p>
-              PNai (Pyin Nyar AI) is an AI-powered teaching assistant created to support
-              educators in planning lessons, creating assessments, managing classes, and
-              communicating with students more efficiently.
+              MILA (MFU Intelligent Lecturer Assistant) supports you in planning lessons,
+              creating assessments, managing classes, and communicating with students.
             </p>
             <p>
-              The platform is designed <strong>by educators, for educators</strong>, with a
-              focus on practical classroom workflows.
+              It is built <strong>by educators, for educators</strong>, around the classroom
+              workflows you already use.
             </p>
-            <div className="bg-emerald-50 border-l-4 border-emerald-500 p-5 rounded-r-xl">
-              <p className="text-sm font-semibold text-emerald-800">
-                PNai is continuously improved based on educator feedback.
+            <p className="text-slate-600">
+              MILA is developed at <strong>Mae Fah Luang University</strong> under the MLII
+              Innovation Development Grant (MFU Learning Innovation Institute).
+            </p>
+            <div className="bg-violet-50 border-l-4 border-violet-500 p-5 rounded-r-xl">
+              <p className="text-sm font-semibold text-violet-800">
+                MILA is continuously improved from lecturer feedback.
               </p>
             </div>
           </div>
@@ -185,29 +184,27 @@ export default function Login() {
         <div className="hidden lg:flex flex-1 flex-col justify-between p-12 xl:p-20 hero-left-branding h-full">
           <div>
             <div className="mb-10">
-              <span className="px-4 py-1.5 text-[10px] font-bold tracking-[0.2em] text-emerald-700 uppercase border border-emerald-200 rounded-full bg-emerald-50/80">
+              <span className="px-4 py-1.5 text-[10px] font-bold tracking-[0.2em] text-violet-700 uppercase border border-violet-200 rounded-full bg-violet-50/80">
                 Your teaching companion
               </span>
             </div>
 
             <div className="mb-8">
-              <div className="inline-flex bg-white/70 backdrop-blur-md p-3 rounded-3xl border border-white/50 shadow-lg">
-                <span className="text-2xl xl:text-3xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-emerald-600 to-emerald-400">
-                  PNai
-                </span>
+              {/* The production lockup, used as-is — the wordmark is never retyped. */}
+              <div className="maia-glass inline-flex rounded-3xl p-4">
+                <MilaLogo height={52} clearSpace />
               </div>
             </div>
 
             <div className="mb-14 max-w-2xl">
-              <h2 className="text-4xl xl:text-5xl font-extrabold tracking-tight mb-2">
-                <span className="bg-clip-text text-transparent bg-gradient-to-r from-emerald-600 to-emerald-400">
-                  Pyin Nyar AI
+              <h2 className="font-display text-4xl xl:text-5xl font-bold tracking-tight mb-2 leading-tight">
+                <span className="bg-clip-text text-transparent bg-gradient-to-r from-violet-600 to-violet-400">
+                  Smart support for educators
                 </span>
               </h2>
               <p className="text-xl xl:text-2xl text-slate-700 font-medium">
-                Smart support for{' '}
-                <span className="text-emerald-700 font-bold">educators</span> by{' '}
-                <span className="text-emerald-700 font-bold">educators</span>.
+                by <span className="text-violet-700 font-bold">educators</span>, built at Mae
+                Fah Luang University.
               </p>
             </div>
 
@@ -247,8 +244,8 @@ export default function Login() {
           <div className="mb-12">
             <h2 className="text-4xl font-bold text-slate-900 mb-4 tracking-tight">
               Log in to{' '}
-              <span className="bg-clip-text text-transparent bg-gradient-to-r from-emerald-500 to-emerald-600">
-                PNai
+              <span className="bg-clip-text text-transparent bg-gradient-to-r from-violet-500 to-violet-600">
+                MILA
               </span>
             </h2>
             <p className="text-slate-600 text-lg font-medium">
@@ -257,18 +254,14 @@ export default function Login() {
           </div>
 
           <div className="space-y-6">
-            <button
-              type="button"
-              onClick={handleSignIn}
-              className="group flex items-center justify-center gap-4 w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-5 px-6 rounded-2xl transition shadow-xl"
-            >
+            <Button type="button" onClick={handleSignIn} block className="group">
               Sign in with Google
-            </button>
+            </Button>
 
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-3">
-              <p className="text-sm font-bold text-slate-900">Privacy & Data Use</p>
+              <p className="text-sm font-bold text-slate-900">Privacy and data use</p>
               <p className="text-xs text-slate-600 leading-relaxed">
-                To use PNai, you may be asked to grant access to selected Google services.
+                To use MILA, you may be asked to grant access to selected Google services.
                 This supports lesson planning and classroom workflows.
               </p>
               <ul className="text-xs text-slate-600 list-disc list-inside space-y-1">
@@ -306,8 +299,8 @@ export default function Login() {
           </div>
 
           <footer className="mt-auto pt-8 border-t border-slate-200 text-xs text-slate-500 flex flex-col sm:flex-row justify-between gap-2">
-            <span>&copy; 2026 Pyin Nyar AI</span>
-            <span>Built to support real classroom teaching</span>
+            <span>&copy; 2026 MILA · MFU</span>
+            <span>Built with the MLII Innovation Development Grant</span>
           </footer>
         </div>
       </div>

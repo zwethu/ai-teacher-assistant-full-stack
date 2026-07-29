@@ -11,7 +11,7 @@ export function ChatWelcomeScreen({ activeChat, onSuggestionClick }: Props) {
   return (
     <div className="flex-1 flex flex-col items-center justify-center text-center py-12">
       <div className="w-12 h-12 rounded-2xl bg-white/50 border border-white/60 shadow-lg flex items-center justify-center mb-5">
-        <Sparkles className="w-6 h-6 text-emerald-600" />
+        <Sparkles className="w-6 h-6 text-violet-600" />
       </div>
       <h2 className="text-xl font-semibold text-slate-800 mb-1">How can I help you teach today?</h2>
       <p className="text-slate-500 text-sm mb-8">

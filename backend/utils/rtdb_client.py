@@ -232,12 +232,19 @@ def write_final_message(
     content: str,
     role: str = "assistant",
     metadata: dict | None = None,
+    message_id: str | None = None,
 ) -> None:
-    """Push the final assistant message into agentRuns/{run_id}/messages."""
+    """Push the final assistant message into agentRuns/{run_id}/messages.
+
+    `message_id` MUST be the Firestore message id. The client reads this node and
+    keeps the id it finds, then uses it to delete (retry) or export that message —
+    so a locally minted id here produces a message the API cannot address, and
+    those calls 404. The fallback exists only for callers with nothing persisted.
+    """
     if not _ensure_init():
         return
     try:
-        msg_id = uuid.uuid4().hex[:16]
+        msg_id = message_id or uuid.uuid4().hex[:16]
         message = {
             "message_id": msg_id,
             "role": role,

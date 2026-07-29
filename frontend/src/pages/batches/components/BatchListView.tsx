@@ -1,9 +1,10 @@
 import type { ToastMessage } from '../../../types'
 import type { Batch } from '../../../entity/Batch'
 import Toast from '../../../components/ui/Toast'
-import { Loader2, Plus, Search, Trash2, Users, X } from 'lucide-react'
+import { Plus, Search, Trash2, Users, X } from 'lucide-react'
 import { BTN_PRIMARY } from '../constants'
 import type { BatchWithCount } from '../types'
+import { Spinner, Button } from '../../../design-system'
 
 type Props = {
   toast: ToastMessage | null
@@ -49,7 +50,7 @@ export function BatchListView({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search batches…"
-            className="block w-full h-11 rounded-md border border-slate-300 bg-white shadow-sm pl-10 pr-10 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-500 focus:ring-emerald-500 focus:outline-none focus:ring-1"
+            className="block w-full h-11 rounded-md border border-slate-300 bg-white shadow-sm pl-10 pr-10 text-sm text-slate-900 placeholder:text-slate-400 focus:border-violet-500 focus:ring-violet-500 focus:outline-none focus:ring-1"
           />
           {searchQuery && (
             <button
@@ -62,20 +63,16 @@ export function BatchListView({
             </button>
           )}
         </div>
-        <button
-          type="button"
-          onClick={openCreateDialog}
-          className="inline-flex items-center justify-center h-11 px-5 border border-transparent text-sm font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500 sm:flex-shrink-0 sm:min-w-[180px]"
-        >
+        <Button type="button" onClick={openCreateDialog} className="h-11 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-violet-500 sm:flex-shrink-0 sm:min-w-[180px]">
           <Plus className="w-5 h-5 mr-2 -ml-1" />
           Create New Batch
-        </button>
+        </Button>
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden transition-shadow duration-200 hover:shadow-md">
         {listLoading ? (
           <div className="flex flex-col items-center justify-center py-20 gap-3">
-            <Loader2 className="w-8 h-8 text-emerald-600 animate-spin" />
+            <Spinner size={32} />
             <p className="text-sm text-slate-500">Loading batches…</p>
           </div>
         ) : listError ? (
@@ -126,15 +123,15 @@ export function BatchListView({
                   <tr
                     key={batch.id}
                     onClick={() => setSelectedBatch(batch)}
-                    className="group cursor-pointer transition-all duration-150 hover:bg-emerald-50/60"
+                    className="group cursor-pointer transition-all duration-150 hover:bg-violet-50/60"
                   >
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
-                        <div className="flex-shrink-0 h-8 w-8 rounded bg-emerald-50 text-emerald-600 flex items-center justify-center mr-3 border border-emerald-100 group-hover:shadow-sm transition-shadow">
+                        <div className="flex-shrink-0 h-8 w-8 rounded bg-violet-50 text-violet-600 flex items-center justify-center mr-3 border border-violet-100 group-hover:shadow-sm transition-shadow">
                           <Users className="w-4 h-4" />
                         </div>
                         <div>
-                          <div className="text-sm font-medium text-slate-900 group-hover:text-emerald-600 transition-colors">
+                          <div className="text-sm font-medium text-slate-900 group-hover:text-violet-600 transition-colors">
                             {batch.batch_name || 'Untitled Batch'}
                           </div>
                           {batch.academic_year && (
@@ -150,7 +147,7 @@ export function BatchListView({
                       <span className="text-sm text-slate-600">{batch.course_name || '—'}</span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-center">
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-800 group-hover:bg-emerald-50 group-hover:text-emerald-700 transition-colors">
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-800 group-hover:bg-violet-50 group-hover:text-violet-700 transition-colors">
                         {batch.student_count} student{batch.student_count === 1 ? '' : 's'}
                       </span>
                     </td>

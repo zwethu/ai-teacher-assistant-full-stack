@@ -40,7 +40,6 @@ export default function Chat() {
         referencePreviousAttachment={state.referencePreviousAttachment}
         removeReferencedAttachment={state.removeReferencedAttachment}
         handleComposerPaste={state.handleComposerPaste}
-        handleAskAboutAttachment={state.handleAskAboutAttachment}
         renamingId={state.renamingId}
         renameValue={state.renameValue}
         setRenameValue={state.setRenameValue}
@@ -49,6 +48,10 @@ export default function Chat() {
         commitRename={state.commitRename}
         cancelRename={state.cancelRename}
         handleDeleteChat={state.handleDeleteChat}
+        retryAssistantMessage={state.retryAssistantMessage}
+        retryingMessageId={state.retryingMessageId}
+        cancelActiveRun={state.cancelActiveRun}
+        cancelling={state.cancelling}
       />
     </ChatErrorBoundary>
   )

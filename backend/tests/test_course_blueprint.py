@@ -7,7 +7,7 @@ from entity.Batch import BatchModel
 from entity.CourseBlueprint import CourseBlueprintContent
 from services import course_blueprint_service
 from services import agent_gateway
-from services.agent_gateway import _build_session_state, course_blueprint_suggestion_metadata
+from services.agent_gateway import _build_session_state
 
 
 class CourseBlueprintValidationTests(unittest.TestCase):
@@ -141,77 +141,13 @@ class CourseBlueprintContextTests(unittest.TestCase):
         build_status.assert_called_once_with("b1", "u1")
 
 
-class CourseBlueprintSuggestionMetadataTests(unittest.TestCase):
-    @staticmethod
-    def _blueprint(**overrides):
-        return {
-            "title": "Roadmap",
-            "summary": "Reusable course plan",
-            "weekly_plan": [],
-            "assessment_strategy": "",
-            "lab_strategy": "",
-            "teaching_preferences": {},
-            "open_questions": [],
-            "plan_scope": "full_course",
-            **overrides,
-        }
-
-    def test_matching_high_confidence_current_run_is_attached(self):
-        result = course_blueprint_suggestion_metadata(
-            {"suggested": True, "confidence": "high", "run_id": "r1",
-             "source_agent": "course_consultant_agent", "suggested_title": " Different title ",
-             "reason": "Reusable plan", "blueprint": self._blueprint()},
-            run_id="r1", workflow_type="", final_text="A seven-week roadmap",
-        )
-        self.assertTrue(result["course_blueprint_save_suggested"])
-        self.assertEqual(result["course_blueprint_suggestion_title"], "Roadmap")
-        self.assertEqual(result["course_blueprint_recommendation"]["plan_scope"], "full_course")
-
-    def test_missing_or_invalid_blueprint_is_ignored(self):
-        base = {"suggested": True, "confidence": "high", "run_id": "r1",
-                "source_agent": "course_consultant_agent"}
-        self.assertEqual(course_blueprint_suggestion_metadata(
-            base, run_id="r1", workflow_type="", final_text="Plan"), {})
-        self.assertEqual(course_blueprint_suggestion_metadata(
-            {**base, "blueprint": {"title": "Title only", "plan_scope": "full_course"}},
-            run_id="r1", workflow_type="", final_text="Plan"), {})
-
-    def test_oversized_recommendation_is_ignored(self):
-        weekly_plan = [{
-            "week": week, "theme": f"Week {week}",
-            "lesson_goal": "L" * 2000, "lab_goal": "B" * 2000,
-            "assessment_idea": "A" * 2000, "notes": "N" * 2000,
-        } for week in range(1, 105)]
-        result = course_blueprint_suggestion_metadata(
-            {"suggested": True, "confidence": "high", "run_id": "r1",
-             "source_agent": "course_consultant_agent",
-             "blueprint": self._blueprint(summary="", weekly_plan=weekly_plan)},
-            run_id="r1", workflow_type="", final_text="Plan",
-        )
-        self.assertEqual(result, {})
-
-    def test_stale_or_non_high_suggestions_are_ignored(self):
-        base = {"suggested": True, "confidence": "high", "run_id": "old",
-                "source_agent": "course_consultant_agent", "blueprint": self._blueprint()}
-        self.assertEqual(course_blueprint_suggestion_metadata(
-            base, run_id="new", workflow_type="", final_text="Plan"), {})
-        self.assertEqual(course_blueprint_suggestion_metadata(
-            {**base, "run_id": "new", "confidence": "medium"},
-            run_id="new", workflow_type="", final_text="Plan"), {})
-
-    def test_generation_and_artifact_messages_are_ignored(self):
-        hint = {"suggested": True, "confidence": "high", "run_id": "r1",
-                "source_agent": "course_consultant_agent",
-                "blueprint": self._blueprint()}
-        self.assertEqual(course_blueprint_suggestion_metadata(
-            hint, run_id="r1", workflow_type="lesson_plan.generate", final_text="Plan"), {})
-        self.assertEqual(course_blueprint_suggestion_metadata(
-            hint, run_id="r1", workflow_type="", final_text="Plan",
-            message_metadata={"artifact_preview_card": True}), {})
-
-
 class CourseBlueprintSuggestionPersistenceTests(unittest.IsolatedAsyncioTestCase):
-    async def test_current_run_hint_is_attached_without_saving_blueprint(self):
+    async def test_consultant_hint_is_ignored(self):
+        """Consultant-suggested blueprint saving was removed on purpose.
+
+        Lecturers now build a course plan deliberately through the Course Plan
+        workflow, so a stale session hint must not resurrect the save prompt.
+        """
         async def fake_stream(**_kwargs):
             yield "Reusable seven-week roadmap"
 
@@ -247,9 +183,9 @@ class CourseBlueprintSuggestionPersistenceTests(unittest.IsolatedAsyncioTestCase
             )
 
         metadata = add_message.call_args.kwargs["metadata"]
-        self.assertTrue(metadata["course_blueprint_save_suggested"])
-        self.assertEqual(metadata["course_blueprint_suggestion_run_id"], "run-hint")
-        self.assertEqual(metadata["course_blueprint_recommendation"]["title"], "Roadmap")
+        self.assertNotIn("course_blueprint_save_suggested", metadata)
+        self.assertNotIn("course_blueprint_recommendation", metadata)
+        self.assertNotIn("course_blueprint_suggestion_run_id", metadata)
         save_blueprint.assert_not_called()
 
 

@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
-from fastapi.responses import RedirectResponse
+from fastapi.responses import Response
 from pydantic import BaseModel, Field, ValidationError
 
 from entity.CourseBlueprint import CourseBlueprintContent
@@ -14,6 +14,7 @@ from services.course_blueprint_service import save_blueprint_from_content
 from services.agent_sessions import (
     claim_pending_artifact_export,
     get_agent_run,
+    mark_agent_run_cancelled,
     invalidate_latest_outline_for_followup,
     mark_agent_run_pending_artifact,
     mark_agent_run_pending_artifact_export_failed,
@@ -36,19 +37,27 @@ from services.email_dispatch import (
 from services.chat_service import (
     create_chat,
     delete_chat,
+    delete_message,
     get_chat,
+    get_message,
     list_chats,
     list_messages,
     update_assistant_message_content_for_run,
     update_assistant_message_metadata_for_run,
     update_chat_title,
 )
+from services.chat_export_service import (
+    SUPPORTED_FORMATS,
+    build_export,
+    render_chat_markdown,
+    render_message_markdown,
+)
 from entity.ChatAttachment import ChatAttachment
 from services.chat_attachment_service import (
     AttachmentTooLargeError,
     AttachmentValidationError,
     create_chat_attachment,
-    get_attachment_url,
+    get_attachment_bytes,
     get_chat_attachment,
     delete_attachment_record,
     list_chat_attachments_for_agent,
@@ -60,7 +69,12 @@ from services.google_workspace.credentials import (
     assert_google_oauth_valid,
 )
 from utils.firebase_auth import CurrentUser, get_current_user
-from utils.rtdb_client import read_run_timeline_snapshot, write_run_event
+from utils.rtdb_client import (
+    finalize_open_run_steps,
+    read_run_timeline_snapshot,
+    set_run_status,
+    write_run_event,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -260,10 +274,19 @@ async def get_chat_attachment_content_endpoint(
     batch_id: str, chat_id: str, attachment_id: str, thumbnail: bool = False,
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    url = get_attachment_url(batch_id, chat_id, attachment_id, current_user["uid"], thumbnail)
-    if not url:
+    result = get_attachment_bytes(batch_id, chat_id, attachment_id, current_user["uid"], thumbnail)
+    if result is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment content not found")
-    return RedirectResponse(url=url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+    payload, content_type, file_name = result
+    return Response(
+        content=payload,
+        media_type=content_type,
+        headers={
+            # inline so previews render in place instead of downloading
+            "Content-Disposition": f'inline; filename="{file_name}"',
+            "Cache-Control": "private, max-age=300",
+        },
+    )
 
 @router.delete("/{chat_id}/attachments/{attachment_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_chat_attachment_endpoint(
@@ -289,6 +312,134 @@ async def list_messages_endpoint(
     if chat is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
     return list_messages(batch_id, chat_id, lecturer_id)
+
+
+def _export_response(payload: bytes, media_type: str, filename: str) -> Response:
+    return Response(
+        content=payload,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            # the browser needs to read the filename off a cross-origin response
+            "Access-Control-Expose-Headers": "Content-Disposition",
+        },
+    )
+
+
+def _validate_format(fmt: str) -> str:
+    if fmt not in SUPPORTED_FORMATS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"format must be one of: {', '.join(SUPPORTED_FORMATS)}",
+        )
+    return fmt
+
+
+@router.get("/{chat_id}/export")
+async def export_chat_endpoint(
+    batch_id: str,
+    chat_id: str,
+    format: str = "markdown",
+    current_user: CurrentUser = Depends(get_current_user),
+) -> Response:
+    """Download the whole conversation as Markdown, PDF or DOCX."""
+    fmt = _validate_format(format)
+    lecturer_id: str = current_user["uid"]
+    chat = get_chat(batch_id, chat_id, lecturer_id)
+    if chat is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
+
+    messages = list_messages(batch_id, chat_id, lecturer_id)
+    markdown_text = render_chat_markdown(chat, messages)
+    title = str(chat.get("title") or "chat")
+
+    try:
+        payload, media_type, filename = build_export(markdown_text, title, fmt)
+    except Exception as exc:  # noqa: BLE001 - surfaced to the client as a 500
+        logger.exception("Chat export failed for %s/%s", batch_id, chat_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Could not export this chat as {fmt}.",
+        ) from exc
+
+    return _export_response(payload, media_type, filename)
+
+
+@router.get("/{chat_id}/messages/{message_id}/export")
+async def export_message_endpoint(
+    batch_id: str,
+    chat_id: str,
+    message_id: str,
+    format: str = "markdown",
+    current_user: CurrentUser = Depends(get_current_user),
+) -> Response:
+    """Download a single response as Markdown, PDF or DOCX."""
+    fmt = _validate_format(format)
+    lecturer_id: str = current_user["uid"]
+    message = get_message(batch_id, chat_id, lecturer_id, message_id)
+    if message is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
+
+    chat = get_chat(batch_id, chat_id, lecturer_id) or {}
+    markdown_text = render_message_markdown(message)
+    if not markdown_text:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="This message has no content to export."
+        )
+
+    title = f"{chat.get('title') or 'chat'} - response"
+    try:
+        payload, media_type, filename = build_export(markdown_text, title, fmt)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Message export failed for %s/%s/%s", batch_id, chat_id, message_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Could not export this response as {fmt}.",
+        ) from exc
+
+    return _export_response(payload, media_type, filename)
+
+
+@router.delete("/{chat_id}/messages/{message_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_message_endpoint(
+    batch_id: str,
+    chat_id: str,
+    message_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> None:
+    """Remove one message.
+
+    Retry uses this to drop the superseded response before re-running, so the
+    chat does not collect abandoned answers.
+    """
+    lecturer_id: str = current_user["uid"]
+    if not delete_message(batch_id, chat_id, lecturer_id, message_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
+
+
+@router.post("/{chat_id}/runs/{run_id}/cancel", response_model=dict)
+async def cancel_run_endpoint(
+    batch_id: str,
+    chat_id: str,
+    run_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Stop a run at the lecturer's request.
+
+    The agent call runs against Agent Engine and cannot be aborted in flight, so
+    this marks the run cancelled and the background worker discards the answer if
+    it arrives afterwards. Already-terminal runs return cancelled=False so a late
+    Stop cannot erase an answer that already landed.
+    """
+    lecturer_id: str = current_user["uid"]
+    if get_chat(batch_id, chat_id, lecturer_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
+
+    cancelled = mark_agent_run_cancelled(batch_id=batch_id, chat_id=chat_id, run_id=run_id)
+    if cancelled:
+        finalize_open_run_steps(run_id, "cancelled")
+        set_run_status(run_id, "cancelled")
+    return {"run_id": run_id, "cancelled": cancelled}
 
 
 @router.get("/{chat_id}/runs/{run_id}", response_model=dict)

@@ -1,0 +1,24 @@
+/* MILA — global entry point (app build).
+   Import-only manifest; every token reachable from here ships to consumers.
+
+   NOTE — differs from the upstream design-system file by one line, deliberately:
+   upstream begins with
+
+     @import url('https://fonts.googleapis.com/css2?family=Inter:…&family=Plus+Jakarta+Sans:…');
+
+   That cannot survive bundling here. `src/index.css` pulls in `tailwindcss`
+   first, which expands to thousands of lines, so by the time this file is
+   inlined the nested @import no longer precedes all other statements and
+   PostCSS rejects it ("@import must precede all other statements").
+
+   The fonts are not lost: `index.html` loads the byte-identical Google Fonts
+   URL via <link rel="stylesheet">, which is also the faster path (no
+   render-blocking CSS-in-CSS import). The standalone copy at
+   docs/design-system/styles.css keeps the @import, because those specimen
+   cards open straight in a browser with no index.html and no bundler. */
+@import './tokens/colors.css';
+@import './tokens/typography.css';
+@import './tokens/spacing.css';
+@import './tokens/radii.css';
+@import './tokens/shadows.css';
+@import './tokens/effects.css';

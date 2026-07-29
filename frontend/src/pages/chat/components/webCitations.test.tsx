@@ -23,11 +23,23 @@ describe('web citation presentation', () => {
     expect(html).not.toContain('href="https://docs.example/path"')
   })
 
-  it('renders unmatched markers as unavailable without an href', () => {
+  it('drops an unmatched marker instead of printing a bare number', () => {
     const html = renderToStaticMarkup(<ResponseMarkdown content="Unsupported [21]." streaming={false} metadata={metadata} />)
-    expect(html).toContain('[21]')
-    expect(html).toContain('Source not available in captured metadata.')
-    expect(html).not.toContain('href=')
+    // A citation is only ever shown as a named chip. Index 21 has no captured
+    // source, so there is nothing to name and the marker goes away — a stray
+    // "[21]" beside real chips reads as a broken footnote.
+    expect(html).not.toContain('[21]')
+    expect(html).not.toContain('Source not available in captured metadata.')
+    // The space that led into the marker goes with it.
+    expect(html).toContain('Unsupported.')
+  })
+
+  it('keeps naming chips when only some indices in a group resolve', () => {
+    const html = renderToStaticMarkup(
+      <ResponseMarkdown content="Mixed [1, 21]." streaming={false} metadata={metadata} />,
+    )
+    expect(html).toContain('docs.example')
+    expect(html).not.toContain('[21]')
   })
 
   it('splits grouped citations into separate chips and preserves source 11', () => {
@@ -40,7 +52,11 @@ describe('web citation presentation', () => {
 
   it('does not transform markers inside code or existing links', () => {
     const html = renderToStaticMarkup(<ResponseMarkdown content={'Code `[1]` and [1](https://existing.example).'} streaming={false} metadata={metadata} />)
-    expect(html.match(/<button/g)).toHaveLength(1)
+    // No citation chip should be produced: one marker sits inside code, the
+    // other is already a markdown link. (This previously also asserted a total
+    // of one <button>, which only ever counted the Sources button — a settled
+    // response now renders copy/retry alongside it, and that count was never
+    // what the test was about.)
     expect(html).not.toContain('title="Official docs')
     expect(html).toContain('href="https://existing.example"')
   })
@@ -62,7 +78,7 @@ describe('web citation presentation', () => {
     const user = userEvent.setup()
     render(<ResponseMarkdown content={'Answer [1].\n\n## Sources & Tool Status\n- Web: success'} streaming={false} metadata={metadata} />)
     expect(screen.queryByRole('dialog', { name: 'Web Sources' })).toBeNull()
-    await user.click(screen.getByRole('button', { name: /Sources/i }))
+    await user.click(screen.getByRole('button', { name: /source/i }))
     const dialog = screen.getByRole('dialog', { name: 'Web Sources' })
     expect(dialog).toBeTruthy()
     expect(screen.getByText('official teaching guidance')).toBeTruthy()

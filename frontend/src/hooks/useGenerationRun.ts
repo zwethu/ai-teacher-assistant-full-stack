@@ -3,6 +3,7 @@ import axios from 'axios'
 import type { Batch } from '../entity/Batch'
 import type { Chat, ChatAttachment, ChatMessage } from '../entity/Chat'
 import {
+  cancelChatRun,
   createChat,
   deleteChatAttachment,
   getChatAttachmentRagStatus,
@@ -80,6 +81,7 @@ export function useGenerationRun(batch: Batch | null, persistKey?: string) {
   // window (before the resolved message carries stage metadata).
   const [activePhase, setActivePhase] = useState<'outline' | 'full' | 'refine' | null>(null)
   const [sending, setSending] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
   const [pendingAttachments, setPendingAttachments] = useState<PendingChatAttachment[]>([])
   const [attachmentsUploading, setAttachmentsUploading] = useState(false)
   const [attachmentErrors, setAttachmentErrors] = useState<string[]>([])
@@ -556,6 +558,48 @@ export function useGenerationRun(batch: Batch | null, persistKey?: string) {
     [batch, sending, startRun],
   )
 
+  /**
+   * Stop the in-flight generation. The backend polls the cancel flag between
+   * streamed chunks and tears the Agent Engine stream down, so this genuinely
+   * ends the work rather than just muting the UI. We keep the placeholder
+   * message so the stage renderer has something to hang "cancelled" off, and
+   * drop the persisted run id so returning to the page does not resubscribe.
+   */
+  const cancelRun = useCallback(async () => {
+    const activeChat = chatRef.current
+    if (!batch || !activeChat || !currentRunId || cancelling) return
+    const runId = currentRunId
+    setCancelling(true)
+    try {
+      await cancelChatRun(batch.id, activeChat.chat_id, runId)
+    } catch {
+      // Settle locally regardless — a stuck "generating" panel is worse than a
+      // run that quietly keeps going.
+    } finally {
+      runUnsubscribesRef.current[runId]?.()
+      delete runUnsubscribesRef.current[runId]
+      stopTimers(runId)
+      setRunStates((prev) => ({
+        ...prev,
+        [runId]: {
+          ...(prev[runId] || { events: [], steps: {} }),
+          status: 'cancelled',
+        } as RunUiState,
+      }))
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.pending && m.run_id === runId ? { ...m, pending: false, status: 'done' } : m,
+        ),
+      )
+      setActivePhase(null)
+      setSending(false)
+      setCancelling(false)
+      if (persistIdRef.current) {
+        writeGenerationRun(persistIdRef.current, { currentRunId: null, activePhase: null })
+      }
+    }
+  }, [batch, currentRunId, cancelling, stopTimers])
+
   // Clear the current run so the page can show its form again ("Generate another").
   // Keeps the workflow chat for reuse but drops the persisted run so it won't rehydrate.
   const reset = useCallback(() => {
@@ -628,6 +672,8 @@ export function useGenerationRun(batch: Batch | null, persistKey?: string) {
     currentRunId,
     activePhase,
     sending,
+    cancelling,
+    cancelRun,
     pendingAttachments,
     attachmentsUploading,
     attachmentErrors,

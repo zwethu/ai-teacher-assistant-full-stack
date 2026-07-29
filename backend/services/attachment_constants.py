@@ -72,8 +72,14 @@ def _bounded_int(name: str, default: int, minimum: int, maximum: int) -> int:
 
 
 def get_chat_attachment_retention_days() -> int:
-    """Hard TTL for a SENT attachment, measured from message association."""
-    return _bounded_int("CHAT_ATTACHMENT_RETENTION_DAYS", 7, 1, 30)
+    """Hard TTL for a SENT attachment, measured from message association.
+
+    30 days rather than the original 7: chat messages now show attachment
+    thumbnails and open them in a viewer, so an expired attachment is a visible
+    hole in the transcript rather than a dead metadata row. A month keeps a
+    term's worth of recent conversations intact.
+    """
+    return _bounded_int("CHAT_ATTACHMENT_RETENTION_DAYS", 30, 1, 30)
 
 
 def get_unsent_attachment_grace_hours() -> int:

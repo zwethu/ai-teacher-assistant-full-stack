@@ -1,14 +1,26 @@
-import { useRef, type ChangeEvent } from 'react'
-import { Loader2, Paperclip, X } from 'lucide-react'
+import { useRef, useState, type ChangeEvent } from 'react'
+import { Paperclip } from 'lucide-react'
+import type { ChatAttachmentSnapshot } from '../../entity/Chat'
 import type { GenerationRunState } from '../../hooks/useGenerationRun'
+import {
+  AttachmentCard,
+  AttachmentViewer,
+  attachmentStatusLabel,
+} from '../../pages/chat/components/AttachmentPreview'
+import { Spinner } from '../../design-system'
 
 /**
  * Optional reference-file attachments for a generation, placed on the request
  * form (not in a chat composer). Files upload to the workflow chat immediately
  * and are attached to the next generate call.
+ *
+ * Same flow as the chat composer, deliberately: preview-only tiles, tap to open
+ * the full viewer, and the identical readiness wording — a lecturer attaching a
+ * PDF here should not have to learn a second set of affordances.
  */
 export function GenerationAttachments({ run }: { run: GenerationRunState }) {
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [preview, setPreview] = useState<ChatAttachmentSnapshot | null>(null)
 
   async function onFiles(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files || [])
@@ -16,12 +28,26 @@ export function GenerationAttachments({ run }: { run: GenerationRunState }) {
     await run.uploadAttachmentFiles(files)
   }
 
+  const batchId = run.chat?.batch_id
+  const chatId = run.chat?.chat_id
+  const processing = run.pendingAttachments.some((a) => a.status === 'processing')
+  const blocked = run.pendingAttachments.some(
+    (a) => a.status === 'too_large' || a.status === 'failed',
+  )
+
   return (
     <div>
       <label className="mb-1.5 block text-sm font-semibold text-slate-700">
         Reference files (optional)
       </label>
-      <input ref={fileInputRef} type="file" multiple className="hidden" onChange={onFiles} />
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept=".pdf,.docx,.pptx,.txt,.md,.markdown,.csv,.png,.jpg,.jpeg,.webp,.heic,.heif"
+        className="hidden"
+        onChange={onFiles}
+      />
       <button
         type="button"
         onClick={() => fileInputRef.current?.click()}
@@ -29,7 +55,7 @@ export function GenerationAttachments({ run }: { run: GenerationRunState }) {
         className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
       >
         {run.attachmentsUploading ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
+          <Spinner size={16} />
         ) : (
           <Paperclip className="h-4 w-4" />
         )}
@@ -37,25 +63,32 @@ export function GenerationAttachments({ run }: { run: GenerationRunState }) {
       </button>
 
       {run.pendingAttachments.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-2">
-          {run.pendingAttachments.map((a) => (
-            <span
-              key={a.attachment_id}
-              className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700"
-            >
-              {a.file_name}
-              {a.status === 'processing' && <Loader2 className="h-3 w-3 animate-spin" />}
-              <button
-                type="button"
-                onClick={() => void run.removePendingAttachment(a.attachment_id)}
-                className="ml-1 text-slate-400 hover:text-slate-600"
-                aria-label={`Remove ${a.file_name}`}
-              >
-                <X className="h-3 w-3" />
-              </button>
-            </span>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {run.pendingAttachments.map((attachment) => (
+            <AttachmentCard
+              key={attachment.attachment_id}
+              batchId={batchId}
+              chatId={chatId}
+              attachment={attachment}
+              status={attachmentStatusLabel(attachment)}
+              onOpen={() => setPreview(attachment)}
+              onRemove={() => void run.removePendingAttachment(attachment.attachment_id)}
+            />
           ))}
         </div>
+      )}
+
+      {processing && (
+        <p className="mt-2 text-xs text-slate-500">
+          Some files are still processing — you can generate now, and the assistant may note a
+          file isn’t ready yet.
+        </p>
+      )}
+      {blocked && (
+        <p className="mt-2 text-xs text-amber-600">
+          Remove the flagged file to generate. Large files belong in Course Space, where they’re
+          indexed for retrieval.
+        </p>
       )}
 
       {run.attachmentErrors.length > 0 && (
@@ -66,6 +99,15 @@ export function GenerationAttachments({ run }: { run: GenerationRunState }) {
             </p>
           ))}
         </div>
+      )}
+
+      {preview && (
+        <AttachmentViewer
+          batchId={batchId}
+          chatId={chatId}
+          attachment={preview}
+          onClose={() => setPreview(null)}
+        />
       )}
     </div>
   )

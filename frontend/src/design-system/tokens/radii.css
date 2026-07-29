@@ -1,0 +1,10 @@
+/* MAIA Liquid radii — one step rounder than MAIA v1 for the liquid-glass feel. */
+:root {
+  --radius-sm: 6px;
+  --radius-md: 10px;   /* buttons, inputs, selects */
+  --radius-lg: 12px;   /* icon tiles */
+  --radius-xl: 16px;   /* cards, nav items */
+  --radius-2xl: 20px;  /* panels, feature cards */
+  --radius-3xl: 28px;  /* modals, branding blocks */
+  --radius-full: 9999px; /* chips, pills, avatars, composer */
+}

@@ -1,7 +1,8 @@
 import { Fragment } from 'react'
-import { Check, Loader2 } from 'lucide-react'
+import { Check } from 'lucide-react'
 import { ACCENT, type GenAccent } from './generationTheme'
 import type { GenerationStage } from './generationStage'
+import { Spinner } from '../../design-system'
 
 const STEPS = ['Outline', 'Review', 'Full preview', 'Done'] as const
 
@@ -14,6 +15,7 @@ const STAGE_MAP: Record<GenerationStage, { active: number; done: number; busy: b
   preview: { active: 3, done: 3, busy: false },
   done: { active: 3, done: 4, busy: false },
   failed: { active: -1, done: 0, busy: false },
+  cancelled: { active: -1, done: 0, busy: false },
 }
 
 export function GenerationStepper({
@@ -48,7 +50,7 @@ export function GenerationStepper({
                 {isDone ? (
                   <Check className="h-3.5 w-3.5" />
                 ) : isActive && busy ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <Spinner size={14} />
                 ) : (
                   index + 1
                 )}

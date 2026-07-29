@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { ExternalLink, FileQuestion, Loader2, Plus, Sparkles } from 'lucide-react'
+import { ExternalLink, FileQuestion, Plus, Sparkles } from 'lucide-react'
 import type { ToastMessage } from '../types'
 import Toast from '../components/ui/Toast'
 import { getErrorMessage } from '../utils/errors'
@@ -10,6 +10,7 @@ import { GenerationAttachments } from '../components/generation/GenerationAttach
 import { PlanHintBanner } from '../components/generation/PlanHintBanner'
 import { listArtifacts, type Artifact } from '../services/artifactService'
 import { timeAgo } from '../utils/formatDate'
+import { Spinner } from '../design-system'
 
 const QUIZ_MODES: Array<{ value: string; label: string }> = [
   { value: 'mixed', label: 'Mixed' },
@@ -152,7 +153,7 @@ export default function Assessments() {
             </button>
           </div>
           <div className="rounded-xl border border-slate-200 bg-white shadow-sm min-h-[24rem] max-h-[80vh] overflow-y-auto">
-            <GenerationRunView batch={selectedBatch} run={run} accent="emerald" />
+            <GenerationRunView batch={selectedBatch} run={run} accent="primary" />
           </div>
         </div>
       ) : (
@@ -161,7 +162,7 @@ export default function Assessments() {
             <label className="block text-sm font-semibold text-slate-700 mb-1.5">Space (batch)</label>
             <select required value={selectedBatchId ?? ''} onChange={(e) => setSelectedBatchId(e.target.value)}
               disabled={batchesLoading}
-              className="block w-full rounded-md border border-slate-300 py-2.5 px-2 text-sm focus:border-emerald-500 focus:ring-emerald-500">
+              className="block w-full rounded-md border border-slate-300 py-2.5 px-2 text-sm focus:border-violet-500 focus:ring-violet-500">
               {batches.map((b) => <option key={b.id} value={b.id}>{b.batch_name} — {b.course_name}</option>)}
             </select>
           </div>
@@ -171,13 +172,13 @@ export default function Assessments() {
               <label className="block text-sm font-semibold text-slate-700 mb-1.5">Week</label>
               <input type="number" min={1} required value={form.week}
                 onChange={(e) => setForm((f) => ({ ...f, week: Number(e.target.value || 1) }))}
-                className="block w-full rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500" />
+                className="block w-full rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-violet-500 focus:ring-violet-500" />
             </div>
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-1.5"># Questions</label>
               <input type="number" min={1} max={50} required value={form.totalQuestions}
                 onChange={(e) => setForm((f) => ({ ...f, totalQuestions: Number(e.target.value || 1) }))}
-                className="block w-full rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500" />
+                className="block w-full rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-violet-500 focus:ring-violet-500" />
             </div>
           </div>
 
@@ -186,7 +187,7 @@ export default function Assessments() {
             <input type="text" value={form.title}
               onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
               placeholder="Leave blank — agent names it from the course plan or topic"
-              className="block w-full rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500" />
+              className="block w-full rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-violet-500 focus:ring-violet-500" />
           </div>
 
           <div>
@@ -194,21 +195,21 @@ export default function Assessments() {
             <input type="text" value={form.topic}
               onChange={(e) => setForm((f) => ({ ...f, topic: e.target.value }))}
               placeholder="Leave blank to let the agent choose from the course plan"
-              className="block w-full rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500" />
+              className="block w-full rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-violet-500 focus:ring-violet-500" />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-1.5">Mode</label>
               <select value={form.quizMode} onChange={(e) => setForm((f) => ({ ...f, quizMode: e.target.value }))}
-                className="block w-full rounded-md border border-slate-300 py-2.5 px-2 text-sm focus:border-emerald-500 focus:ring-emerald-500">
+                className="block w-full rounded-md border border-slate-300 py-2.5 px-2 text-sm focus:border-violet-500 focus:ring-violet-500">
                 {QUIZ_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
               </select>
             </div>
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-1.5">Difficulty</label>
               <select value={form.difficulty} onChange={(e) => setForm((f) => ({ ...f, difficulty: e.target.value }))}
-                className="block w-full rounded-md border border-slate-300 py-2.5 px-2 text-sm focus:border-emerald-500 focus:ring-emerald-500 capitalize">
+                className="block w-full rounded-md border border-slate-300 py-2.5 px-2 text-sm focus:border-violet-500 focus:ring-violet-500 capitalize">
                 {DIFFICULTIES.map((d) => <option key={d} value={d}>{d}</option>)}
               </select>
             </div>
@@ -224,7 +225,7 @@ export default function Assessments() {
               <div className="mt-2 flex items-center gap-2">
                 <input type="number" min={1} required value={form.timeLimit}
                   onChange={(e) => setForm((f) => ({ ...f, timeLimit: Number(e.target.value || 1) }))}
-                  className="w-28 rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500" />
+                  className="w-28 rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-violet-500 focus:ring-violet-500" />
                 <span className="text-sm text-slate-500">minutes</span>
               </div>
             )}
@@ -235,7 +236,7 @@ export default function Assessments() {
             <textarea rows={2} value={form.instructions}
               onChange={(e) => setForm((f) => ({ ...f, instructions: e.target.value }))}
               placeholder="Anything else the agent should consider…"
-              className="block w-full rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500 resize-y" />
+              className="block w-full rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-violet-500 focus:ring-violet-500 resize-y" />
           </div>
 
           {selectedBatch && <GenerationAttachments run={run} />}
@@ -245,8 +246,8 @@ export default function Assessments() {
 
           <div>
             <button type="submit" disabled={run.sending || missing.length > 0}
-              className="inline-flex w-full items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm transition-colors disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none disabled:cursor-not-allowed">
-              {run.sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+              className="inline-flex w-full items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-md text-white bg-violet-600 hover:bg-violet-700 shadow-sm transition-colors disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none disabled:cursor-not-allowed">
+              {run.sending ? <Spinner tone="inverse" size={16} /> : <Sparkles className="w-4 h-4" />}
               Generate outline
             </button>
             {missing.length > 0 && !run.sending && (
@@ -263,12 +264,12 @@ export default function Assessments() {
           <h2 className="text-sm font-semibold text-slate-700">Saved assessments</h2>
           {selectedBatchId && (
             <button type="button" onClick={() => void refreshArtifacts(selectedBatchId)}
-              className="text-xs text-emerald-700 hover:underline">Refresh</button>
+              className="text-xs text-violet-700 hover:underline">Refresh</button>
           )}
         </div>
         {listLoading ? (
           <div className="flex items-center gap-2 text-sm text-slate-500 py-6">
-            <Loader2 className="w-4 h-4 animate-spin" /> Loading…
+            <Spinner size={16} /> Loading…
           </div>
         ) : artifacts.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-10 text-center rounded-xl border border-slate-100 bg-white">
@@ -280,7 +281,7 @@ export default function Assessments() {
             {artifacts.map((a) => (
               <article key={a.id} className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
                 <div className="flex items-start gap-3 mb-2">
-                  <div className="h-9 w-9 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100">
+                  <div className="h-9 w-9 rounded-lg bg-violet-50 text-violet-600 flex items-center justify-center border border-violet-100">
                     <FileQuestion className="w-4 h-4" />
                   </div>
                   <div className="min-w-0 flex-1">

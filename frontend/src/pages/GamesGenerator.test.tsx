@@ -11,7 +11,17 @@ const listArtifacts = vi.fn()
 const generate = vi.fn()
 const removePendingAttachment = vi.fn()
 const useBatchSelection = vi.fn()
-let pendingAttachments: Array<{ attachment_id: string }> = []
+// The composer/form renders real preview tiles, so a fixture needs the fields a
+// real attachment carries (kind, content type, name) — not just an id.
+type AttachmentFixture = {
+  attachment_id: string
+  file_name: string
+  content_type: string
+  attachment_kind: string
+  size_bytes: number
+  status: string
+}
+let pendingAttachments: AttachmentFixture[] = []
 
 vi.mock('../services/gameService', () => ({
   listGames: (...args: unknown[]) => listGames(...args),
@@ -122,7 +132,17 @@ describe('Games — source picker', () => {
   })
 
   it('drops an uploaded file when saved work is picked instead', async () => {
-    pendingAttachments = [{ attachment_id: 'att-1' }]
+    pendingAttachments = [
+      {
+        attachment_id: 'att-1',
+        file_name: 'week-3-notes.docx',
+        content_type:
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        attachment_kind: 'document',
+        size_bytes: 24_000,
+        status: 'ready',
+      },
+    ]
     listArtifacts.mockResolvedValue([lessonPlan])
     renderPage()
 

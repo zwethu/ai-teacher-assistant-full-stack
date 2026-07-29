@@ -84,7 +84,7 @@ export function BatchDetailView({
             <h1 className="text-2xl font-bold text-slate-800 tracking-tight">
               {selectedBatch.batch_name}
             </h1>
-            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-100">
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-violet-50 text-violet-700 border border-violet-100">
               {students.length} student{students.length === 1 ? '' : 's'}
             </span>
           </div>
@@ -118,14 +118,14 @@ export function BatchDetailView({
         <button
           type="button"
           onClick={() => setDetailTab('planning')}
-          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${detailTab === 'planning' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${detailTab === 'planning' ? 'border-violet-600 text-violet-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
         ><BookOpenCheck className="w-4 h-4" />Planning</button>
         <button
           type="button"
           onClick={() => setDetailTab('students')}
           className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
             detailTab === 'students'
-              ? 'border-emerald-600 text-emerald-700'
+              ? 'border-violet-600 text-violet-700'
               : 'border-transparent text-slate-500 hover:text-slate-700'
           }`}
         >
@@ -137,7 +137,7 @@ export function BatchDetailView({
           onClick={() => setDetailTab('materials')}
           className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
             detailTab === 'materials'
-              ? 'border-emerald-600 text-emerald-700'
+              ? 'border-violet-600 text-violet-700'
               : 'border-transparent text-slate-500 hover:text-slate-700'
           }`}
         >
@@ -154,7 +154,7 @@ export function BatchDetailView({
           onClick={() => setDetailTab('artifacts')}
           className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
             detailTab === 'artifacts'
-              ? 'border-emerald-600 text-emerald-700'
+              ? 'border-violet-600 text-violet-700'
               : 'border-transparent text-slate-500 hover:text-slate-700'
           }`}
         >

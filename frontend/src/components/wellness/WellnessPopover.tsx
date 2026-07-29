@@ -10,6 +10,7 @@ import {
   type StressState,
 } from '../../services/wellnessService'
 import { formatDate } from '../../utils/formatDate'
+import { Button } from '../../design-system'
 
 const MOODS = [
   { value: 'great', emoji: '😊', label: 'Great' },
@@ -45,13 +46,13 @@ function stressLabel(score: number): string {
 function stressBarColor(score: number): string {
   if (score >= 100) return 'bg-red-500'
   if (score >= 80) return 'bg-orange-500'
-  return 'bg-emerald-500'
+  return 'bg-violet-500'
 }
 
 function stressLabelColor(score: number): string {
   if (score >= 100) return 'text-red-600'
   if (score >= 80) return 'text-orange-600'
-  return 'text-emerald-600'
+  return 'text-violet-600'
 }
 
 export default function WellnessPopover({
@@ -205,7 +206,7 @@ export default function WellnessPopover({
 
       <div className={embedded ? '' : 'border-t border-slate-100 pt-4'}>
             {breathing ? (
-              <p className="text-xl font-semibold text-center text-emerald-700 py-6">
+              <p className="text-xl font-semibold text-center text-violet-700 py-6">
                 {breathPhase}
               </p>
             ) : (
@@ -217,7 +218,7 @@ export default function WellnessPopover({
                       setBreathResult(null)
                       setBreathing(true)
                     }}
-                    className="w-full text-sm text-emerald-700 font-medium py-2"
+                    className="w-full text-sm text-violet-700 font-medium py-2"
                   >
                     ✅ Breathing done today
                   </button>
@@ -228,7 +229,7 @@ export default function WellnessPopover({
                       setBreathResult(null)
                       setBreathing(true)
                     }}
-                    className="w-full text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl py-2.5 transition-colors"
+                    className="w-full text-sm font-semibold text-white bg-violet-600 hover:bg-violet-700 rounded-xl py-2.5 transition-colors"
                   >
                     🧘 Start Breathing Exercise
                   </button>
@@ -239,7 +240,7 @@ export default function WellnessPopover({
             {breathResult && !breathing && (
               <div className="mt-3 space-y-1">
                 {breathResult.stress_reduced ? (
-                  <p className="text-xs text-emerald-700 font-medium">
+                  <p className="text-xs text-violet-700 font-medium">
                     ✅ Stress reduced by 20 points!
                   </p>
                 ) : (
@@ -262,7 +263,7 @@ export default function WellnessPopover({
                     onClick={() => setMood(m.value)}
                     className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs border transition-colors ${
                       mood === m.value
-                        ? 'border-emerald-400 bg-emerald-50 text-emerald-800'
+                        ? 'border-violet-400 bg-violet-50 text-violet-800'
                         : 'border-slate-200 hover:border-slate-300'
                     }`}
                   >
@@ -276,15 +277,11 @@ export default function WellnessPopover({
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="Optional notes…"
                 rows={2}
-                className="block w-full rounded-lg border border-slate-300 shadow-sm py-2 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500 resize-y"
+                className="block w-full rounded-lg border border-slate-300 shadow-sm py-2 px-3 text-sm focus:border-violet-500 focus:ring-violet-500 resize-y"
               />
-              <button
-                type="submit"
-                disabled={!mood || submitting}
-                className="w-full text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 rounded-xl py-2 transition-colors"
-              >
+              <Button type="submit" disabled={!mood || submitting} block>
                 Save reflection
-              </button>
+              </Button>
             </form>
           )}
 

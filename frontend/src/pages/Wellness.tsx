@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import type { Wellness as WellnessEntry } from '../entity/Wellness'
 import { getErrorMessage } from '../utils/errors'
 
-import { BookOpen, Loader2, Plus, Trash2, X } from 'lucide-react'
+import { BookOpen, Plus, Trash2, X } from 'lucide-react'
 import {
   addDoc,
   collection,
@@ -24,6 +24,7 @@ import {
   MOOD_SELECT_OPTIONS,
 } from '../utils/constants'
 import { formatDate } from '../utils/formatDate'
+import { Spinner, Button } from '../design-system'
 
 const NOTES_PREVIEW_LEN = 140
 
@@ -194,14 +195,10 @@ export default function Wellness() {
             Private reflection check-ins from stressful moments.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={openAddModal}
-          className="inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500"
-        >
+        <Button type="button" onClick={openAddModal} className="focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-violet-500">
           <Plus className="w-5 h-5 mr-2 -ml-1" />
           Add Entry
-        </button>
+        </Button>
       </div>
 
       {/* Mood stats */}
@@ -231,7 +228,7 @@ export default function Wellness() {
                   <div
                     className={`h-full rounded-full transition-all ${
                       mood === 'great'
-                        ? 'bg-emerald-400'
+                        ? 'bg-violet-400'
                         : mood === 'okay'
                           ? 'bg-sky-400'
                           : mood === 'tired'
@@ -253,7 +250,7 @@ export default function Wellness() {
       <div className="relative rounded-2xl border border-slate-100 bg-white shadow-sm overflow-hidden">
         {listLoading ? (
           <div className="flex flex-col items-center justify-center py-20 gap-3">
-            <Loader2 className="w-8 h-8 text-emerald-600 animate-spin" />
+            <Spinner size={32} />
             <p className="text-sm text-slate-500">Loading journal entries…</p>
           </div>
         ) : entries.length === 0 ? (
@@ -267,14 +264,10 @@ export default function Wellness() {
             <p className="mt-1 text-sm text-slate-500 mb-6 max-w-sm">
               Log how you are feeling and capture notes from your teaching week.
             </p>
-            <button
-              type="button"
-              onClick={openAddModal}
-              className="inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm"
-            >
+            <Button type="button" onClick={openAddModal}>
               <Plus className="w-4 h-4 mr-2" />
               Add Entry
-            </button>
+            </Button>
           </div>
         ) : (
           <div className="p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -355,7 +348,7 @@ export default function Wellness() {
                   onChange={(e) =>
                     setForm((f) => ({ ...f, mood: e.target.value }))
                   }
-                  className="block w-full rounded-md border border-slate-300 shadow-sm py-2.5 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500"
+                  className="block w-full rounded-md border border-slate-300 shadow-sm py-2.5 px-3 text-sm focus:border-violet-500 focus:ring-violet-500"
                 >
                   {MOOD_SELECT_OPTIONS.map((m) => (
                     <option key={m.value} value={m.value}>
@@ -376,7 +369,7 @@ export default function Wellness() {
                   onChange={(e) =>
                     setForm((f) => ({ ...f, date: e.target.value }))
                   }
-                  className="block w-full rounded-md border border-slate-300 shadow-sm py-2.5 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500"
+                  className="block w-full rounded-md border border-slate-300 shadow-sm py-2.5 px-3 text-sm focus:border-violet-500 focus:ring-violet-500"
                 />
               </div>
 
@@ -391,7 +384,7 @@ export default function Wellness() {
                     setForm((f) => ({ ...f, notes: e.target.value }))
                   }
                   placeholder="What happened today? How are you feeling?"
-                  className="block w-full rounded-md border border-slate-300 shadow-sm py-2.5 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500"
+                  className="block w-full rounded-md border border-slate-300 shadow-sm py-2.5 px-3 text-sm focus:border-violet-500 focus:ring-violet-500"
                 />
               </div>
 
@@ -408,20 +401,16 @@ export default function Wellness() {
                 >
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm disabled:opacity-70 min-w-[100px]"
-                >
+                <Button type="submit" disabled={saving} className="min-w-[100px]">
                   {saving ? (
                     <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <Spinner tone="inverse" size={16} />
                       Saving…
                     </>
                   ) : (
                     'Save Entry'
                   )}
-                </button>
+                </Button>
               </div>
             </form>
           </div>

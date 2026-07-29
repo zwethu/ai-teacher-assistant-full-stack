@@ -19,7 +19,7 @@ export function StepTimelineRow({ row }: Props) {
     <CollapsibleRow
       open={open}
       onToggle={() => setOpen((value) => !value)}
-      icon={webSearchDetails ? <Search className="h-3.5 w-3.5 flex-shrink-0 text-emerald-600" /> : row.kind === 'tool' ? <Wrench className="h-3.5 w-3.5 flex-shrink-0 text-slate-500" /> : <ChevronIcon open={open} />}
+      icon={webSearchDetails ? <Search className="h-3.5 w-3.5 flex-shrink-0 text-violet-600" /> : row.kind === 'tool' ? <Wrench className="h-3.5 w-3.5 flex-shrink-0 text-slate-500" /> : <ChevronIcon open={open} />}
       title={row.title}
       status={row.status}
       failed={row.kind === 'error' || row.status === 'failed'}
@@ -37,7 +37,7 @@ export function StepTimelineRow({ row }: Props) {
               href={link}
               target="_blank"
               rel="noreferrer"
-              className="font-medium text-emerald-700 underline underline-offset-2"
+              className="font-medium text-violet-700 underline underline-offset-2"
             >
               Open artifact
             </a>
@@ -67,7 +67,7 @@ export function WebSearchDetail({ detail }: { detail: Record<string, unknown> })
       {sources.length > 0 && <div><div className="mb-1 font-semibold text-slate-700">Sources checked</div><div className="space-y-1">{sources.map((source, index) => {
         const url = typeof source.url === 'string' && /^https?:\/\//.test(source.url) ? source.url : ''
         const title = String(source.title || source.domain || `Source ${index + 1}`)
-        return url ? <a key={url} href={url} target="_blank" rel="noreferrer" className="flex items-center gap-1 font-medium text-emerald-700 underline underline-offset-2"><ExternalLink className="h-3 w-3" />{title}</a> : <div key={`${title}-${index}`}>{title}</div>
+        return url ? <a key={url} href={url} target="_blank" rel="noreferrer" className="flex items-center gap-1 font-medium text-violet-700 underline underline-offset-2"><ExternalLink className="h-3 w-3" />{title}</a> : <div key={`${title}-${index}`}>{title}</div>
       })}</div></div>}
       {(Number.isFinite(sourceCount) || Number.isFinite(citationCount) || mode) && <div className="text-slate-500">{Number.isFinite(sourceCount) ? `${sourceCount} sources` : ''}{Number.isFinite(sourceCount) && Number.isFinite(citationCount) ? ' · ' : ''}{Number.isFinite(citationCount) ? `${citationCount} citations` : ''}{mode ? ` · ${mode.replaceAll('_', ' ')}` : ''}</div>}
     </div>
@@ -121,7 +121,7 @@ function StatusBadge({ status, failed }: { status: string; failed?: boolean }) {
     return <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Done</span>
   }
   if (status === 'running' || status === 'started') {
-    return <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700">Running</span>
+    return <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700">Running</span>
   }
   return <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">{status}</span>
 }

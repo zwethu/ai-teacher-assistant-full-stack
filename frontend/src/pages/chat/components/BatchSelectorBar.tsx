@@ -53,7 +53,13 @@ export function BatchSelectorBar({
         <button
           type="button"
           onClick={handleChipClick}
-          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium border border-emerald-200/70 bg-white/70 text-slate-700 hover:bg-emerald-50/60 transition-colors"
+          /* Tinted violet glass once a space is chosen — MILA's variant for
+             selected liquid surfaces. Plain glass while nothing is selected. */
+          className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+            selectedBatch
+              ? 'maia-glass-tint text-violet-900'
+              : 'border border-violet-200/70 bg-white/70 text-slate-700 hover:bg-violet-50/60'
+          }`}
         >
           <span className="truncate max-w-[220px]">{chipLabel}</span>
           {batches.length > 0 && (
@@ -98,8 +104,8 @@ export function BatchSelectorBar({
                   onSelectBatch(batch)
                   setOpen(false)
                 }}
-                className={`w-full text-left px-4 py-2.5 text-sm hover:bg-emerald-50/60 transition-colors ${
-                  selectedBatch?.id === batch.id ? 'text-emerald-700 font-medium' : 'text-slate-700'
+                className={`w-full text-left px-4 py-2.5 text-sm hover:bg-violet-50/60 transition-colors ${
+                  selectedBatch?.id === batch.id ? 'text-violet-700 font-medium' : 'text-slate-700'
                 }`}
               >
                 <div className="truncate">{batch.batch_name}</div>

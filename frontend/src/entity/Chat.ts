@@ -29,6 +29,8 @@ export type ChatAttachmentSnapshot = {
   parse_status: AttachmentStatus
   vision_status: AttachmentStatus
   thumbnail_available: boolean
+  /** PDF page count; 0 for non-PDFs or files that would not parse. */
+  page_count?: number
   promotion_allowed: false
 }
 

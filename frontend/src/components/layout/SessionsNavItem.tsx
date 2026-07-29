@@ -5,7 +5,6 @@ import {
   Check,
   ChevronRight,
   Clock,
-  Loader2,
   MoreHorizontal,
   Pencil,
   Trash2,
@@ -13,6 +12,7 @@ import {
 } from 'lucide-react'
 import { invalidateSessionsCache, useAllSessions, type SessionItem } from '../../hooks/useAllSessions'
 import { deleteChat, updateChatTitle } from '../../services/chatService'
+import { Spinner } from '../../design-system'
 
 type Props = {
   showLabels: boolean
@@ -23,23 +23,23 @@ type Props = {
 function sessionsExpandedClass(isActive: boolean): string {
   const layout = 'gap-3 px-3 py-2.5 w-full'
   if (isActive) {
-    return `relative flex items-center ${layout} text-sm font-medium rounded-xl whitespace-nowrap group text-emerald-800 bg-gradient-to-r from-emerald-100 to-white border border-emerald-300 shadow-md -translate-y-0.5 transition-all`
+    return `relative flex items-center ${layout} text-sm font-medium rounded-xl whitespace-nowrap group text-violet-800 bg-gradient-to-r from-violet-100 to-white border border-violet-300 shadow-md -translate-y-0.5 transition-all`
   }
-  return `flex items-center ${layout} text-sm font-medium rounded-xl whitespace-nowrap group text-slate-600 hover:text-slate-900 hover:bg-gradient-to-r hover:from-white hover:via-emerald-50/60 hover:to-white border border-transparent hover:border-slate-200 hover:shadow-sm hover:-translate-y-0.5 transition-all`
+  return `flex items-center ${layout} text-sm font-medium rounded-xl whitespace-nowrap group text-slate-600 hover:text-slate-900 hover:bg-gradient-to-r hover:from-white hover:via-violet-50/60 hover:to-white border border-transparent hover:border-slate-200 hover:shadow-sm hover:-translate-y-0.5 transition-all`
 }
 
 function sessionsCollapsedClass(isActive: boolean): string {
   const layout = 'justify-center items-center p-2 w-10 h-10 mx-auto shrink-0'
   if (isActive) {
-    return `relative flex ${layout} text-sm font-medium rounded-xl group text-emerald-800 bg-emerald-100/90 border border-emerald-300 shadow-md -translate-y-0.5 transition-all`
+    return `relative flex ${layout} text-sm font-medium rounded-xl group text-violet-800 bg-violet-100/90 border border-violet-300 shadow-md -translate-y-0.5 transition-all`
   }
-  return `flex ${layout} text-sm font-medium rounded-xl group text-slate-600 hover:text-slate-900 hover:bg-gradient-to-r hover:from-white hover:via-emerald-50/60 hover:to-white border border-transparent hover:border-slate-200 hover:shadow-sm hover:-translate-y-0.5 transition-all`
+  return `flex ${layout} text-sm font-medium rounded-xl group text-slate-600 hover:text-slate-900 hover:bg-gradient-to-r hover:from-white hover:via-violet-50/60 hover:to-white border border-transparent hover:border-slate-200 hover:shadow-sm hover:-translate-y-0.5 transition-all`
 }
 
 function iconClass(isActive: boolean): string {
   return isActive
-    ? 'text-emerald-700'
-    : 'text-slate-500 group-hover:text-emerald-600'
+    ? 'text-violet-700'
+    : 'text-slate-500 group-hover:text-violet-600'
 }
 
 function SessionList({
@@ -120,7 +120,7 @@ function SessionList({
 
     return (
       <li key={`${session.batch_id}-${session.chat_id}`} className="group relative">
-        <div className={`flex items-center gap-2 ${rowPadding} hover:bg-emerald-50/60 transition-colors`}>
+        <div className={`flex items-center gap-2 ${rowPadding} hover:bg-violet-50/60 transition-colors`}>
           <div
             className="min-w-0 flex-1 cursor-pointer"
             onClick={() => {
@@ -137,7 +137,7 @@ function SessionList({
                   if (e.key === 'Enter') void commitRename(session)
                   if (e.key === 'Escape') cancelRename()
                 }}
-                className="w-full bg-transparent text-sm font-medium text-slate-800 outline-none border-b border-emerald-400"
+                className="w-full bg-transparent text-sm font-medium text-slate-800 outline-none border-b border-violet-400"
                 onClick={(e) => e.stopPropagation()}
               />
             ) : (
@@ -221,7 +221,7 @@ function SessionList({
   if (loading && items.length === 0) {
     return (
       <div className="flex items-center justify-center py-4">
-        <Loader2 className="w-4 h-4 text-emerald-600 animate-spin" />
+        <Spinner size={16} />
       </div>
     )
   }
@@ -389,7 +389,7 @@ export function SessionsNavItem({ collapsed, onNavigate }: Props) {
         <button
           type="button"
           onClick={toggleInline}
-          className="flex-shrink-0 rounded-md hover:bg-emerald-50/50 transition-colors"
+          className="flex-shrink-0 rounded-md hover:bg-violet-50/50 transition-colors"
           aria-label={inlineOpen ? 'Collapse sessions' : 'Expand sessions'}
           aria-expanded={inlineOpen}
         >

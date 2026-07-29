@@ -128,6 +128,25 @@ function enrichMessages(data: ChatMessage[], chat: Chat): ChatMessage[] {
  * re-render appended a second, empty assistant row — which rendered as a
  * detached "Completed N steps" / "Thought for Xs" block under the real answer.
  */
+/**
+ * Messages the client holds that server truth will not contain, and which a
+ * poll must therefore not delete.
+ *
+ * Two kinds qualify:
+ *  - still streaming — a retry leaves the previous run's poll alive briefly, and
+ *    the server cannot yet know about the reply arriving right now.
+ *  - cancelled — a stopped run persists nothing, so the "You stopped this
+ *    request" record exists only here. It is deliberately not `pending`
+ *    (cancelling settles it), so it has to be named explicitly.
+ */
+export function localOnlyMessages(previous: ChatMessage[], fetched: ChatMessage[]): ChatMessage[] {
+  const fetchedIds = new Set(fetched.map((item) => item.message_id))
+  return previous.filter(
+    (msg) =>
+      (msg.pending || msg.metadata?.run_cancelled === true) && !fetchedIds.has(msg.message_id),
+  )
+}
+
 export function runHasAssistantMessage(messages: ChatMessage[], runId: string): boolean {
   const pendingId = `pending-${runId}`
   return messages.some(
@@ -853,7 +872,12 @@ export function useChatPage() {
       setMessages((prev) =>
         prev.map((item) =>
           item.message_id === `pending-${runId}` || (item.pending && item.run_id === runId)
-            ? { ...item, pending: false, status: 'done' as const }
+            ? {
+                ...item,
+                pending: false,
+                status: 'done' as const,
+                metadata: { ...(item.metadata || {}), run_cancelled: true },
+              }
             : item,
         ),
       )
@@ -1388,15 +1412,8 @@ export function useChatPage() {
           ? { ...msg, status: msg.role === 'assistant' ? 'done' : msg.status, pending: false }
           : msg,
       )
-      // A poll for THIS run must not wipe a different run's in-flight message.
-      // Retry leaves the previous run's poll interval alive for a moment, and
-      // that poll returns server truth — which cannot yet contain the reply now
-      // streaming into the client. Without this the streamed text vanished
-      // mid-answer and only came back on reload.
-      const streamingElsewhere = previous.filter(
-        (msg) => msg.pending && !fetched.some((item) => item.message_id === msg.message_id),
-      )
-      return [...settled, ...streamingElsewhere]
+      // A poll for THIS run must not wipe a message the server cannot know about.
+      return [...settled, ...localOnlyMessages(previous, fetched)]
     }
 
     const latestAssistant = fetchedAssistant.at(-1)

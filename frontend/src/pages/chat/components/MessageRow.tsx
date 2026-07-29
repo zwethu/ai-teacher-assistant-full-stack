@@ -116,8 +116,10 @@ export function MessageRow({
   const isPending = Boolean(msg.pending || msg.status === 'pending')
   const isFailed = msg.status === 'failed' || run?.status === 'failed'
   // The lecturer pressed Stop. Whatever streamed first is discarded server-side,
-  // so this replaces the body rather than annotating it.
-  const isCancelled = run?.status === 'cancelled'
+  // so this replaces the body rather than annotating it. The metadata flag is
+  // the durable half: run state can be dropped (resubscribe, remount) while the
+  // message itself still needs to say it was stopped.
+  const isCancelled = run?.status === 'cancelled' || msg.metadata?.run_cancelled === true
   // Run created but held until its attachments finish processing.
   const isAwaitingAttachments = run?.status === 'awaiting_attachments'
   const shouldUseArtifactCard = isGeneratedArtifactPreviewMessage(msg, isPending)

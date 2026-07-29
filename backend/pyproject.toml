@@ -16,6 +16,18 @@ dependencies = [
     "apscheduler",
     "httpx",
     "pydantic",
+    "google-cloud-storage",
+    "google-cloud-discoveryengine",
+    "google-cloud-aiplatform[adk,agent-engines]",
+    "python-multipart",
+    "pypdf",
+    "python-docx",
+    "python-pptx",
+    "pillow",
+    "pillow-heif",
+    "google-genai",
+    "google-cloud-documentai",
+    "google-cloud-tasks",
 ]
 
 [build-system]

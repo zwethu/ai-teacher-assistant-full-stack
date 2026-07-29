@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 .env
 serviceAccountKey.json
+gcp-service-account.json
 *.egg-info/
 dist/
 build/

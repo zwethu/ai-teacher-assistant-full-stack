@@ -1,56 +1,217 @@
-import {
-  addDoc,
-  collection,
-  getDocs,
-  orderBy,
-  query,
-  serverTimestamp,
-} from 'firebase/firestore'
-import { db } from '../lib/firebase'
-import type { ChatMessage } from '../entity/Chat'
+import type { Chat, ChatAttachment, ChatAttachmentListItem, ChatAttachmentStatusUpdate, ChatMessage } from '../entity/Chat'
+import api from '../lib/api'
+import type { LessonPlanExportResult } from './artifactService'
+import type { AgentRunEvent, AgentRunStatus, AgentRunStep } from './agentRunStream'
 
-const CHATS_COLLECTION = 'chats'
+export type ChatRunRecord = {
+  run_id: string
+  status: AgentRunStatus
+  error?: string
+  timeline_snapshot?: {
+    events?: AgentRunEvent[]
+    steps?: Record<string, AgentRunStep>
+    status?: AgentRunStatus
+    captured_at?: number
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Chat CRUD
+// ---------------------------------------------------------------------------
 
 export async function createChat(
-  uid: string,
   batchId: string,
-  batchLabel: string,
-): Promise<string> {
-  const ref = collection(db, CHATS_COLLECTION)
-  const docRef = await addDoc(ref, {
-    uid,
-    batchId,
-    batchLabel,
-    title: batchLabel,
-    createdAt: serverTimestamp(),
+  title: string = 'New Chat',
+  options?: { type?: 'chat' | 'workflow'; workflowType?: string; hidden?: boolean },
+): Promise<Chat> {
+  const res = await api.post<Chat>(`/batches/${batchId}/chats`, {
+    title,
+    type: options?.type,
+    workflow_type: options?.workflowType,
+    hidden: options?.hidden,
   })
-  return docRef.id
+  return res.data
 }
 
-export async function getMessages(chatId: string): Promise<ChatMessage[]> {
-  const ref = collection(db, CHATS_COLLECTION, chatId, 'messages')
-  const q = query(ref, orderBy('createdAt', 'asc'))
-  const snap = await getDocs(q)
-  return snap.docs.map((d) => {
-    const data = d.data()
-    return {
-      id: d.id,
-      role: data.role as 'user' | 'assistant',
-      content: data.content ?? '',
-      createdAt: data.createdAt ? data.createdAt.toDate?.() ?? null : null,
-    }
-  })
+export async function listChats(batchId: string): Promise<Chat[]> {
+  const res = await api.get<Chat[]>(`/batches/${batchId}/chats`)
+  return res.data
 }
 
-export async function addMessage(
+export async function getChat(batchId: string, chatId: string): Promise<Chat> {
+  const res = await api.get<Chat>(`/batches/${batchId}/chats/${chatId}`)
+  return res.data
+}
+
+export async function deleteChat(batchId: string, chatId: string): Promise<void> {
+  await api.delete(`/batches/${batchId}/chats/${chatId}`)
+}
+
+export async function updateChatTitle(
+  batchId: string,
   chatId: string,
-  role: 'user' | 'assistant',
-  content: string,
+  title: string,
 ): Promise<void> {
-  const ref = collection(db, CHATS_COLLECTION, chatId, 'messages')
-  await addDoc(ref, {
-    role,
-    content,
-    createdAt: serverTimestamp(),
+  await api.patch(`/batches/${batchId}/chats/${chatId}/title`, { title })
+}
+
+// ---------------------------------------------------------------------------
+// Messages
+// ---------------------------------------------------------------------------
+
+export async function listMessages(batchId: string, chatId: string): Promise<ChatMessage[]> {
+  const res = await api.get<ChatMessage[]>(`/batches/${batchId}/chats/${chatId}/messages`)
+  return res.data
+}
+
+export async function getChatRun(
+  batchId: string,
+  chatId: string,
+  runId: string,
+): Promise<ChatRunRecord> {
+  const res = await api.get<ChatRunRecord>(`/batches/${batchId}/chats/${chatId}/runs/${runId}`)
+  return res.data
+}
+
+export async function sendMessage(
+  batchId: string,
+  chatId: string,
+  content: string,
+  connectors: Record<string, boolean> = {},
+  attachmentIds: string[] = [],
+): Promise<{
+  user_message: ChatMessage
+  run_id: string
+  rtdb_run_path: string
+  status: 'running' | 'done' | 'failed'
+}> {
+  const res = await api.post<{
+    user_message: ChatMessage
+    run_id: string
+    rtdb_run_path: string
+    status: 'running' | 'done' | 'failed'
+  }>(`/batches/${batchId}/chats/${chatId}/messages`, {
+    content, connectors, attachment_ids: attachmentIds,
   })
+  return res.data
+}
+
+export async function uploadChatAttachment(
+  batchId: string, chatId: string, file: File,
+): Promise<ChatAttachment> {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('file_title', file.name)
+  const res = await api.post<ChatAttachment>(
+    `/batches/${batchId}/chats/${chatId}/attachments`, form,
+  )
+  return res.data
+}
+
+export async function getChatAttachmentContent(
+  batchId: string, chatId: string, attachmentId: string, thumbnail = false,
+): Promise<Blob> {
+  const res = await api.get(
+    `/batches/${batchId}/chats/${chatId}/attachments/${attachmentId}/content`,
+    { params: { thumbnail }, responseType: 'blob' },
+  )
+  return res.data as Blob
+}
+
+export async function deleteChatAttachment(batchId: string, chatId: string, attachmentId: string): Promise<void> {
+  await api.delete(`/batches/${batchId}/chats/${chatId}/attachments/${attachmentId}`)
+}
+
+export async function listChatAttachments(batchId: string, chatId: string, limit = 50): Promise<ChatAttachmentListItem[]> {
+  const res = await api.get<ChatAttachmentListItem[]>(`/batches/${batchId}/chats/${chatId}/attachments`, { params: { limit } })
+  return res.data
+}
+
+export async function getChatAttachmentRagStatus(batchId: string, chatId: string, attachmentId: string): Promise<ChatAttachmentStatusUpdate> {
+  const res = await api.get<ChatAttachmentStatusUpdate>(`/batches/${batchId}/chats/${chatId}/attachments/${attachmentId}/rag-status`)
+  return res.data
+}
+
+export async function generateDocsFromPendingArtifact(
+  batchId: string,
+  chatId: string,
+  runId: string,
+): Promise<LessonPlanExportResult & { pending_artifact_id?: string; artifact_type?: string }> {
+  const res = await api.post<LessonPlanExportResult & { pending_artifact_id?: string; artifact_type?: string }>(
+    `/batches/${batchId}/chats/${chatId}/runs/${runId}/pending-artifact/generate-docs`,
+  )
+  return res.data
+}
+
+export async function exportPendingQuizToGoogleForms(
+  batchId: string,
+  chatId: string,
+  runId: string,
+): Promise<LessonPlanExportResult & { artifact_type?: string }> {
+  const res = await api.post<LessonPlanExportResult & { artifact_type?: string }>(
+    `/batches/${batchId}/chats/${chatId}/runs/${runId}/pending-artifact/export-google-form`,
+  )
+  return res.data
+}
+
+export interface SendPendingEmailResult {
+  success?: boolean
+  sent_count: number
+  failed_count: number
+  recipients: string[]
+  failed: { to: string; error: string }[]
+}
+
+export async function sendPendingEmail(
+  batchId: string,
+  chatId: string,
+  runId: string,
+): Promise<SendPendingEmailResult> {
+  const res = await api.post<SendPendingEmailResult>(
+    `/batches/${batchId}/chats/${chatId}/runs/${runId}/pending-artifact/send-email`,
+  )
+  return res.data
+}
+
+export interface SchedulePendingEmailResult {
+  success?: boolean
+  email_id: string
+  recipient_count: number
+  send_at: string
+}
+
+export async function schedulePendingEmail(
+  batchId: string,
+  chatId: string,
+  runId: string,
+  sendAtIso: string,
+): Promise<SchedulePendingEmailResult> {
+  const res = await api.post<SchedulePendingEmailResult>(
+    `/batches/${batchId}/chats/${chatId}/runs/${runId}/pending-artifact/schedule-email`,
+    { send_at: sendAtIso },
+  )
+  return res.data
+}
+
+export interface UpdatePendingEmailResult {
+  success: boolean
+  subject: string
+  body: string
+  recipients: string[]
+  recipient_count: number
+  preview_markdown: string
+}
+
+/** Edit a staged email before sending. Only valid until it is sent or scheduled. */
+export async function updatePendingEmail(
+  batchId: string,
+  chatId: string,
+  runId: string,
+  payload: { subject: string; body: string; recipients?: string[] },
+): Promise<UpdatePendingEmailResult> {
+  const res = await api.patch<UpdatePendingEmailResult>(
+    `/batches/${batchId}/chats/${chatId}/runs/${runId}/pending-artifact/email`,
+    payload,
+  )
+  return res.data
 }

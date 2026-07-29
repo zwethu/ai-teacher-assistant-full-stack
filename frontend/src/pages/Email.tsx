@@ -1,6 +1,8 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useNavigate } from 'react-router-dom'
 import type { ToastMessage } from '../types'
 import type { Email as EmailRecord } from '../entity/Email'
+import type { Batch, BatchStudent } from '../entity/Batch'
 import Toast from '../components/ui/Toast'
 import axios from 'axios'
 import { getErrorMessage } from '../utils/errors'
@@ -9,10 +11,15 @@ import { useSearchParams } from 'react-router-dom'
 import {
   AlertTriangle,
   CalendarClock,
+  Check,
+  ChevronRight,
+  ExternalLink,
   Loader2,
   Mail,
+  Plus,
   Send,
   Trash2,
+  Users,
   X,
 } from 'lucide-react'
 import {
@@ -24,6 +31,7 @@ import {
   orderBy,
   query,
   serverTimestamp,
+  Timestamp,
   where,
 } from 'firebase/firestore'
 import { db } from '../lib/firebase'
@@ -34,13 +42,16 @@ import {
 } from '../services/authService'
 import { fromFirestore, toFirestore } from '../entity/Email'
 import { sendEmailNow } from '../services/emailService'
+import { listBatches, listBatchStudents } from '../services/batchService'
 import { increaseStress } from '../services/wellnessService'
 import { formatDateTime, timeAgo } from '../utils/formatDate'
 
 const NOTES_PREVIEW_LEN = 120
 
+/** Persisted so the batch survives the Google OAuth full-page redirect. */
+const SELECTED_BATCH_KEY = 'email:selectedBatchId'
+
 const INITIAL_FORM = {
-  to: '',
   subject: '',
   body: '',
   sendAt: '',
@@ -66,8 +77,14 @@ function statusBadgeClass(status: string) {
   return 'bg-amber-50 text-amber-800 border-amber-200'
 }
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+function isValidEmail(value: string) {
+  return EMAIL_RE.test(value.trim())
+}
+
 export default function Email() {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
 
   const [emails, setEmails] = useState<EmailRecord[]>([])
@@ -75,11 +92,27 @@ export default function Email() {
   const [hasGoogleScopes, setHasGoogleScopes] = useState(false)
   const [permissionsLoading, setPermissionsLoading] = useState(true)
 
+  // Batch ("space") selection gates the whole page.
+  const [batches, setBatches] = useState<Batch[]>([])
+  const [batchesLoading, setBatchesLoading] = useState(true)
+  const [selectedBatchId, setSelectedBatchId] = useState<string | null>(() =>
+    sessionStorage.getItem(SELECTED_BATCH_KEY),
+  )
+  const [students, setStudents] = useState<BatchStudent[]>([])
+  const [studentsLoading, setStudentsLoading] = useState(false)
+
   const [modalMode, setModalMode] = useState<'send' | 'schedule' | null>(null)
   const [form, setForm] = useState(INITIAL_FORM)
+  const [recipients, setRecipients] = useState<string[]>([])
+  const [recipientDraft, setRecipientDraft] = useState('')
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState('')
   const [toast, setToast] = useState<ToastMessage | null>(null)
+
+  const selectedBatch = useMemo(
+    () => batches.find((b) => b.id === selectedBatchId) ?? null,
+    [batches, selectedBatchId],
+  )
 
   function showToast(type: ToastMessage['type'], message: string) {
     setToast({ type, message })
@@ -102,6 +135,52 @@ export default function Email() {
   useEffect(() => {
     refreshPermissions()
   }, [])
+
+  // Load batches; drop a stale persisted selection that no longer exists.
+  useEffect(() => {
+    if (!user) return undefined
+    let cancelled = false
+    setBatchesLoading(true)
+    listBatches()
+      .then((data) => {
+        if (cancelled) return
+        setBatches(data)
+        setSelectedBatchId((prev) =>
+          prev && data.some((b) => b.id === prev) ? prev : null,
+        )
+      })
+      .catch(console.error)
+      .finally(() => {
+        if (!cancelled) setBatchesLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [user])
+
+  // Load the selected batch's students for the recipient picker.
+  useEffect(() => {
+    if (!selectedBatch) {
+      setStudents([])
+      return undefined
+    }
+    let cancelled = false
+    setStudentsLoading(true)
+    listBatchStudents(selectedBatch.id)
+      .then((data) => {
+        if (!cancelled) setStudents(data)
+      })
+      .catch((err) => {
+        console.error(err)
+        if (!cancelled) setStudents([])
+      })
+      .finally(() => {
+        if (!cancelled) setStudentsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [selectedBatch])
 
   useEffect(() => {
     const connected = searchParams.get('connected')
@@ -149,18 +228,29 @@ export default function Email() {
     return unsubscribe
   }, [user?.uid])
 
+  function handleSelectBatch(batch: Batch) {
+    setSelectedBatchId(batch.id)
+    sessionStorage.setItem(SELECTED_BATCH_KEY, batch.id)
+  }
+
+  function handleChangeBatch() {
+    setSelectedBatchId(null)
+    sessionStorage.removeItem(SELECTED_BATCH_KEY)
+  }
+
   function openSendModal() {
     setModalMode('send')
     setForm({ ...INITIAL_FORM })
+    setRecipients([])
+    setRecipientDraft('')
     setFormError('')
   }
 
   function openScheduleModal() {
     setModalMode('schedule')
-    setForm({
-      ...INITIAL_FORM,
-      sendAt: minScheduleLocal(),
-    })
+    setForm({ ...INITIAL_FORM, sendAt: minScheduleLocal() })
+    setRecipients([])
+    setRecipientDraft('')
     setFormError('')
   }
 
@@ -168,6 +258,49 @@ export default function Email() {
     if (saving) return
     setModalMode(null)
     setFormError('')
+  }
+
+  function addRecipient(email: string): boolean {
+    const value = email.trim()
+    if (!value) return false
+    if (!isValidEmail(value)) {
+      setFormError(`"${value}" is not a valid email address.`)
+      return false
+    }
+    setRecipients((prev) =>
+      prev.some((r) => r.toLowerCase() === value.toLowerCase()) ? prev : [...prev, value],
+    )
+    setFormError('')
+    return true
+  }
+
+  function removeRecipient(email: string) {
+    setRecipients((prev) => prev.filter((r) => r !== email))
+  }
+
+  function addAllStudents() {
+    const emails = students.map((s) => s.email).filter(isValidEmail)
+    setRecipients((prev) => {
+      const seen = new Set(prev.map((r) => r.toLowerCase()))
+      const next = [...prev]
+      for (const e of emails) {
+        if (!seen.has(e.toLowerCase())) {
+          seen.add(e.toLowerCase())
+          next.push(e)
+        }
+      }
+      return next
+    })
+    setFormError('')
+  }
+
+  function handleRecipientKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault()
+      if (addRecipient(recipientDraft)) setRecipientDraft('')
+    } else if (e.key === 'Backspace' && !recipientDraft && recipients.length > 0) {
+      removeRecipient(recipients[recipients.length - 1])
+    }
   }
 
   async function handleConnectGoogle() {
@@ -180,16 +313,34 @@ export default function Email() {
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    if (!user) return
+    if (!user || !selectedBatch) return
 
+    // Fold any half-typed recipient still sitting in the input into the list.
+    const pending = recipientDraft.trim()
+    let finalRecipients = recipients
+    if (pending) {
+      if (!isValidEmail(pending)) {
+        setFormError(`"${pending}" is not a valid email address.`)
+        return
+      }
+      if (!finalRecipients.some((r) => r.toLowerCase() === pending.toLowerCase())) {
+        finalRecipients = [...finalRecipients, pending]
+      }
+    }
+
+    if (finalRecipients.length === 0) {
+      setFormError('Add at least one recipient.')
+      return
+    }
+
+    setRecipients(finalRecipients)
+    setRecipientDraft('')
     setSaving(true)
     setFormError('')
 
-    const payload = {
-      to: form.to.trim(),
-      subject: form.subject.trim(),
-      body: form.body.trim(),
-    }
+    const subject = form.subject.trim()
+    const body = form.body.trim()
+    const batchMeta = { batchId: selectedBatch.id, batchName: selectedBatch.batch_name }
 
     try {
       if (modalMode === 'send') {
@@ -199,23 +350,47 @@ export default function Email() {
           return
         }
 
-        await sendEmailNow(payload)
+        // Send one message per recipient so the class roster is never exposed
+        // in the To header (mirrors the backend's chat-email dispatch).
+        const sent: string[] = []
+        const failed: string[] = []
+        for (const to of finalRecipients) {
+          try {
+            await sendEmailNow({ to, subject, body })
+            sent.push(to)
+          } catch (err) {
+            console.error('Failed to send to', to, err)
+            failed.push(to)
+          }
+        }
+
+        if (sent.length === 0) {
+          setFormError('Failed to send email. Please try again.')
+          return
+        }
 
         await addDoc(
           collection(db, 'emails'),
           toFirestore({
             uid: user.uid,
-            to: payload.to,
-            subject: payload.subject,
-            body: payload.body,
+            to: sent.join(', '),
+            recipients: sent,
+            subject,
+            body,
             status: 'sent',
             sentAt: serverTimestamp(),
             createdAt: serverTimestamp(),
+            ...batchMeta,
           }),
         )
 
         closeModal()
-        showToast('success', 'Email sent successfully.')
+        showToast(
+          'success',
+          failed.length === 0
+            ? `Email sent to ${sent.length} recipient${sent.length > 1 ? 's' : ''}.`
+            : `Sent to ${sent.length}, but ${failed.length} failed. Check the addresses and retry.`,
+        )
         increaseStress(user.uid, 3)
       } else if (modalMode === 'schedule') {
         if (!form.sendAt) {
@@ -228,21 +403,29 @@ export default function Email() {
           return
         }
 
-        await addDoc(
-          collection(db, 'emails'),
-          toFirestore({
+        await addDoc(collection(db, 'emails'), {
+          ...toFirestore({
             uid: user.uid,
-            to: payload.to,
-            subject: payload.subject,
-            body: payload.body,
+            to: finalRecipients.join(', '),
+            // The send cron sends one message per entry in `recipients`.
+            recipients: finalRecipients,
+            subject,
+            body,
             status: 'pending',
             sendAt: sendDate.toISOString(),
             createdAt: serverTimestamp(),
+            ...batchMeta,
           }),
-        )
+          // The send cron (check_and_send_emails) filters on send_at as a Firestore
+          // Timestamp; the camelCase sendAt above is only for the card's display.
+          send_at: Timestamp.fromDate(sendDate),
+        })
 
         closeModal()
-        showToast('success', 'Email scheduled successfully')
+        showToast(
+          'success',
+          `Email scheduled for ${finalRecipients.length} recipient${finalRecipients.length > 1 ? 's' : ''}.`,
+        )
         increaseStress(user.uid, 3)
       }
     } catch (err) {
@@ -282,6 +465,10 @@ export default function Email() {
   }
 
   const showGoogleBanner = !permissionsLoading && !hasGoogleScopes
+  const recipientKeys = useMemo(
+    () => new Set(recipients.map((r) => r.toLowerCase())),
+    [recipients],
+  )
 
   return (
     <div>
@@ -294,156 +481,268 @@ export default function Email() {
             Emails
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Send messages now or schedule them for later.
+            {selectedBatch
+              ? 'Send messages now or schedule them for later.'
+              : 'Choose a batch to start emailing your students.'}
           </p>
         </div>
-        <div className="flex flex-wrap gap-2 shrink-0">
-          <button
-            type="button"
-            onClick={openScheduleModal}
-            className="inline-flex items-center justify-center px-4 py-2 border border-emerald-200 text-sm font-medium rounded-md text-emerald-700 bg-emerald-50 hover:bg-emerald-100 shadow-sm transition-colors"
-          >
-            <CalendarClock className="w-4 h-4 mr-2" />
-            Schedule Email
-          </button>
-          <button
-            type="button"
-            onClick={openSendModal}
-            className="inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500"
-          >
-            <Send className="w-4 h-4 mr-2" />
-            Send Now
-          </button>
-        </div>
-      </div>
-
-      {showGoogleBanner && (
-        <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3">
-          <div className="flex items-start gap-3 flex-1">
-            <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
-            <p className="text-sm text-amber-900">
-              Connect your Google account to send emails
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={handleConnectGoogle}
-            className="inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm shrink-0"
-          >
-            Connect Google
-          </button>
-        </div>
-      )}
-
-      <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
-        {listLoading ? (
-          <div className="flex flex-col items-center justify-center py-20 gap-3">
-            <Loader2 className="w-8 h-8 text-emerald-600 animate-spin" />
-            <p className="text-sm text-slate-500">Loading emails…</p>
-          </div>
-        ) : emails.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center px-6">
-            <div className="h-16 w-16 bg-slate-50 rounded-full flex items-center justify-center mb-4">
-              <Mail className="w-8 h-8 text-slate-300" />
-            </div>
-            <h3 className="text-sm font-medium text-slate-900">
-              No emails yet. Send your first email!
-            </h3>
-            <p className="mt-1 text-sm text-slate-500 mb-6 max-w-sm">
-              Deliver instantly with Gmail or schedule a message for later.
-            </p>
-            <div className="flex flex-wrap gap-2 justify-center">
-              <button
-                type="button"
-                onClick={openSendModal}
-                className="inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm"
-              >
-                <Send className="w-4 h-4 mr-2" />
-                Send Now
-              </button>
-              <button
-                type="button"
-                onClick={openScheduleModal}
-                className="inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-md border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100"
-              >
-                <CalendarClock className="w-4 h-4 mr-2" />
-                Schedule Email
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-            {emails.map((item) => {
-              const isPending = item.status === 'pending'
-              return (
-                <article
-                  key={item.id}
-                  className="rounded-xl border border-slate-100 bg-white p-5 shadow-sm hover:shadow-md hover:border-emerald-200/80 transition-all"
-                >
-                  <div className="flex items-start justify-between gap-2 mb-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-xs text-slate-500 truncate">To</p>
-                      <p className="text-sm font-semibold text-slate-900 truncate">
-                        {item.to || '—'}
-                      </p>
-                    </div>
-                    <span
-                      className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium border shrink-0 ${statusBadgeClass(item.status)}`}
-                    >
-                      {item.status === 'sent' ? 'Sent' : 'Pending'}
-                    </span>
-                  </div>
-
-                  <h3 className="font-semibold text-slate-800 truncate mb-2">
-                    {item.subject || 'No subject'}
-                  </h3>
-
-                  <p className="text-sm text-slate-600 line-clamp-3 mb-4 leading-relaxed">
-                    {truncateText(item.body)}
-                  </p>
-
-                  <dl className="text-xs text-slate-500 space-y-1 border-t border-slate-100 pt-3">
-                    {isPending ? (
-                      <div className="flex justify-between gap-2">
-                        <dt>Scheduled for</dt>
-                        <dd className="text-slate-700 font-medium text-right">
-                          {formatDateTime(item.sendAt)}
-                        </dd>
-                      </div>
-                    ) : (
-                      <div className="flex justify-between gap-2">
-                        <dt>Sent at</dt>
-                        <dd className="text-slate-700 font-medium text-right">
-                          {formatDateTime(item.sentAt)}
-                        </dd>
-                      </div>
-                    )}
-                    <div className="flex justify-between gap-2">
-                      <dt>Created</dt>
-                      <dd className="text-slate-700 font-medium text-right">
-                        {timeAgo(item.createdAt)}
-                      </dd>
-                    </div>
-                  </dl>
-
-                  {isPending && (
-                    <button
-                      type="button"
-                      onClick={() => handleCancelScheduled(item)}
-                      className="mt-4 w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 border border-red-200 text-xs font-medium rounded-md text-red-700 bg-white hover:bg-red-50 transition-colors"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      Cancel
-                    </button>
-                  )}
-                </article>
-              )
-            })}
+        {selectedBatch && (
+          <div className="flex flex-wrap gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={openScheduleModal}
+              className="inline-flex items-center justify-center px-4 py-2 border border-emerald-200 text-sm font-medium rounded-md text-emerald-700 bg-emerald-50 hover:bg-emerald-100 shadow-sm transition-colors"
+            >
+              <CalendarClock className="w-4 h-4 mr-2" />
+              Schedule Email
+            </button>
+            <button
+              type="button"
+              onClick={openSendModal}
+              className="inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500"
+            >
+              <Send className="w-4 h-4 mr-2" />
+              Send Now
+            </button>
           </div>
         )}
       </div>
 
-      {modalMode && (
+      {!selectedBatch ? (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+          <div className="px-6 py-10">
+            <div className="text-center mb-8">
+              <div className="h-14 w-14 mx-auto bg-emerald-50 rounded-2xl flex items-center justify-center mb-4">
+                <Users className="w-7 h-7 text-emerald-600" />
+              </div>
+              <h2 className="text-lg font-semibold text-slate-800">
+                Which batch are you emailing?
+              </h2>
+              <p className="text-sm text-slate-500 mt-1 max-w-sm mx-auto">
+                Pick a batch first. You can then add its students as recipients in
+                one click.
+              </p>
+            </div>
+
+            {batchesLoading ? (
+              <div className="flex flex-col items-center justify-center py-10 gap-3">
+                <Loader2 className="w-7 h-7 text-emerald-600 animate-spin" />
+                <p className="text-sm text-slate-500">Loading your batches…</p>
+              </div>
+            ) : batches.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-8 text-center">
+                <p className="text-sm text-slate-500 mb-5 max-w-sm">
+                  You don't have any batches yet. Create one to add students and
+                  start emailing.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => navigate('/batches')}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  Go to Batches
+                </button>
+              </div>
+            ) : (
+              <div className="max-w-md mx-auto space-y-2">
+                {batches.map((batch) => (
+                  <button
+                    key={batch.id}
+                    type="button"
+                    onClick={() => handleSelectBatch(batch)}
+                    className="w-full flex items-center gap-3 p-4 rounded-xl border border-slate-100 hover:border-emerald-200 hover:bg-emerald-50/40 transition-all text-left"
+                  >
+                    <div className="h-10 w-10 rounded-lg bg-slate-50 flex items-center justify-center flex-shrink-0">
+                      <Users className="w-5 h-5 text-emerald-600" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-semibold text-slate-800 truncate">
+                        {batch.batch_name}
+                      </div>
+                      <div className="text-xs text-slate-500 truncate">
+                        {batch.course_name}
+                        {batch.academic_year ? ` · ${batch.academic_year}` : ''}
+                        {` · ${batch.student_count} student${batch.student_count === 1 ? '' : 's'}`}
+                      </div>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-emerald-100 bg-emerald-50/60 px-4 py-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="h-9 w-9 rounded-lg bg-white border border-emerald-100 flex items-center justify-center flex-shrink-0">
+                <Users className="w-4.5 h-4.5 text-emerald-600" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs text-slate-500">Emailing batch</p>
+                <p className="text-sm font-semibold text-slate-800 truncate">
+                  {selectedBatch.batch_name}
+                  <span className="font-normal text-slate-400">
+                    {' · '}
+                    {selectedBatch.course_name}
+                    {` · ${selectedBatch.student_count} student${selectedBatch.student_count === 1 ? '' : 's'}`}
+                  </span>
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleChangeBatch}
+              className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md border border-emerald-200 text-emerald-700 bg-white hover:bg-emerald-50 shrink-0 self-start sm:self-auto"
+            >
+              Change batch
+            </button>
+          </div>
+
+          {showGoogleBanner && (
+            <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3">
+              <div className="flex items-start gap-3 flex-1">
+                <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                <p className="text-sm text-amber-900">
+                  Connect your Google account to send emails
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleConnectGoogle}
+                className="inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm shrink-0"
+              >
+                Connect Google
+              </button>
+            </div>
+          )}
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+            {listLoading ? (
+              <div className="flex flex-col items-center justify-center py-20 gap-3">
+                <Loader2 className="w-8 h-8 text-emerald-600 animate-spin" />
+                <p className="text-sm text-slate-500">Loading emails…</p>
+              </div>
+            ) : emails.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 text-center px-6">
+                <div className="h-16 w-16 bg-slate-50 rounded-full flex items-center justify-center mb-4">
+                  <Mail className="w-8 h-8 text-slate-300" />
+                </div>
+                <h3 className="text-sm font-medium text-slate-900">
+                  No emails yet. Send your first email!
+                </h3>
+                <p className="mt-1 text-sm text-slate-500 mb-6 max-w-sm">
+                  Deliver instantly with Gmail or schedule a message for later.
+                </p>
+                <div className="flex flex-wrap gap-2 justify-center">
+                  <button
+                    type="button"
+                    onClick={openSendModal}
+                    className="inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm"
+                  >
+                    <Send className="w-4 h-4 mr-2" />
+                    Send Now
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openScheduleModal}
+                    className="inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-md border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100"
+                  >
+                    <CalendarClock className="w-4 h-4 mr-2" />
+                    Schedule Email
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                {emails.map((item) => {
+                  const isPending = item.status === 'pending'
+                  const recipientCount = item.recipients?.length ?? 0
+                  return (
+                    <article
+                      key={item.id}
+                      className="rounded-xl border border-slate-100 bg-white p-5 shadow-sm hover:shadow-md hover:border-emerald-200/80 transition-all"
+                    >
+                      <div className="flex items-start justify-between gap-2 mb-3">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs text-slate-500 truncate">To</p>
+                          <p className="text-sm font-semibold text-slate-900 truncate">
+                            {item.to || '—'}
+                          </p>
+                          {recipientCount > 1 && (
+                            <p className="text-xs text-slate-400">
+                              {recipientCount} recipients
+                            </p>
+                          )}
+                        </div>
+                        <span
+                          className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium border shrink-0 ${statusBadgeClass(item.status)}`}
+                        >
+                          {item.status === 'sent' ? 'Sent' : 'Pending'}
+                        </span>
+                      </div>
+
+                      {item.batchName && (
+                        <span className="inline-flex items-center gap-1 mb-2 px-2 py-0.5 rounded-full text-xs font-medium bg-slate-50 text-slate-600 border border-slate-100">
+                          <Users className="w-3 h-3" />
+                          {item.batchName}
+                        </span>
+                      )}
+
+                      <h3 className="font-semibold text-slate-800 truncate mb-2">
+                        {item.subject || 'No subject'}
+                      </h3>
+
+                      <p className="text-sm text-slate-600 line-clamp-3 mb-4 leading-relaxed">
+                        {truncateText(item.body)}
+                      </p>
+
+                      <dl className="text-xs text-slate-500 space-y-1 border-t border-slate-100 pt-3">
+                        {isPending ? (
+                          <div className="flex justify-between gap-2">
+                            <dt>Scheduled for</dt>
+                            <dd className="text-slate-700 font-medium text-right">
+                              {formatDateTime(item.sendAt)}
+                            </dd>
+                          </div>
+                        ) : (
+                          <div className="flex justify-between gap-2">
+                            <dt>Sent at</dt>
+                            <dd className="text-slate-700 font-medium text-right">
+                              {formatDateTime(item.sentAt)}
+                            </dd>
+                          </div>
+                        )}
+                        <div className="flex justify-between gap-2">
+                          <dt>Created</dt>
+                          <dd className="text-slate-700 font-medium text-right">
+                            {timeAgo(item.createdAt)}
+                          </dd>
+                        </div>
+                      </dl>
+
+                      {isPending && (
+                        <button
+                          type="button"
+                          onClick={() => handleCancelScheduled(item)}
+                          className="mt-4 w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 border border-red-200 text-xs font-medium rounded-md text-red-700 bg-white hover:bg-red-50 transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          Cancel
+                        </button>
+                      )}
+                    </article>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {modalMode && selectedBatch && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div
             className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
@@ -458,9 +757,14 @@ export default function Email() {
                   : 'bg-slate-50 border-slate-200'
               }`}
             >
-              <h3 className="text-lg font-semibold text-slate-800">
-                {modalMode === 'send' ? 'Send Email Now' : 'Schedule Email'}
-              </h3>
+              <div className="min-w-0">
+                <h3 className="text-lg font-semibold text-slate-800">
+                  {modalMode === 'send' ? 'Send Email Now' : 'Schedule Email'}
+                </h3>
+                <p className="text-xs text-slate-500 truncate">
+                  {selectedBatch.batch_name}
+                </p>
+              </div>
               <button
                 type="button"
                 onClick={closeModal}
@@ -475,18 +779,101 @@ export default function Email() {
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-                  To
+                  Recipients
                 </label>
-                <input
-                  type="email"
-                  required
-                  value={form.to}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, to: e.target.value }))
-                  }
-                  placeholder="student@example.com"
-                  className="block w-full rounded-md border border-slate-300 shadow-sm py-2.5 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500"
-                />
+                <div className="flex flex-wrap gap-1.5 rounded-md border border-slate-300 px-2 py-2 focus-within:border-emerald-500 focus-within:ring-1 focus-within:ring-emerald-500">
+                  {recipients.map((r) => (
+                    <span
+                      key={r}
+                      className="inline-flex items-center gap-1 rounded-full bg-emerald-50 border border-emerald-200 pl-2.5 pr-1 py-0.5 text-xs font-medium text-emerald-700"
+                    >
+                      {r}
+                      <button
+                        type="button"
+                        onClick={() => removeRecipient(r)}
+                        className="p-0.5 rounded-full hover:bg-emerald-100 text-emerald-500 hover:text-emerald-700"
+                        aria-label={`Remove ${r}`}
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  ))}
+                  <input
+                    type="text"
+                    inputMode="email"
+                    value={recipientDraft}
+                    onChange={(e) => setRecipientDraft(e.target.value)}
+                    onKeyDown={handleRecipientKeyDown}
+                    onBlur={() => {
+                      if (recipientDraft.trim() && addRecipient(recipientDraft)) {
+                        setRecipientDraft('')
+                      }
+                    }}
+                    placeholder={
+                      recipients.length ? 'Add another…' : 'student@example.com'
+                    }
+                    className="flex-1 min-w-[140px] border-0 p-1 text-sm focus:ring-0 focus:outline-none"
+                  />
+                </div>
+                <p className="text-xs text-slate-400 mt-1">
+                  Press Enter or comma to add. Each recipient gets their own copy.
+                </p>
+
+                {studentsLoading ? (
+                  <p className="text-xs text-slate-400 mt-2 flex items-center gap-1.5">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Loading batch students…
+                  </p>
+                ) : students.length > 0 ? (
+                  <div className="mt-2 rounded-md border border-slate-100 bg-slate-50/60">
+                    <div className="flex items-center justify-between px-3 py-1.5 border-b border-slate-100">
+                      <p className="text-xs font-medium text-slate-500">
+                        Batch students ({students.length})
+                      </p>
+                      <button
+                        type="button"
+                        onClick={addAllStudents}
+                        className="text-xs font-semibold text-emerald-700 hover:text-emerald-800"
+                      >
+                        Add all
+                      </button>
+                    </div>
+                    <div className="max-h-32 overflow-y-auto divide-y divide-slate-100">
+                      {students.map((s) => {
+                        const added = recipientKeys.has(s.email.toLowerCase())
+                        return (
+                          <button
+                            key={s.id}
+                            type="button"
+                            disabled={added}
+                            onClick={() => addRecipient(s.email)}
+                            className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left hover:bg-white disabled:cursor-default"
+                          >
+                            <div className="min-w-0">
+                              <div className="text-xs font-medium text-slate-700 truncate">
+                                {s.name || s.email}
+                              </div>
+                              {s.name && (
+                                <div className="text-[11px] text-slate-400 truncate">
+                                  {s.email}
+                                </div>
+                              )}
+                            </div>
+                            {added ? (
+                              <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                            ) : (
+                              <Plus className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                            )}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-400 mt-2">
+                    This batch has no students yet — add recipients manually above.
+                  </p>
+                )}
               </div>
 
               <div>

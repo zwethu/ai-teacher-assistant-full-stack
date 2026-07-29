@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from entity.email import SendEmailRequest
 from services.gmail_service import GmailSendError, send_email
+from services.google_workspace.credentials import read_refresh_token
 from utils.firebase_auth import CurrentUser, get_current_user
 from utils.firestore_client import get_firestore
 
@@ -12,13 +13,8 @@ USERS_COLLECTION = "users"
 
 def _get_user_refresh_token(uid: str) -> str:
     db = get_firestore()
-    snap = db.collection(USERS_COLLECTION).document(uid).get()
-    if not snap.exists:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Google account not connected. Please grant permissions first.",
-        )
-    token = (snap.to_dict() or {}).get("google_refresh_token")
+    # Token lives in the Admin-only private subdoc (with legacy fallback).
+    token = read_refresh_token(db, uid)
     if not token:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

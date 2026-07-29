@@ -5,6 +5,8 @@ import os
 import secrets
 from urllib.parse import urlencode
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
 from firebase_admin import auth as firebase_auth_module
@@ -13,9 +15,10 @@ from google.oauth2 import id_token as google_id_token
 from google_auth_oauthlib.flow import Flow
 from google.cloud.firestore import SERVER_TIMESTAMP
 
+from services.google_workspace.credentials import read_refresh_token, store_refresh_token
 from utils.firebase_auth import CurrentUser, get_current_user, init_firebase
 from utils.firestore_client import get_firestore
-from utils.google_credentials import get_google_flow
+from utils.google_credentials import get_google_flow, GOOGLE_SCOPES
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +30,10 @@ OAUTH_STATES_COLLECTION = "oauth_states"
 
 def _frontend_base_url() -> str:
     return (os.getenv("FRONTEND_URL") or "http://localhost:5173").rstrip("/")
+
+
+def _google_connect_url() -> str:
+    return "/auth/google-scopes"
 
 
 def _build_flow() -> Flow:
@@ -181,13 +188,19 @@ async def google_scopes_callback(
             "uid": uid,
             "email": email,
             "display_name": name,
-            "google_refresh_token": refresh_token,
+            "google_scopes": GOOGLE_SCOPES,
+            "google_token_status": "valid",
+            "google_oauth_provider": "google",
+            "google_email": email,
         }
         if picture:
             user_payload["photo_url"] = picture
         if not user_snap.exists:
             user_payload["createdAt"] = SERVER_TIMESTAMP
         user_ref.set(user_payload, merge=True)
+        # The refresh token (a secret) is written to an Admin-only private subdoc,
+        # never to the client-readable users/{uid} doc.
+        store_refresh_token(db, uid, refresh_token)
 
         custom_token = firebase_auth_module.create_custom_token(uid).decode("utf-8")
     except Exception as exc:
@@ -198,17 +211,56 @@ async def google_scopes_callback(
     return RedirectResponse(url=success_url, status_code=status.HTTP_302_FOUND)
 
 
+@router.get("/google/status")
+async def google_status(
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    uid = current_user["uid"]
+    
+    from services.google_workspace.credentials import get_user_google_record, assert_google_oauth_valid, GoogleOAuthInvalidError, GoogleOAuthRequiredError
+    
+    record = get_user_google_record(uid)
+    has_token = bool(record.get("google_refresh_token"))
+    
+    if not has_token:
+        return {
+            "connected": False,
+            "valid": False,
+            "has_google_scopes": False,
+            "scopes": [],
+            "missing_scopes": GOOGLE_SCOPES,
+            "message": "Not connected",
+            "connect_url": _google_connect_url(),
+        }
+        
+    try:
+        assert_google_oauth_valid(uid)
+        is_valid = True
+        message = "Connected and valid"
+    except (GoogleOAuthRequiredError, GoogleOAuthInvalidError):
+        is_valid = False
+        message = "Token invalid or expired"
+        
+    current_scopes = record.get("google_scopes") or []
+    missing_scopes = [s for s in GOOGLE_SCOPES if s not in current_scopes]
+    
+    return {
+        "connected": True,
+        "valid": is_valid,
+        "has_google_scopes": len(missing_scopes) == 0 and is_valid,
+        "scopes": current_scopes,
+        "missing_scopes": missing_scopes,
+        "message": message,
+        "connect_url": _google_connect_url(),
+    }
+
+
 @router.get("/check-permissions")
 async def check_permissions(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, bool]:
     uid = current_user["uid"]
     db = get_firestore()
-    snapshot = db.collection(USERS_COLLECTION).document(uid).get()
-
-    if not snapshot.exists:
-        return {"has_google_scopes": False}
-
-    data = snapshot.to_dict() or {}
-    token = data.get("google_refresh_token")
+    # Token lives in the Admin-only private subdoc (with legacy fallback).
+    token = read_refresh_token(db, uid)
     return {"has_google_scopes": bool(token)}

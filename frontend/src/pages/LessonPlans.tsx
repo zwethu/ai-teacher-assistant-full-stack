@@ -1,482 +1,334 @@
-import { useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { BookOpen, Clock, ExternalLink, FileText, Loader2, Plus, Sparkles } from 'lucide-react'
 import type { ToastMessage } from '../types'
-import type { LessonPlan } from '../entity/LessonPlan'
 import Toast from '../components/ui/Toast'
 import { getErrorMessage } from '../utils/errors'
-
-import {
-  BookOpen,
-  Clock,
-  Eye,
-  FileText,
-  Loader2,
-  Plus,
-  Sparkles,
-  Trash2,
-  X,
-} from 'lucide-react'
-import {
-  addDoc,
-  collection,
-  deleteDoc,
-  doc,
-  serverTimestamp,
-} from 'firebase/firestore'
-import { db } from '../lib/firebase'
-import { useAuth } from '../hooks/useAuth'
-import { useUserCollection } from '../hooks/useUserCollection'
-import { fromFirestore, toFirestore } from '../entity/LessonPlan'
-import { generateLessonPlan } from '../services/agentService'
-import { increaseStress } from '../services/wellnessService'
-import { formatLessonPlanContent as formatContentForDisplay } from '../utils/content'
+import { useBatchSelection } from '../hooks/useBatchSelection'
+import { useGenerationRun } from '../hooks/useGenerationRun'
+import { GenerationRunView } from '../components/generation/GenerationRunView'
+import { GenerationAttachments } from '../components/generation/GenerationAttachments'
+import { PlanHintBanner } from '../components/generation/PlanHintBanner'
+import { listArtifacts, type Artifact } from '../services/artifactService'
 import { timeAgo } from '../utils/formatDate'
 
-const GRADES = Array.from({ length: 12 }, (_, i) => `Grade ${i + 1}`)
-const DURATIONS = ['30 min', '45 min', '60 min', '90 min']
+const GRADES = ['Undergraduate Y1', 'Undergraduate Y2', 'Undergraduate Y3', 'Undergraduate Y4', 'Postgraduate']
+const DURATIONS = [30, 45, 60, 90, 120, 180]
+const DIFFICULTIES = ['easy', 'medium', 'hard']
+const APPROACHES = ['inquiry-based', 'direct', 'project-based', 'mixed']
+const PLAN_TYPES = [
+  'standard', 'scenario_based', 'case_based', 'lab_based',
+  'project_based', 'flipped', 'workshop_practice', 'review_remediation',
+]
 
 const INITIAL_FORM = {
-  subject: '',
-  grade: 'Grade 6',
+  title: '',
   topic: '',
-  duration: '45 min',
-  objectives: '',
+  week: 1,
+  grade: GRADES[0],
+  duration: 60,
+  difficulty: 'medium',
+  approach: 'mixed',
+  planType: 'standard',
+  priorKnowledge: '',
+  instructions: '',
 }
 
-function planTitle(item: LessonPlan) {
-  if (item.topic) return item.topic
-  if (item.subject) return item.subject
-  return 'Untitled Lesson Plan'
+function buildMessage(f: typeof INITIAL_FORM): string {
+  const lines = [
+    `Generate a lesson plan for week ${f.week}.`,
+    // Standalone form already collected required fields — do not ask follow-up questions.
+    'Standalone form submission: all required fields below are confirmed. Do not ask clarifying questions; proceed to begin_lesson_plan_workflow.',
+  ]
+  if (f.title.trim()) lines.push(`Preferred lesson plan title: ${f.title.trim()}`)
+  else {
+    lines.push(
+      'Preferred lesson plan title: not specified — auto-name the lesson plan. If an active Course Plan exists, derive the title from that week\'s theme/goal; otherwise name it from the topic and course.',
+    )
+  }
+  if (f.topic.trim()) lines.push(`Topic: ${f.topic.trim()}`)
+  else {
+    lines.push(
+      'Topic: not specified — choose a suitable topic for this week from the active Course Plan week guidance if available; otherwise pick a suitable topic for the course.',
+    )
+  }
+  lines.push(
+    `Grade/level: ${f.grade}`,
+    `Duration: ${f.duration} minutes`,
+    `Difficulty: ${f.difficulty}`,
+    `Teaching approach: ${f.approach}`,
+    `Lesson plan type: ${f.planType}`,
+    // Required: the agent's clarification gate blocks research until prior_knowledge
+    // is present and specific, so this line is always sent.
+    `Prior knowledge: ${f.priorKnowledge.trim()}`,
+  )
+  if (f.instructions.trim()) lines.push(`Additional instructions: ${f.instructions.trim()}`)
+  lines.push(
+    'If course_blueprint_status is active, you MUST reference the Course Plan (especially course_blueprint_week_plan) when choosing topic/title and aligning objectives.',
+  )
+  return lines.join('\n')
+}
+
+// Required inputs only — topic and additional instructions are optional, so a blank
+// one never blocks generation.
+function missingRequiredInputs(f: typeof INITIAL_FORM, hasBatch: boolean): string[] {
+  const missing: string[] = []
+  if (!hasBatch) missing.push('a space')
+  if (!(Number(f.week) >= 1)) missing.push('a week number')
+  if (!f.priorKnowledge.trim()) missing.push('prior knowledge')
+  return missing
+}
+
+function joinReadable(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? ''
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
 }
 
 export default function LessonPlans() {
-  const { user } = useAuth()
+  const { batches, loading: batchesLoading, selectedBatch, selectedBatchId, setSelectedBatchId } =
+    useBatchSelection()
+  const run = useGenerationRun(selectedBatch, 'lesson_plan')
 
-  const {
-    items: lessonPlans,
-    loading: listLoading,
-    error: listError,
-  } = useUserCollection({
-    collectionName: 'lesson_plans',
-    uid: user?.uid,
-    fromFirestore,
-  })
-  const [generateOpen, setGenerateOpen] = useState(false)
-  const [viewItem, setViewItem] = useState<LessonPlan | null>(null)
   const [form, setForm] = useState(INITIAL_FORM)
-  const [generating, setGenerating] = useState(false)
   const [toast, setToast] = useState<ToastMessage | null>(null)
+  const [artifacts, setArtifacts] = useState<Artifact[]>([])
+  const [listLoading, setListLoading] = useState(false)
 
-  function showToast(type: ToastMessage['type'], message: string) {
+  const showToast = useCallback((type: ToastMessage['type'], message: string) => {
     setToast({ type, message })
     window.setTimeout(() => setToast(null), 5000)
-  }
+  }, [])
 
-  function openGenerateModal() {
-    setForm(INITIAL_FORM)
-    setGenerateOpen(true)
-  }
+  const refreshArtifacts = useCallback(async (batchId: string) => {
+    setListLoading(true)
+    try {
+      const data = await listArtifacts(batchId, { type: 'lesson_plan', current: true })
+      setArtifacts(data)
+    } catch (err) {
+      console.error(err)
+      showToast('error', getErrorMessage(err, 'Could not load lesson plans.'))
+    } finally {
+      setListLoading(false)
+    }
+  }, [showToast])
+
+  useEffect(() => {
+    if (selectedBatchId) void refreshArtifacts(selectedBatchId)
+    else setArtifacts([])
+  }, [selectedBatchId, refreshArtifacts])
 
   async function handleGenerate(e: FormEvent) {
     e.preventDefault()
-
-    if (!user) return
-
-    setGenerating(true)
-    try {
-      const token = await user.getIdToken(true)
-      const payload = {
-        subject: form.subject.trim(),
-        grade: form.grade,
-        topic: form.topic.trim(),
-        duration: form.duration,
-        objectives: form.objectives.trim(),
-      }
-
-      const result = await generateLessonPlan(token, payload)
-
-      await addDoc(
-        collection(db, 'lesson_plans'),
-        toFirestore({
-          uid: user.uid,
-          subject: payload.subject,
-          grade: payload.grade,
-          topic: payload.topic,
-          duration: payload.duration,
-          objectives: payload.objectives,
-          content: result,
-          createdAt: serverTimestamp(),
-        }),
-      )
-
-      setGenerateOpen(false)
-      showToast('success', 'Lesson plan generated and saved successfully.')
-      increaseStress(user.uid, 5)
-    } catch (err) {
-      console.error(err)
-      showToast('error', getErrorMessage(err, 'Failed to generate lesson plan.'))
-    } finally {
-      setGenerating(false)
+    if (!selectedBatch || run.sending) return
+    const blockers = missingRequiredInputs(form, true)
+    if (blockers.length > 0) {
+      showToast('error', `Add ${joinReadable(blockers)} before generating.`)
+      return
     }
+    await run.generate({
+      workflowType: 'lesson_plan',
+      message: buildMessage(form),
+      week: Number(form.week) || 1,
+      webSearch: true,
+    })
   }
 
-  async function handleDelete(item: LessonPlan) {
-    if (!item.id) return
-    const title = planTitle(item)
-    if (!window.confirm(`Delete "${title}"? This cannot be undone.`)) return
-
-    try {
-      await deleteDoc(doc(db, 'lesson_plans', item.id))
-      if (viewItem?.id === item.id) setViewItem(null)
-      showToast('success', 'Lesson plan deleted.')
-    } catch (err) {
-      console.error(err)
-      showToast('error', 'Failed to delete lesson plan.')
-    }
-  }
+  // Keep the page form-first: the progress panel only appears once a run starts.
+  const started = run.messages.length > 0 || Boolean(run.currentRunId)
+  const missing = missingRequiredInputs(form, Boolean(selectedBatch))
 
   return (
     <div>
       <Toast toast={toast} onDismiss={() => setToast(null)} />
 
-      <div className="flex items-center justify-between mb-8">
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Lesson Plans</h1>
+        <p className="text-sm text-slate-500 mt-1">
+          Generate a lesson plan for a space. The agent uses the space's Course-Space files,
+          web search, and any files you attach.
+        </p>
+      </div>
+
+      <PlanHintBanner batchId={selectedBatchId} />
+
+      {started && selectedBatch ? (
         <div>
-          <h1 className="text-2xl font-bold text-slate-800 tracking-tight">
-            Lesson Plans
-          </h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Manage and preview your generated course content.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={openGenerateModal}
-          className="inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700 shadow-lg shadow-emerald-500/20 hover:shadow-xl hover:-translate-y-0.5 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500"
-        >
-          <Plus className="w-5 h-5 mr-2 -ml-1" />
-          Generate New
-        </button>
-      </div>
-
-      <div className="relative group overflow-hidden rounded-2xl border border-slate-100 bg-white/90 shadow-sm">
-        <div className="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500">
-          <div className="absolute -top-16 -right-10 w-40 h-40 bg-emerald-400/22 blur-3xl" />
-          <div className="absolute -bottom-16 -left-10 w-40 h-40 bg-sky-400/20 blur-3xl" />
-        </div>
-
-        <div className="relative z-10 rounded-2xl bg-white">
-          {listLoading ? (
-            <div className="flex flex-col items-center justify-center py-20 gap-3">
-              <Loader2 className="w-8 h-8 text-emerald-600 animate-spin" />
-              <p className="text-sm text-slate-500">Loading lesson plans…</p>
-            </div>
-          ) : listError ? (
-            <div className="flex flex-col items-center justify-center py-16 px-6 text-center gap-2">
-              <p className="text-sm font-medium text-red-700">{listError}</p>
-            </div>
-          ) : lessonPlans.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-center px-6">
-              <div className="h-16 w-16 bg-slate-50 rounded-full flex items-center justify-center mb-4">
-                <FileText className="w-8 h-8 text-slate-300" />
-              </div>
-              <h3 className="text-sm font-medium text-slate-900">
-                No lesson plans yet. Generate your first one!
-              </h3>
-              <p className="mt-1 text-sm text-slate-500 mb-6">
-                Build structured lessons with AI in seconds.
-              </p>
-              <button
-                type="button"
-                onClick={openGenerateModal}
-                className="inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm"
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                Generate New
-              </button>
-            </div>
-          ) : (
-            <div className="p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              {lessonPlans.map((item) => (
-                <article
-                  key={item.id}
-                  className="group relative rounded-xl border border-slate-100 bg-white p-5 shadow-sm hover:shadow-md hover:border-emerald-200/80 transition-all"
-                >
-                  <div className="flex items-start gap-3 mb-3">
-                    <div className="flex-shrink-0 h-9 w-9 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center border border-sky-100">
-                      <BookOpen className="w-4 h-4" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <h3 className="font-semibold text-slate-900 truncate group-hover:text-emerald-700 transition-colors">
-                        {planTitle(item)}
-                      </h3>
-                      <p className="text-xs text-slate-500 mt-0.5 truncate">
-                        {item.subject || '—'}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2 mb-4">
-                    {item.grade && (
-                      <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200">
-                        {item.grade}
-                      </span>
-                    )}
-                    {item.duration && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
-                        <Clock className="w-3 h-3" />
-                        {item.duration}
-                      </span>
-                    )}
-                  </div>
-
-                  <p className="text-xs text-slate-400 mb-4">
-                    {timeAgo(item.createdAt)}
-                  </p>
-
-                  <div className="flex items-center gap-2 pt-3 border-t border-slate-100">
-                    <button
-                      type="button"
-                      onClick={() => setViewItem(item)}
-                      className="inline-flex flex-1 items-center justify-center gap-1.5 px-3 py-1.5 border border-slate-300 shadow-sm text-xs font-medium rounded-md text-slate-700 bg-white hover:bg-slate-50 transition-all"
-                    >
-                      <Eye className="w-3.5 h-3.5" />
-                      View
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(item)}
-                      className="inline-flex items-center justify-center px-3 py-1.5 border border-slate-300 shadow-sm text-xs font-medium rounded-md text-slate-700 bg-white hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-all"
-                      aria-label="Delete"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </article>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {generateOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div
-            className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
-            onClick={() => !generating && setGenerateOpen(false)}
-            aria-hidden="true"
-          />
-          <div className="relative w-full max-w-lg rounded-xl bg-white shadow-2xl border border-slate-200 overflow-hidden max-h-[90vh] flex flex-col">
-            <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between flex-shrink-0">
-              <h3 className="text-lg font-semibold text-slate-800">
-                Generate Lesson Plan
-              </h3>
-              <button
-                type="button"
-                onClick={() => !generating && setGenerateOpen(false)}
-                disabled={generating}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-md hover:bg-slate-200"
-                aria-label="Close"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form
-              onSubmit={handleGenerate}
-              className="p-6 space-y-4 overflow-y-auto flex-1"
-            >
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-                  Subject
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={form.subject}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, subject: e.target.value }))
-                  }
-                  placeholder="e.g. Science"
-                  className="block w-full rounded-md border border-slate-300 shadow-sm py-2.5 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-                    Grade
-                  </label>
-                  <select
-                    value={form.grade}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, grade: e.target.value }))
-                    }
-                    className="block w-full rounded-md border border-slate-300 shadow-sm py-2.5 px-2 text-sm focus:border-emerald-500 focus:ring-emerald-500"
-                  >
-                    {GRADES.map((g) => (
-                      <option key={g} value={g}>
-                        {g}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-                    Duration
-                  </label>
-                  <select
-                    value={form.duration}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, duration: e.target.value }))
-                    }
-                    className="block w-full rounded-md border border-slate-300 shadow-sm py-2.5 px-2 text-sm focus:border-emerald-500 focus:ring-emerald-500"
-                  >
-                    {DURATIONS.map((d) => (
-                      <option key={d} value={d}>
-                        {d}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-                  Topic
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={form.topic}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, topic: e.target.value }))
-                  }
-                  placeholder="e.g. Photosynthesis"
-                  className="block w-full rounded-md border border-slate-300 shadow-sm py-2.5 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-                  Learning objectives
-                </label>
-                <textarea
-                  required
-                  rows={4}
-                  value={form.objectives}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, objectives: e.target.value }))
-                  }
-                  placeholder="What should students know or be able to do by the end of the lesson?"
-                  className="block w-full rounded-md border border-slate-300 shadow-sm py-2.5 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500 resize-y"
-                />
-              </div>
-
-              {generating && (
-                <div className="flex items-center gap-3 rounded-lg bg-emerald-50 border border-emerald-100 px-4 py-3">
-                  <Loader2 className="w-5 h-5 text-emerald-600 animate-spin flex-shrink-0" />
-                  <p className="text-sm text-emerald-800">
-                    Generating lesson plan… This may take 5–15 seconds.
-                  </p>
-                </div>
-              )}
-
-              <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setGenerateOpen(false)}
-                  disabled={generating}
-                  className="px-4 py-2 text-sm font-medium rounded-md border border-slate-300 text-slate-700 bg-white hover:bg-slate-50 disabled:opacity-60"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={generating}
-                  className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm disabled:opacity-70 disabled:cursor-not-allowed min-w-[140px]"
-                >
-                  {generating ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      Generating…
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="w-4 h-4" />
-                      Generate
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-slate-700">Lesson plan generation</h2>
+            <button type="button" onClick={() => run.reset()}
+              className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              <Plus className="h-4 w-4" /> Generate another
+            </button>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-white shadow-sm min-h-[24rem] max-h-[80vh] overflow-y-auto">
+            <GenerationRunView batch={selectedBatch} run={run} accent="emerald" />
           </div>
         </div>
+      ) : (
+        <form onSubmit={handleGenerate} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1.5">Space (batch)</label>
+            <select
+              required
+              value={selectedBatchId ?? ''}
+              onChange={(e) => setSelectedBatchId(e.target.value)}
+              disabled={batchesLoading}
+              className="block w-full rounded-md border border-slate-300 py-2.5 px-2 text-sm focus:border-emerald-500 focus:ring-emerald-500"
+            >
+              {batches.map((b) => (
+                <option key={b.id} value={b.id}>{b.batch_name} — {b.course_name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Week</label>
+              <input type="number" min={1} required value={form.week}
+                onChange={(e) => setForm((f) => ({ ...f, week: Number(e.target.value || 1) }))}
+                className="block w-full rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500" />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Duration (min)</label>
+              <select value={form.duration} onChange={(e) => setForm((f) => ({ ...f, duration: Number(e.target.value) }))}
+                className="block w-full rounded-md border border-slate-300 py-2.5 px-2 text-sm focus:border-emerald-500 focus:ring-emerald-500">
+                {DURATIONS.map((d) => <option key={d} value={d}>{d}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1.5">Lesson plan name (optional)</label>
+            <input type="text" value={form.title}
+              onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+              placeholder="Leave blank — agent names it from the course plan or topic"
+              className="block w-full rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500" />
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1.5">Topic (optional)</label>
+            <input type="text" value={form.topic}
+              onChange={(e) => setForm((f) => ({ ...f, topic: e.target.value }))}
+              placeholder="Leave blank to let the agent choose from the course plan"
+              className="block w-full rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500" />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Level</label>
+              <select value={form.grade} onChange={(e) => setForm((f) => ({ ...f, grade: e.target.value }))}
+                className="block w-full rounded-md border border-slate-300 py-2.5 px-2 text-sm focus:border-emerald-500 focus:ring-emerald-500">
+                {GRADES.map((g) => <option key={g} value={g}>{g}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Difficulty</label>
+              <select value={form.difficulty} onChange={(e) => setForm((f) => ({ ...f, difficulty: e.target.value }))}
+                className="block w-full rounded-md border border-slate-300 py-2.5 px-2 text-sm focus:border-emerald-500 focus:ring-emerald-500 capitalize">
+                {DIFFICULTIES.map((d) => <option key={d} value={d}>{d}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Approach</label>
+              <select value={form.approach} onChange={(e) => setForm((f) => ({ ...f, approach: e.target.value }))}
+                className="block w-full rounded-md border border-slate-300 py-2.5 px-2 text-sm focus:border-emerald-500 focus:ring-emerald-500">
+                {APPROACHES.map((a) => <option key={a} value={a}>{a}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Plan type</label>
+              <select value={form.planType} onChange={(e) => setForm((f) => ({ ...f, planType: e.target.value }))}
+                className="block w-full rounded-md border border-slate-300 py-2.5 px-2 text-sm focus:border-emerald-500 focus:ring-emerald-500">
+                {PLAN_TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1.5">Prior knowledge</label>
+            <textarea rows={2} required value={form.priorKnowledge}
+              onChange={(e) => setForm((f) => ({ ...f, priorKnowledge: e.target.value }))}
+              placeholder="What students already know before this lesson, e.g. basic spreadsheet and database concepts"
+              className="block w-full rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500 resize-y" />
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1.5">Additional instructions (optional)</label>
+            <textarea rows={2} value={form.instructions}
+              onChange={(e) => setForm((f) => ({ ...f, instructions: e.target.value }))}
+              placeholder="Anything else the agent should consider…"
+              className="block w-full rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500 resize-y" />
+          </div>
+
+          {selectedBatch && <GenerationAttachments run={run} />}
+          <p className="text-xs text-slate-400">
+            Course-Space files for the selected space are always used.
+          </p>
+
+          <div>
+            <button type="submit" disabled={run.sending || missing.length > 0}
+              className="inline-flex w-full items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm transition-colors disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none disabled:cursor-not-allowed">
+              {run.sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+              Generate outline
+            </button>
+            {missing.length > 0 && !run.sending && (
+              <p className="mt-2 text-center text-xs text-slate-500">
+                Add {joinReadable(missing)} to continue.
+              </p>
+            )}
+          </div>
+        </form>
       )}
 
-      {viewItem && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div
-            className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
-            onClick={() => setViewItem(null)}
-            aria-hidden="true"
-          />
-          <div className="relative w-full max-w-3xl max-h-[90vh] flex flex-col rounded-xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
-            <div className="bg-sky-50 px-6 py-4 border-b border-sky-100 flex items-center justify-between flex-shrink-0">
-              <div>
-                <h3 className="text-lg font-semibold text-slate-900">
-                  {planTitle(viewItem)}
-                </h3>
-                <div className="flex flex-wrap gap-2 mt-2 items-center">
-                  <span className="text-xs text-slate-600">{viewItem.subject}</span>
-                  {viewItem.grade && (
-                    <span className="text-xs text-slate-400">· {viewItem.grade}</span>
-                  )}
-                  {viewItem.duration && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
-                      <Clock className="w-3 h-3" />
-                      {viewItem.duration}
+      {/* Existing lesson plans (canonical artifacts) */}
+      <div className="mt-8">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold text-slate-700">Saved lesson plans</h2>
+          {selectedBatchId && (
+            <button type="button" onClick={() => void refreshArtifacts(selectedBatchId)}
+              className="text-xs text-emerald-700 hover:underline">Refresh</button>
+          )}
+        </div>
+        {listLoading ? (
+          <div className="flex items-center gap-2 text-sm text-slate-500 py-6">
+            <Loader2 className="w-4 h-4 animate-spin" /> Loading…
+          </div>
+        ) : artifacts.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-10 text-center rounded-xl border border-slate-100 bg-white">
+            <FileText className="w-8 h-8 text-slate-300 mb-2" />
+            <p className="text-sm text-slate-500">No lesson plans yet for this space.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {artifacts.map((a) => (
+              <article key={a.id} className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
+                <div className="flex items-start gap-3 mb-2">
+                  <div className="h-9 w-9 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center border border-sky-100">
+                    <BookOpen className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="font-semibold text-slate-900 truncate">{a.title || 'Lesson plan'}</h3>
+                    <p className="text-xs text-slate-500 mt-0.5">Week {a.week ?? '—'} · v{a.version ?? 1}</p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 mb-3">
+                  {a.status && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600 border border-slate-200">
+                      <Clock className="w-3 h-3" />{a.status}
                     </span>
                   )}
                 </div>
-                {viewItem.objectives && (
-                  <p className="text-xs text-slate-500 mt-2 line-clamp-2">
-                    <span className="font-medium">Objectives:</span>{' '}
-                    {viewItem.objectives}
-                  </p>
+                <p className="text-xs text-slate-400 mb-3">{timeAgo(a.updated_at ? new Date(a.updated_at) : null)}</p>
+                {a.doc_url && (
+                  <a href={a.doc_url} target="_blank" rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50">
+                    <ExternalLink className="w-3.5 h-3.5" /> Open Google Doc
+                  </a>
                 )}
-              </div>
-              <button
-                type="button"
-                onClick={() => setViewItem(null)}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-md hover:bg-sky-100"
-                aria-label="Close"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-6">
-              <pre className="whitespace-pre-wrap text-sm text-slate-700 font-sans leading-relaxed">
-                {formatContentForDisplay(viewItem.content)}
-              </pre>
-            </div>
-            <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-2 flex-shrink-0">
-              <button
-                type="button"
-                onClick={() => handleDelete(viewItem)}
-                className="px-4 py-2 text-sm font-medium rounded-md border border-red-200 text-red-700 bg-white hover:bg-red-50"
-              >
-                Delete
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewItem(null)}
-                className="px-4 py-2 text-sm font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700"
-              >
-                Close
-              </button>
-            </div>
+              </article>
+            ))}
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   )
 }

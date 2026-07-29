@@ -1,0 +1,15 @@
+# Credentials / service-account keys — never commit these.
+# Patterns without a slash match at every depth, so these cover the repo root
+# AND any subdirectory (backend/, etc.).
+client_secrets.json
+client_secret.json
+gcp-service-account.json
+serviceAccountKey.json
+*-service-account*.json
+
+# Python caches
+__pycache__/
+*.py[cod]
+
+# Node
+node_modules/

@@ -1,0 +1,14 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+
+    "agentRuns": {
+      "$run_id": {
+        "//": "Backend + agent write via the Admin SDK (rules bypassed). Clients get read-only access to a run only if they own it, established by the backend-written meta/lecturer_id. No client writes.",
+        ".read": "auth != null && data.child('meta/lecturer_id').val() === auth.uid",
+        ".write": false
+      }
+    }
+  }
+}

@@ -1,9 +1,8 @@
 import logging
 from datetime import datetime, timezone
 
-from apscheduler.schedulers.background import BackgroundScheduler
-
 from services.gmail_service import GmailSendError, send_email
+from services.google_workspace.credentials import read_refresh_token
 from utils.firestore_client import get_firestore
 
 logger = logging.getLogger(__name__)
@@ -11,32 +10,9 @@ logger = logging.getLogger(__name__)
 USERS_COLLECTION = "users"
 EMAILS_COLLECTION = "emails"
 
-_scheduler: BackgroundScheduler | None = None
-
-
-def start_scheduler() -> None:
-    """Start the background job that sends due scheduled emails."""
-    global _scheduler
-    if _scheduler is not None and _scheduler.running:
-        return
-
-    _scheduler = BackgroundScheduler()
-    _scheduler.add_job(
-        check_and_send_emails,
-        trigger="interval",
-        minutes=2,
-    )
-    _scheduler.start()
-    logger.info("Email scheduler started (interval: 2 minutes)")
-
-
-def shutdown_scheduler() -> None:
-    """Stop the background email scheduler."""
-    global _scheduler
-    if _scheduler is not None and _scheduler.running:
-        _scheduler.shutdown(wait=False)
-        logger.info("Email scheduler stopped")
-    _scheduler = None
+# NOTE: the scheduling of check_and_send_emails is owned by maintenance_scheduler
+# (local dev, APScheduler) or Cloud Scheduler -> /tasks/cron/send-emails (prod).
+# The previous standalone APScheduler here was dead code and has been removed.
 
 
 def check_and_send_emails() -> None:
@@ -69,7 +45,7 @@ def check_and_send_emails() -> None:
                 )
                 continue
 
-            refresh_token = (user_snap.to_dict() or {}).get("google_refresh_token")
+            refresh_token = read_refresh_token(db, uid)
             if not refresh_token:
                 logger.warning(
                     "No google_refresh_token for user %s (email %s); skipping",
@@ -78,20 +54,33 @@ def check_and_send_emails() -> None:
                 )
                 continue
 
-            to = data.get("to")
             subject = data.get("subject")
             body = data.get("body")
-            if not to or not subject or not body:
+            # Chat-staged batch emails carry a `recipients` list (one send per
+            # recipient, no roster disclosure); standalone emails carry a single `to`.
+            recipients_raw = data.get("recipients")
+            if isinstance(recipients_raw, list) and recipients_raw:
+                recipients = [str(r) for r in recipients_raw if str(r).strip()]
+            else:
+                to = data.get("to")
+                recipients = [str(to)] if to else []
+            if not recipients or not subject or not body:
                 logger.warning(
-                    "Email %s missing to/subject/body; skipping", doc.id
+                    "Email %s missing recipients/subject/body; skipping", doc.id
                 )
                 continue
 
-            send_email(refresh_token, str(to), str(subject), str(body))
+            for recipient in recipients:
+                send_email(refresh_token, recipient, str(subject), str(body))
 
             sent_at = datetime.now(timezone.utc)
-            doc.reference.update({"status": "sent", "sent_at": sent_at})
-            logger.info("Sent scheduled email %s to %s", doc.id, to)
+            # Both casings: snake_case for the backend, camelCase for the Email page.
+            doc.reference.update(
+                {"status": "sent", "sent_at": sent_at, "sentAt": sent_at}
+            )
+            logger.info(
+                "Sent scheduled email %s to %d recipient(s)", doc.id, len(recipients)
+            )
         except GmailSendError as exc:
             logger.error("Failed to send email %s: %s", doc.id, exc)
         except Exception as exc:

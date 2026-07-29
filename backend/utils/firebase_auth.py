@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from typing import Annotated, Any
 
 import firebase_admin
@@ -17,16 +18,22 @@ def init_firebase() -> firebase_admin.App:
     if _app is not None:
         return _app
 
+    backend_dir = Path(__file__).resolve().parents[1]
     cred_path = (os.getenv("FIREBASE_SERVICE_ACCOUNT") or "").strip()
-    if cred_path and not os.path.isabs(cred_path):
-        backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        cred_path = os.path.join(backend_dir, cred_path)
-    if not cred_path or not os.path.isfile(cred_path):
+    resolved = Path(cred_path) if cred_path else backend_dir / "serviceAccountKey.json"
+    if not resolved.is_absolute():
+        resolved = backend_dir / resolved
+    if not resolved.is_file():
+        fallback = backend_dir / "serviceAccountKey.json"
+        if fallback.is_file():
+            resolved = fallback
+    if not resolved.is_file():
         raise RuntimeError(
             "FIREBASE_SERVICE_ACCOUNT must point to a valid service account JSON file"
         )
 
-    cred = credentials.Certificate(cred_path)
+    os.environ["FIREBASE_SERVICE_ACCOUNT"] = str(resolved)
+    cred = credentials.Certificate(str(resolved))
     options: dict[str, str] = {}
     project_id = (os.getenv("FIREBASE_PROJECT_ID") or "").strip()
     if project_id:

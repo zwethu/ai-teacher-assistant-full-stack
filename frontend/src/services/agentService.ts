@@ -1,60 +1,64 @@
-const AGENT_ENGINE_URL = import.meta.env.VITE_AGENT_ENGINE_URL
+import api from '../lib/api'
 
-async function postAgentEngine(
-  token: string,
-  payload: Record<string, unknown>,
+export type AgentConnectors = {
+  web_search: boolean
+}
+
+export type AgentInvokePayload = {
+  message: string
+  batch_id: string
+  chat_id?: string
+  workflow_type?: string
+  week?: number
+  save_draft?: boolean
+  pending_artifact?: boolean
+  workflow_stage?: '' | 'outline' | 'full'
+  approval_action?: '' | 'approve_outline'
+  approved_outline_run_id?: string
+  connectors?: AgentConnectors
+  attachment_ids?: string[]
+}
+
+export async function invokeAgent(
+  payload: AgentInvokePayload | Record<string, unknown>,
 ): Promise<unknown> {
-  if (!AGENT_ENGINE_URL) {
-    throw new Error(
-      'Agent Engine URL is not configured. Set VITE_AGENT_ENGINE_URL in your environment.',
-    )
-  }
-
-  const response = await fetch(AGENT_ENGINE_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(payload),
+  const connectors =
+    (payload as AgentInvokePayload).connectors ?? (await getDefaultConnectors())
+  const { data } = await api.post('/agent/invoke', {
+    ...payload,
+    connectors,
   })
+  return data
+}
 
-  let body: Record<string, unknown> | null = null
-  try {
-    body = await response.json()
-  } catch {
-    body = null
-  }
-
-  if (!response.ok) {
-    const message =
-      (body && (body.detail || body.error || body.message)) ||
-      `Agent request failed (${response.status})`
-    throw new Error(
-      typeof message === 'string' ? message : JSON.stringify(message),
-    )
-  }
-
-  return body
+async function getDefaultConnectors(): Promise<AgentConnectors> {
+  return { web_search: true }
 }
 
 export async function generateAssessment(
-  token: string,
-  payload: Record<string, unknown>,
+  _token: string,
+  payload: AgentInvokePayload | Record<string, unknown>,
 ) {
-  return postAgentEngine(token, payload)
+  return invokeAgent(payload)
 }
 
 export async function generateLessonPlan(
-  token: string,
-  payload: Record<string, unknown>,
+  _token: string,
+  payload: AgentInvokePayload | Record<string, unknown>,
 ) {
-  return postAgentEngine(token, payload)
+  return invokeAgent(payload)
+}
+
+export async function generateLab(
+  _token: string,
+  payload: AgentInvokePayload | Record<string, unknown>,
+) {
+  return invokeAgent(payload)
 }
 
 export async function generateBatchContent(
-  token: string,
-  payload: Record<string, unknown>,
+  _token: string,
+  payload: AgentInvokePayload | Record<string, unknown>,
 ) {
-  return postAgentEngine(token, payload)
+  return invokeAgent(payload)
 }

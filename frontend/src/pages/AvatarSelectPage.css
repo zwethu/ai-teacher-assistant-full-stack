@@ -1,0 +1,194 @@
+/* Colour tokens (--g-*) live in index.css. */
+
+.avatar-select-bg {
+  min-height: 100vh;
+  background:
+    var(--game-pattern) 0 0 / var(--game-pattern-size) repeat,
+    var(--g-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  font-family: 'Nunito', sans-serif;
+  animation: avatar-fade-in 0.5s ease;
+}
+
+@keyframes avatar-fade-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.avatar-select-card {
+  position: relative;
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1.5px solid rgba(255, 255, 255, 0.7);
+  border-radius: 30px;
+  padding: 32px 30px 30px;
+  max-width: 640px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  box-shadow: var(--g-shadow-lg);
+}
+
+.avatar-select-title {
+  font-size: 1.7rem;
+  font-weight: 900;
+  color: var(--g-cocoa-900);
+  margin: 0;
+  text-align: center;
+}
+
+.avatar-select-subtitle {
+  font-size: 1rem;
+  color: var(--g-ink-soft);
+  margin: 0 0 8px;
+  text-align: center;
+  font-weight: 700;
+}
+
+/* Sound control pinned to the top-right corner, out of the reading path. */
+.avatar-select-card .music-toggle {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  z-index: 4;
+}
+
+.avatar-select-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  width: 100%;
+  margin-top: 6px;
+}
+
+@media (max-width: 520px) {
+  .avatar-select-grid { grid-template-columns: 1fr; }
+}
+
+/* height: 100% + the grid's default stretch keeps both cards the same height,
+   which .avatar-check relies on to pin itself to the bottom. */
+.avatar-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 18px 14px 16px;
+  border-radius: 24px;
+  border: 3px solid transparent;
+  cursor: pointer;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  font-family: inherit;
+  height: 100%;
+}
+
+/* Brand tints (which pet): pink for cat, blue for dog — this is the one
+   screen that shows both brands side by side, so the choice reads by colour. */
+.avatar-option--cat { background: var(--g-rose-200); }
+.avatar-option--dog { background: var(--g-sky-200); }
+
+.avatar-option:hover {
+  transform: translateY(-6px) scale(1.02);
+  box-shadow: var(--g-shadow-md);
+}
+
+/* Each card carries its own `theme-cat`/`theme-dog` class, so --g-select and
+   --g-select-ring resolve to THAT pet's brand — the dog is ringed in blue, the
+   cat in pink, matching what the player sees in-game after picking. */
+.avatar-option.is-selected {
+  border-color: var(--g-select);
+  box-shadow: 0 0 0 5px var(--g-select-ring), 0 12px 28px var(--g-select-ring);
+  transform: translateY(-6px) scale(1.02);
+}
+
+.avatar-lottie-wrap {
+  width: 150px;
+  height: 150px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  filter: drop-shadow(0 6px 10px rgba(107, 67, 38, 0.14));
+}
+
+.avatar-lottie-wrap > * { width: 100%; height: 100%; }
+
+/* The cat art sits smaller in its canvas than the dog does in its own, so
+   equal boxes render an unequally-sized pet. Here the BOXES must stay equal
+   (unequal ones push each card's text to a different height), so the cat is
+   scaled up inside its box instead. Nothing animates transform on this
+   screen, unlike .cat-sprite--cat in CatGame.css — that one resizes the box
+   for the same reason in reverse. Keep the two visually in step. */
+.avatar-option--cat .avatar-lottie-wrap > * { transform: scale(1.3); }
+
+.avatar-option-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 1.15rem;
+  font-weight: 900;
+  color: var(--g-cocoa-900);
+}
+
+.avatar-option-blurb {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--g-ink-soft);
+  line-height: 1.4;
+  text-align: center;
+  min-height: 2.3em;
+}
+
+/* auto pins the chip to the card's bottom edge, so a one-line blurb (cat) and
+   a two-line one (dog) still line their chips up. */
+.avatar-check {
+  margin-top: auto;
+  font-size: 0.8rem;
+  font-weight: 800;
+  padding: 4px 14px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.65);
+  color: var(--g-ink-soft);
+}
+
+.avatar-option.is-selected .avatar-check {
+  background: #fff;
+  color: var(--g-cocoa-700);
+}
+
+.avatar-continue-btn {
+  margin-top: 16px;
+  padding: 15px 52px;
+  border: none;
+  border-radius: 50px;
+  background: var(--g-accent);
+  color: white;
+  font-size: 1.15rem;
+  font-weight: 900;
+  font-family: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: background 0.2s, transform 0.15s, box-shadow 0.2s, opacity 0.2s;
+  box-shadow: 0 6px 22px var(--g-accent-ring);
+}
+
+.avatar-continue-btn:not(:disabled):hover {
+  background: var(--g-accent-hover);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 28px var(--g-accent-ring);
+}
+
+.avatar-continue-btn:disabled {
+  opacity: 0.85;
+  cursor: not-allowed;
+  background: var(--g-disabled-bg);
+  color: var(--g-disabled-ink);
+  box-shadow: none;
+}

@@ -75,6 +75,154 @@
   }
 }
 
+/* ─── Shared repeating background for the whole cat/dog game flow ───
+   A faint tiled pattern (transparent tile) layered OVER each screen's
+   solid color so the flow feels textured, not empty-white.
+
+   The 120px tile carries one motif per quadrant — paw, bone, fish, heart —
+   so cat and dog players both see themselves in the wallpaper. Each motif is
+   normalized to roughly the same ~28px bounding box and centred on its
+   quadrant (30,30 / 90,30 / 30,90 / 90,90), so none reads as the "big" one.
+   That's why the bone and fish carry a `translate(-x 0)` after their rotate:
+   both are drawn from an end rather than their middle, so they need
+   re-centring or they'd rotate off-centre and drift out of the quadrant.
+
+   Motifs sit fully inside the tile (nothing crosses an edge), so it repeats
+   seamlessly with no edge-matching needed.
+   To use your own image: replace the url() value below with url('/your-file.png'). */
+:root {
+  --game-pattern:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'%3E%3Cg fill='%23c98a5a' fill-opacity='0.10'%3E%3Cg transform='translate(2.5 5)'%3E%3Cellipse cx='27' cy='32' rx='7.5' ry='6.5'/%3E%3Cellipse cx='17' cy='21' rx='3' ry='3.6'/%3E%3Cellipse cx='24' cy='16' rx='3' ry='3.8'/%3E%3Cellipse cx='33' cy='16' rx='3' ry='3.8'/%3E%3Cellipse cx='38' cy='22' rx='3' ry='3.6'/%3E%3C/g%3E%3Cg transform='translate(90 30) rotate(-20) scale(0.9) translate(-9 0)'%3E%3Crect x='0' y='-3' width='18' height='6' rx='2.5'/%3E%3Ccircle cx='0' cy='-4' r='4.5'/%3E%3Ccircle cx='0' cy='4' r='4.5'/%3E%3Ccircle cx='18' cy='-4' r='4.5'/%3E%3Ccircle cx='18' cy='4' r='4.5'/%3E%3C/g%3E%3Cg transform='translate(30 90) rotate(-8) translate(-3.5 0)'%3E%3Cellipse cx='0' cy='0' rx='10' ry='7'/%3E%3Cpath d='M8 0 L17 -7 L17 7 Z'/%3E%3Ccircle cx='-5' cy='-1.5' r='1.2' fill-opacity='0.22'/%3E%3C/g%3E%3Cg transform='translate(90 90) rotate(12) scale(1.2) translate(-12 -12)'%3E%3Cpath d='M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+  --game-pattern-size: 120px 120px;
+}
+
+/* ─── Game palette ──────────────────────────────────────────────────
+   One cute pastel system shared by every screen in the game flow.
+
+   Harmony here is a rule, not a lucky pick: the warm cream/peach base
+   carries ~90% of each screen, and all three accents sit in the SAME
+   tone band (S≈80%, L≈70%) so none of them shouts over the others.
+   The old palette mixed vivid violet (#b06fe0), vivid blue (#3b82f6)
+   and pale pink (#f7b8cf) — three hues at three different saturations.
+   That mismatch is what read as "off", not the hues themselves.
+
+   Accent roles are EXCLUSIVE — reusing one outside its role is what
+   made the old screens ambiguous:
+     brand → primary action (solid fill = the thing to click) + chrome.
+             SPECIES-DRIVEN: pink for cat, blue for dog. Carried by the
+             `--g-rose-*` ramp, which `.theme-dog` remaps to blue so every
+             brand element flips with one class on the screen root.
+     cocoa → "this is what you picked" (selection / pending) + neutral +
+             wrong. Selection is deliberately NEUTRAL, not the brand hue,
+             so it never competes with the one primary action and never
+             clashes with the dog's blue brand. Wrong stays colourless so
+             it never reads as a hint (behavioural signals are the
+             assessment — a red border would coach the player).
+     mint  → confirmed correct. The ONLY success colour, kept across both
+             themes as legible post-submit feedback.
+   Background is plain white; the only screen colour is the species brand.
+   Shadows are tinted cocoa (the base hue), never a foreign purple. */
+:root {
+  --g-cream-50:  #fff9f2;
+  --g-cream-100: #fff3e7;
+  --g-cream-200: #ffe9d6;
+  --g-cream-300: #fbdcc0;
+  --g-peach-300: #f7d3b2;
+  --g-peach-400: #efb88a;
+
+  --g-cocoa-200: #e3cdb4;
+  --g-cocoa-300: #c9a986;
+  --g-cocoa-500: #9c7a5c;
+  --g-cocoa-700: #6b4326;
+  --g-cocoa-900: #4a2d18;
+
+  --g-rose-100:  #fff2f6;
+  --g-rose-200:  #ffe0ea;
+  --g-rose-300:  #ffc2d6;
+  --g-rose-500:  #f4739e;
+  --g-rose-600:  #e25786;
+  --g-rose-700:  #b83e68;
+
+  --g-sky-200:   #e2f0fe;
+  --g-sky-300:   #bfddfb;
+  --g-sky-500:   #5ea8f0;
+  --g-sky-600:   #3e8ad8;
+  --g-sky-700:   #2c6ba8;
+
+  --g-mint-200:  #ddf7ea;
+  --g-mint-300:  #b6eed3;
+  --g-mint-500:  #4fc992;
+  --g-mint-600:  #2fae78;
+  --g-mint-700:  #1f8a62;
+
+  --g-butter-300: #ffe6a3;
+  --g-butter-500: #ffcc57;
+  --g-butter-700: #c98a12;
+
+  --g-coral-500: #f58a7a;
+  --g-coral-700: #c4553f;
+
+  /* Semantic aliases — prefer these over raw ramp values.
+     --g-accent* resolve `--g-rose-*` at use time, so overriding the rose
+     ramp inside a `.theme-*` scope re-tints every brand element there. */
+  --g-bg:           #ffffff;
+  --g-surface:      #ffffff;
+  --g-ink:          var(--g-cocoa-700);
+  --g-ink-soft:     var(--g-cocoa-500);
+  --g-accent:       var(--g-rose-500);
+  --g-accent-hover: var(--g-rose-600);
+  --g-accent-ring:  rgba(244, 115, 158, 0.38);
+  /* Selection / pending / disabled — a LIGHT tint of the species brand
+     (light pink for cat, light blue for dog), so "picked" and "inactive"
+     read as softer shades of the same colour, never a foreign brown.
+     Distinct from the SOLID brand CTA by intensity, not hue.
+     NOTE: these reference the rose ramp, so they resolve to pink at :root
+     and must be REDECLARED in `.theme-dog` to recompute as blue. */
+  --g-select:       var(--g-rose-300);
+  --g-select-bg:    var(--g-rose-200);
+  --g-select-ring:  var(--g-accent-ring);
+  --g-disabled-bg:  var(--g-rose-200);
+  --g-disabled-ink: var(--g-rose-700);
+  --g-correct:      var(--g-mint-500);
+  --g-correct-ring: rgba(79, 201, 146, 0.30);
+
+  --g-shadow-sm: 0 3px 10px rgba(107, 67, 38, 0.10);
+  --g-shadow-md: 0 8px 24px rgba(107, 67, 38, 0.13);
+  --g-shadow-lg: 0 16px 48px rgba(107, 67, 38, 0.16);
+}
+
+/* ─── Species themes ───────────────────────────────────────────────
+   One class on a screen root re-tints the whole screen's brand.
+   `.theme-cat` = pink (the default rose ramp); `.theme-dog` remaps the
+   rose ramp to blue. Nothing else changes — selection stays neutral,
+   correct stays mint. Each theme also swaps the wallpaper paw tint. */
+.theme-cat {
+  --game-pattern:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'%3E%3Cg fill='%23f4739e' fill-opacity='0.08'%3E%3Cg transform='translate(2.5 5)'%3E%3Cellipse cx='27' cy='32' rx='7.5' ry='6.5'/%3E%3Cellipse cx='17' cy='21' rx='3' ry='3.6'/%3E%3Cellipse cx='24' cy='16' rx='3' ry='3.8'/%3E%3Cellipse cx='33' cy='16' rx='3' ry='3.8'/%3E%3Cellipse cx='38' cy='22' rx='3' ry='3.6'/%3E%3C/g%3E%3Cg transform='translate(90 30) rotate(-20) scale(0.9) translate(-9 0)'%3E%3Crect x='0' y='-3' width='18' height='6' rx='2.5'/%3E%3Ccircle cx='0' cy='-4' r='4.5'/%3E%3Ccircle cx='0' cy='4' r='4.5'/%3E%3Ccircle cx='18' cy='-4' r='4.5'/%3E%3Ccircle cx='18' cy='4' r='4.5'/%3E%3C/g%3E%3Cg transform='translate(30 90) rotate(-8) translate(-3.5 0)'%3E%3Cellipse cx='0' cy='0' rx='10' ry='7'/%3E%3Cpath d='M8 0 L17 -7 L17 7 Z'/%3E%3Ccircle cx='-5' cy='-1.5' r='1.2' fill-opacity='0.22'/%3E%3C/g%3E%3Cg transform='translate(90 90) rotate(12) scale(1.2) translate(-12 -12)'%3E%3Cpath d='M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+}
+.theme-dog {
+  --g-rose-100: #eef5fe;
+  --g-rose-200: #dcecfd;
+  --g-rose-300: #b3d4f7;
+  --g-rose-500: #4a9bec;
+  --g-rose-600: #2f81da;
+  --g-rose-700: #1f66b8;
+  --g-accent-ring: rgba(74, 155, 236, 0.38);
+  /* MUST redeclare every brand-derived alias here, not only the ramp:
+     each is resolved to pink at :root and inherits as a fixed value, so
+     overriding the ramp alone leaves `var(--g-accent)`/`var(--g-select)`
+     etc. pink. Redeclaring recomputes them against this scope's blue ramp. */
+  --g-accent:       var(--g-rose-500);
+  --g-accent-hover: var(--g-rose-600);
+  --g-select:       var(--g-rose-300);
+  --g-select-bg:    var(--g-rose-200);
+  --g-select-ring:  var(--g-accent-ring);
+  --g-disabled-bg:  var(--g-rose-200);
+  --g-disabled-ink: var(--g-rose-700);
+  --game-pattern:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'%3E%3Cg fill='%234a9bec' fill-opacity='0.08'%3E%3Cg transform='translate(2.5 5)'%3E%3Cellipse cx='27' cy='32' rx='7.5' ry='6.5'/%3E%3Cellipse cx='17' cy='21' rx='3' ry='3.6'/%3E%3Cellipse cx='24' cy='16' rx='3' ry='3.8'/%3E%3Cellipse cx='33' cy='16' rx='3' ry='3.8'/%3E%3Cellipse cx='38' cy='22' rx='3' ry='3.6'/%3E%3C/g%3E%3Cg transform='translate(90 30) rotate(-20) scale(0.9) translate(-9 0)'%3E%3Crect x='0' y='-3' width='18' height='6' rx='2.5'/%3E%3Ccircle cx='0' cy='-4' r='4.5'/%3E%3Ccircle cx='0' cy='4' r='4.5'/%3E%3Ccircle cx='18' cy='-4' r='4.5'/%3E%3Ccircle cx='18' cy='4' r='4.5'/%3E%3C/g%3E%3Cg transform='translate(30 90) rotate(-8) translate(-3.5 0)'%3E%3Cellipse cx='0' cy='0' rx='10' ry='7'/%3E%3Cpath d='M8 0 L17 -7 L17 7 Z'/%3E%3Ccircle cx='-5' cy='-1.5' r='1.2' fill-opacity='0.22'/%3E%3C/g%3E%3Cg transform='translate(90 90) rotate(12) scale(1.2) translate(-12 -12)'%3E%3Cpath d='M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+}
+
 @layer utilities {
   /* These three class names predate the MILA import and are still used by
      Login.tsx. They now resolve to MILA foundations, so existing surfaces

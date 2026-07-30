@@ -1,309 +1,362 @@
 import { useState } from 'react'
-
-interface ModalBackdropProps {
-  onClose: () => void
-}
-
-interface ModalProps {
-  open: boolean
-  onClose: () => void
-}
-
 import { Navigate } from 'react-router-dom'
+import {
+  BookOpen,
+  FileQuestion,
+  FlaskConical,
+  Gamepad2,
+  GraduationCap,
+  Mail,
+  type LucideIcon,
+} from 'lucide-react'
+
 import { MilaLogo } from '../components/brand/MilaLogo'
+import { MilaWord } from '../components/brand/MilaWord'
 import { useAuth } from '../hooks/useAuth'
-import PageSpinner from '../components/ui/PageSpinner'
-import { Button } from '../design-system'
+import { Button, Modal } from '../design-system'
+import LoadingScreen from '../components/ui/LoadingScreen'
 
-function ModalBackdrop({ onClose }: ModalBackdropProps) {
+/**
+ * Sign-in page.
+ *
+ * Two columns on desktop: what MILA is on the left over the academic canvas,
+ * the sign-in itself on the right in glass. On narrow screens the left column
+ * drops entirely — it is context, not a step in the task — and the right column
+ * becomes the whole page.
+ *
+ * Both columns scroll independently rather than the page scrolling as one, so
+ * the sign-in button stays reachable on a short viewport without the marketing
+ * copy pushing it off screen.
+ */
+
+// ---------------------------------------------------------------------------
+// Content — kept next to the page it describes, and true to what is built
+// ---------------------------------------------------------------------------
+
+type Capability = { icon: LucideIcon; title: string; body: string }
+
+/** The generation workflows the composer actually offers (see GENERATE_MODES). */
+const CAPABILITIES: Capability[] = [
+  { icon: GraduationCap, title: 'Course plans', body: 'A term mapped out week by week.' },
+  { icon: BookOpen, title: 'Lesson plans', body: 'Structured sessions from your own materials.' },
+  { icon: FileQuestion, title: 'Assessments', body: 'Quizzes and tests, exported to Google Forms.' },
+  { icon: FlaskConical, title: 'Labs', body: 'Practical worksheets with setup and steps.' },
+  { icon: Mail, title: 'Class email', body: 'Drafted, reviewed by you, then sent or scheduled.' },
+  { icon: Gamepad2, title: 'Study games', body: 'Revision activities built from your notes.' },
+]
+
+/**
+ * Google services and why each is asked for. This mirrors the OAuth scopes the
+ * backend actually requests (utils/google_credentials.py) — the consent screen
+ * should never ask for something this page has not already explained.
+ */
+const GOOGLE_SERVICES: { name: string; purpose: string }[] = [
+  { name: 'Google Docs', purpose: 'lesson plans and labs' },
+  { name: 'Google Drive', purpose: 'a folder per class for what MILA creates' },
+  { name: 'Google Forms', purpose: 'assessments, and their responses' },
+  { name: 'Gmail', purpose: 'messages to your students' },
+]
+
+const MICRO_LABEL = 'text-[10px] font-bold uppercase tracking-[0.2em] text-violet-700'
+
+/**
+ * Lockup height, and the nudge that makes it sit flush with the type below it.
+ *
+ * The artwork does not start at its own viewBox edge — the leftmost bead's
+ * outer edge lands ~7.9% in (bead cx 20.2, r 7.5, inside a `scale(0.875)`
+ * group on a 140-wide box). Rendered flush-left the mark therefore hangs about
+ * 15px right of the heading's stem, which reads as a misalignment rather than
+ * as clear space. Pulling it back by that same fraction lines the ring's
+ * leftmost point up with the text.
+ */
+const LOGO_HEIGHT = 112
+const LOGO_OPTICAL_INSET = Math.round(LOGO_HEIGHT * (140 / 84) * 0.079)
+
+/**
+ * Both columns end in a footer, and they have to land on the same line — the
+ * page is one surface split by a glass edge, not two independent pages. Sharing
+ * these three classes (and the columns' `py-14`) is what puts the rule, the
+ * micro-label and the content line at identical heights on either side.
+ */
+const FOOTER_BAND = 'border-t border-violet-200/60 pt-6'
+const FOOTER_LABEL = 'text-[10px] font-bold uppercase tracking-[0.2em] text-slate-600'
+const FOOTER_LINE = 'mt-2.5 text-sm font-medium leading-6 text-slate-600'
+
+// ---------------------------------------------------------------------------
+
+function TermsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   return (
-    <div
-      className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-      onClick={onClose}
-      aria-hidden="true"
-    />
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Terms and conditions"
+      eyebrow="Last updated 2025"
+      size="lg"
+      footer={<Button onClick={onClose}>Got it</Button>}
+    >
+      <div className="space-y-5 text-sm leading-relaxed text-slate-700">
+        <p>
+          By using MILA (MFU Intelligent Lecturer Assistant) you agree to the terms below.
+          Please read them before continuing.
+        </p>
+        <section className="space-y-1.5">
+          <h4 className="font-semibold text-slate-900">Purpose of the service</h4>
+          <p>
+            MILA helps you plan lessons, create assessments, manage student batches, and
+            communicate with students using Google Workspace tools.
+          </p>
+        </section>
+        <section className="space-y-1.5">
+          <h4 className="font-semibold text-slate-900">Account access</h4>
+          <p>
+            Sign in with a valid Google account. You are responsible for keeping that
+            account secure.
+          </p>
+        </section>
+        <section className="space-y-1.5">
+          <h4 className="font-semibold text-slate-900">Google services and permissions</h4>
+          <p>
+            MILA asks for access to the Google services listed on the sign-in panel, and
+            uses them only for the classroom workflows described there.
+          </p>
+        </section>
+        <section className="space-y-1.5">
+          <h4 className="font-semibold text-slate-900">Your work stays yours</h4>
+          <p>
+            Everything MILA generates is a draft for you to review. Nothing is sent to
+            your students until you approve it.
+          </p>
+        </section>
+      </div>
+    </Modal>
   )
 }
 
-function TermsModal({ open, onClose }: ModalProps) {
-  if (!open) return null
-
+function AboutModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   return (
-    <div className="fixed inset-0 z-[9999]">
-      <ModalBackdrop onClose={onClose} />
-      <div className="absolute inset-0 flex items-center justify-center p-4 sm:p-6 md:p-8 pointer-events-none">
-        <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden pointer-events-auto border border-white/20">
-          <div className="flex items-center justify-between p-6 border-b border-slate-200 bg-gradient-to-r from-violet-50/50 to-white shrink-0">
-            <div>
-              <h3 className="text-xl font-bold text-slate-900">MILA — terms and conditions</h3>
-              <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mt-1">
-                Last updated: 2025
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={onClose}
-              className="text-slate-400 hover:text-slate-600 transition p-2 hover:bg-slate-100 rounded-xl"
-              aria-label="Close"
-            >
-              ✕
-            </button>
-          </div>
-          <div className="flex-1 overflow-y-auto p-8 space-y-6 text-slate-700 text-sm leading-relaxed no-scrollbar">
-            <p className="font-semibold text-slate-800 italic border-l-4 border-violet-500 pl-4 bg-violet-50/30 py-4 rounded-r-xl">
-              By using MILA (MFU Intelligent Lecturer Assistant), you agree to the following
-              terms. Please read them before continuing.
-            </p>
-            <section className="space-y-2">
-              <h4 className="font-bold text-slate-900 text-base">1. Purpose of the service</h4>
-              <p>
-                MILA helps you plan lessons, create assessments, manage student batches, and
-                communicate with students using Google Workspace tools.
-              </p>
-            </section>
-            <section className="space-y-2">
-              <h4 className="font-bold text-slate-900 text-base">2. Account access</h4>
-              <p>
-                To use MILA, sign in with a valid Google account. You are responsible for
-                keeping your account secure.
-              </p>
-            </section>
-            <section className="space-y-2">
-              <h4 className="font-bold text-slate-900 text-base">3. Google services and permissions</h4>
-              <p className="text-slate-600 italic">
-                MILA may request access to selected Google services — Gmail, Google Forms, and
-                Google Calendar — to support classroom workflows.
-              </p>
-            </section>
-            <div className="bg-violet-50 border-l-4 border-violet-500 p-5 rounded-r-xl">
-              <p className="text-sm font-bold text-violet-800">
-                By continuing, you confirm that you understand and agree to these terms.
-              </p>
-            </div>
-          </div>
-          <div className="p-6 border-t border-slate-200 bg-slate-50 shrink-0 flex gap-4">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 px-6 py-3 text-sm font-bold text-slate-600 bg-white border border-slate-300 rounded-2xl hover:bg-slate-50 transition shadow-sm"
-            >
-              Cancel
-            </button>
-            <Button type="button" onClick={onClose} size="lg" className="flex-1">
-              Accept & Continue
-            </Button>
-          </div>
-        </div>
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="About MILA"
+      eyebrow="Educator-first assistant"
+      size="lg"
+      footer={<Button onClick={onClose}>Close</Button>}
+    >
+      <div className="space-y-5 text-sm leading-relaxed text-slate-700">
+        <p>
+          MILA — MFU Intelligent Lecturer Assistant — supports you in planning lessons,
+          creating assessments, managing classes, and communicating with students.
+        </p>
+        <p>
+          It is built <strong className="font-semibold text-slate-900">by educators, for
+          educators</strong>, around the classroom workflows you already use, and it is
+          improved continuously from lecturer feedback.
+        </p>
+        <p>
+          MILA is developed at Mae Fah Luang University under the MLII Innovation
+          Development Grant, at the MFU Learning Innovation Institute.
+        </p>
       </div>
-    </div>
-  )
-}
-
-function AboutModal({ open, onClose }: ModalProps) {
-  if (!open) return null
-
-  return (
-    <div className="fixed inset-0 z-[9999]">
-      <ModalBackdrop onClose={onClose} />
-      <div className="absolute inset-0 flex items-center justify-center p-4 sm:p-6 md:p-8 pointer-events-none">
-        <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden pointer-events-auto border border-white/20">
-          <div className="flex items-center justify-between p-6 border-b border-slate-200 bg-gradient-to-r from-violet-50/50 to-white shrink-0">
-            <div>
-              <h3 className="text-xl font-bold text-slate-900">About MILA</h3>
-              <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mt-1">
-                Educator-first assistant
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={onClose}
-              className="text-slate-400 hover:text-slate-600 transition p-2 hover:bg-slate-100 rounded-xl"
-              aria-label="Close"
-            >
-              ✕
-            </button>
-          </div>
-          <div className="flex-1 overflow-y-auto p-8 space-y-6 text-slate-700 text-sm leading-relaxed no-scrollbar">
-            <p>
-              MILA (MFU Intelligent Lecturer Assistant) supports you in planning lessons,
-              creating assessments, managing classes, and communicating with students.
-            </p>
-            <p>
-              It is built <strong>by educators, for educators</strong>, around the classroom
-              workflows you already use.
-            </p>
-            <p className="text-slate-600">
-              MILA is developed at <strong>Mae Fah Luang University</strong> under the MLII
-              Innovation Development Grant (MFU Learning Innovation Institute).
-            </p>
-            <div className="bg-violet-50 border-l-4 border-violet-500 p-5 rounded-r-xl">
-              <p className="text-sm font-semibold text-violet-800">
-                MILA is continuously improved from lecturer feedback.
-              </p>
-            </div>
-          </div>
-          <div className="p-6 border-t border-slate-200 bg-slate-50 shrink-0">
-            <button
-              type="button"
-              onClick={onClose}
-              className="w-full px-6 py-3 text-sm font-bold text-slate-600 bg-white border border-slate-300 rounded-2xl hover:bg-slate-50 transition shadow-sm"
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+    </Modal>
   )
 }
 
 export default function Login() {
   const { user, loading, signInWithGoogle } = useAuth()
+  const [redirecting, setRedirecting] = useState(false)
   const [termsOpen, setTermsOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
 
-  if (loading) {
-    return <PageSpinner label="Checking sign-in status…" />
-  }
-
-  if (user) {
-    return <Navigate to="/chat" replace />
-  }
-
-  function handleSignIn() {
-    signInWithGoogle()
-  }
+  if (loading) return <LoadingScreen label="Checking sign-in status…" />
+  if (user) return <Navigate to="/chat" replace />
 
   return (
-    <div className="academic-bg h-screen overflow-hidden no-scrollbar relative font-sans">
+    <div className="academic-bg fixed inset-0 flex font-sans">
       <TermsModal open={termsOpen} onClose={() => setTermsOpen(false)} />
       <AboutModal open={aboutOpen} onClose={() => setAboutOpen(false)} />
 
-      <div className="flex h-full w-full">
-        {/* Left: branding */}
-        <div className="hidden lg:flex flex-1 flex-col justify-between p-12 xl:p-20 hero-left-branding h-full">
-          <div>
-            <div className="mb-10">
-              <span className="px-4 py-1.5 text-[10px] font-bold tracking-[0.2em] text-violet-700 uppercase border border-violet-200 rounded-full bg-violet-50/80">
-                Your teaching companion
-              </span>
-            </div>
+      {/* ---------------------------------------------------------------- */}
+      {/* Left: what MILA is                                               */}
+      {/* ---------------------------------------------------------------- */}
+      {/* `justify-between` on three groups — mark, hero, integrations — so the
+          column occupies the full height on purpose rather than stacking from
+          the top and trailing off. */}
+      <section className="hero-left-branding hidden flex-1 flex-col justify-between gap-12 overflow-y-auto px-12 py-14 lg:flex xl:px-20">
+        <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
+          <div className="maia-blob maia-blob--azure absolute -top-16 right-[-6rem] h-[26rem] w-[26rem]" />
+          <div className="maia-blob maia-blob--indigo absolute bottom-24 right-[12%] h-72 w-72" />
+        </div>
+        {/* No container. The lockup carries its own clear space, and boxing it
+            made the mark read as a stray card floating on the canvas. */}
+        <div style={{ marginLeft: -LOGO_OPTICAL_INSET }}>
+          <MilaLogo height={LOGO_HEIGHT} />
+        </div>
 
-            <div className="mb-8">
-              {/* The production lockup, used as-is — the wordmark is never retyped. */}
-              <div className="maia-glass inline-flex rounded-3xl p-4">
-                <MilaLogo height={52} clearSpace />
-              </div>
-            </div>
+        <div className="max-w-3xl 2xl:max-w-5xl">
+          <p className={MICRO_LABEL}>Your teaching companion</p>
 
-            <div className="mb-14 max-w-2xl">
-              <h2 className="font-display text-4xl xl:text-5xl font-bold tracking-tight mb-2 leading-tight">
-                <span className="bg-clip-text text-transparent bg-gradient-to-r from-violet-600 to-violet-400">
-                  Smart support for educators
+          {/* One clause per line, deliberately. At `text-4xl` in a `max-w-xl`
+              column the first clause wrapped after "for", so the heading read as
+              three ragged lines instead of two balanced ones. A wider measure
+              plus a smaller step at `lg` keeps "Smart support for educators," on
+              one line at every width, which is also what frees the height the
+              mark above now uses. */}
+          <p className="mt-3 font-display text-3xl font-bold leading-[1.12] tracking-[-0.025em] text-slate-900 xl:text-5xl xl:tracking-[-0.03em]">
+            <span className="block">Smart support for educators,</span>
+            <span className="block text-violet-600">by educators.</span>
+          </p>
+
+          <p className="mt-6 max-w-lg text-lg leading-relaxed text-slate-600 2xl:max-w-2xl">
+            {/* Plain, not MilaWord: gold on this canvas measures 1.35:1 at
+                18px, so the I all but vanishes — and the component's own rule
+                is display sizes only. The mark sits directly above anyway. */}
+            <span className="font-semibold text-slate-800">MILA</span> turns your course
+            materials into the things you actually hand out — and sends them where your
+            students already are. Built at Mae Fah Luang University.
+          </p>
+
+          {/* A row per workflow rather than two large cards: the product does
+              six of these, and two cards both over-weighted the two they named
+              and left the column looking half-finished. */}
+          <ul className="mt-10 grid grid-cols-2 gap-x-6 gap-y-6 xl:gap-x-10 2xl:grid-cols-3">
+            {CAPABILITIES.map(({ icon: Icon, title, body }) => (
+              <li key={title} className="flex gap-4">
+                <span className="mt-0.5 flex h-9 w-9 flex-none items-center justify-center rounded-xl border border-white/70 bg-white/70 text-violet-600 shadow-sm">
+                  <Icon className="h-5 w-5" strokeWidth={1.75} />
                 </span>
-              </h2>
-              <p className="text-xl xl:text-2xl text-slate-700 font-medium">
-                by <span className="text-violet-700 font-bold">educators</span>, built at Mae
-                Fah Luang University.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-10">
-              <div className="space-y-4 bg-white/50 backdrop-blur-sm p-6 rounded-3xl border border-white/60 shadow-md">
-                <h3 className="text-xl font-bold text-slate-900">AI-Powered Assessments</h3>
-                <p className="text-sm text-slate-700 font-medium">
-                  Generate quizzes and tests from your course materials, then distribute
-                  them via Google Forms.
-                </p>
-              </div>
-              <div className="space-y-4 bg-white/50 backdrop-blur-sm p-6 rounded-3xl border border-white/60 shadow-md">
-                <h3 className="text-xl font-bold text-slate-900">Lesson Plans & Scheduling</h3>
-                <p className="text-sm text-slate-700 font-medium">
-                  Create structured lesson plans, manage student batches, and schedule
-                  classes in Google Calendar.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="pt-8 border-t border-slate-300/60">
-            <p className="text-[10px] text-slate-600 uppercase tracking-widest font-bold mb-4">
-              Works Seamlessly With
-            </p>
-            <div className="flex flex-wrap gap-6 text-slate-700 font-semibold text-sm">
-              <span>Google Docs</span>
-              <span>Google Forms</span>
-              <span>Google Calendar</span>
-              <span>Gmail</span>
-            </div>
-          </div>
+                <span className="min-w-0">
+                  <span className="block text-base font-semibold text-slate-900">{title}</span>
+                  <span className="mt-1 block text-sm leading-normal text-slate-600">{body}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
         </div>
 
-        {/* Right: login card */}
-        <div className="w-full lg:w-[480px] xl:w-[520px] h-full flex flex-col justify-center p-10 lg:p-12 login-card overflow-y-auto no-scrollbar">
-          <div className="mb-12">
-            <h2 className="text-4xl font-bold text-slate-900 mb-4 tracking-tight">
-              Log in to{' '}
-              <span className="bg-clip-text text-transparent bg-gradient-to-r from-violet-500 to-violet-600">
-                MILA
-              </span>
-            </h2>
-            <p className="text-slate-600 text-lg font-medium">
-              Sign in to plan lessons, create assessments, and send them to your students.
+        {/* Shares its rule position and two-row rhythm with the sign-in
+            column's footer, so the two read as one band across the seam
+            instead of two footers that happen to be near each other. */}
+        <div className={FOOTER_BAND}>
+          <p className={FOOTER_LABEL}>Works seamlessly with</p>
+          {/* A fixed 32px gutter, not `justify-between`. Spreading five names
+              across the full column stretched the gaps to whatever width was
+              left over, which varies with the viewport and pulled the list
+              apart. A constant gap keeps them reading as one row. */}
+          <div className={`${FOOTER_LINE} flex flex-wrap gap-x-8 gap-y-1`}>
+            {GOOGLE_SERVICES.map(({ name }) => (
+              <span key={name}>{name}</span>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ---------------------------------------------------------------- */}
+      {/* Right: sign in                                                   */}
+      {/* ---------------------------------------------------------------- */}
+      {/* Everything here — including the footer — is one group centred with
+          `my-auto`, rather than a `flex-1 justify-center` block above a footer
+          pinned to the bottom. That older arrangement split the column's spare
+          height in two and parked half of it between the last link and the
+          footer, where it read as a hole. Centring the whole group instead puts
+          all the slack outside it, as symmetric margin.
+
+          `my-auto` rather than `justify-center` on the column: it centres the
+          same way but still scrolls from the top when the viewport is too short
+          to fit the group, instead of clipping its head. */}
+      <section className="login-card flex w-full flex-col overflow-y-auto px-6 py-14 sm:px-10 lg:w-[27rem] lg:px-12 xl:w-[31rem]">
+        {/* Bounded spacers rather than `my-auto`. Auto margins split the spare
+            height evenly, which parked half of it between the last button and
+            the footer — a gap bounded on both sides, so it read as a hole. The
+            second spacer is capped, so the surplus collects above the group
+            instead, where it is just page margin. Both collapse to zero when
+            the column overflows, so a short viewport still scrolls from the
+            top rather than clipping the heading. */}
+        <div aria-hidden="true" className="flex-1" />
+
+        <div className="mx-auto w-full max-w-sm md:max-w-md lg:max-w-sm">
+          {/* The left column is hidden below lg, so the mark has to appear here
+              or the page loses its identity entirely on a phone. */}
+          <div className="mb-10 lg:hidden">
+            <MilaLogo height={38} />
+          </div>
+          {/* The page's only h1: the left column is `hidden lg:flex`, so below
+              1024px its heading is out of the accessibility tree entirely and
+              the document used to start at h2. "Sign in", not "Log in" —
+              everything else in the app says sign in. */}
+          <h1 className="font-display text-3xl font-bold leading-[1.15] tracking-[-0.015em] text-slate-900">
+            Sign in to <MilaWord className="text-violet-600" />
+          </h1>
+          <p className="mt-3 text-base leading-relaxed text-slate-600">
+            Plan a lesson, build an assessment, and send it to your students.
+          </p>
+
+          {/* signInWithGoogle is a full-page redirect, so without this the
+              button sits inert for however long the round trip takes and the
+              page looks broken. `loading` renders the bead garland — the
+              loading loader, never the thinking one. */}
+          <Button
+            type="button"
+            onClick={() => {
+              setRedirecting(true)
+              signInWithGoogle()
+            }}
+            loading={redirecting}
+            size="lg"
+            block
+            className="mt-10"
+          >
+            {redirecting ? 'Taking you to Google…' : 'Sign in with Google'}
+          </Button>
+
+          <div className="mt-4 rounded-2xl border border-white/70 bg-white/70 p-5 shadow-sm backdrop-blur-sm">
+            <p className="text-sm font-semibold text-slate-900">What MILA will ask for</p>
+            <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
+              Google will ask you to grant access to the services below. MILA uses them
+              only for the classroom work you start.
             </p>
+            <ul className="mt-4 space-y-2">
+              {GOOGLE_SERVICES.map(({ name, purpose }) => (
+                <li key={name} className="flex gap-2.5 text-sm leading-snug">
+                  <span className="mt-2 h-1 w-1 flex-none rounded-full bg-violet-400" />
+                  <span className="text-slate-600">
+                    <span className="font-semibold text-slate-800">{name}</span> — {purpose}
+                  </span>
+                </li>
+              ))}
+            </ul>
           </div>
 
-          <div className="space-y-6">
-            <Button type="button" onClick={handleSignIn} block className="group">
-              Sign in with Google
+          {/* The design system's `secondary` — frosted white against the solid
+              violet primary — so these read as buttons without competing with
+              the one action the page exists for. Equal columns rather than a
+              flex row: two buttons of different widths under a full-width CTA
+              look like a mistake. */}
+          <div className="mt-8 grid grid-cols-2 gap-3">
+            <Button type="button" variant="secondary" size="sm" block onClick={() => setTermsOpen(true)}>
+              Terms and conditions
             </Button>
-
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-3">
-              <p className="text-sm font-bold text-slate-900">Privacy and data use</p>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                To use MILA, you may be asked to grant access to selected Google services.
-                This supports lesson planning and classroom workflows.
-              </p>
-              <ul className="text-xs text-slate-600 list-disc list-inside space-y-1">
-                <li>
-                  <strong>Google Docs</strong> – lesson plans
-                </li>
-                <li>
-                  <strong>Google Forms</strong> – assessments
-                </li>
-                <li>
-                  <strong>Google Calendar</strong> – schedules
-                </li>
-                <li>
-                  <strong>Gmail</strong> – communications
-                </li>
-              </ul>
-            </div>
-
-            <div className="mt-8 flex items-center justify-center gap-4 flex-wrap">
-              <button
-                type="button"
-                onClick={() => setTermsOpen(true)}
-                className="px-5 py-2.5 text-sm font-semibold text-slate-700 bg-white border border-slate-300 rounded-xl hover:bg-slate-50 hover:border-slate-400 transition-all shadow-sm"
-              >
-                Terms & Conditions
-              </button>
-              <button
-                type="button"
-                onClick={() => setAboutOpen(true)}
-                className="px-5 py-2.5 text-sm font-semibold text-slate-700 bg-white border border-slate-300 rounded-xl hover:bg-slate-50 hover:border-slate-400 transition-all shadow-sm"
-              >
-                Contact & About Us
-              </button>
-            </div>
+            <Button type="button" variant="secondary" size="sm" block onClick={() => setAboutOpen(true)}>
+              About and contact
+            </Button>
           </div>
-
-          <footer className="mt-auto pt-8 border-t border-slate-200 text-xs text-slate-500 flex flex-col sm:flex-row justify-between gap-2">
-            <span>&copy; 2026 MILA · MFU</span>
-            <span>Built with the MLII Innovation Development Grant</span>
-          </footer>
         </div>
-      </div>
+
+        <div aria-hidden="true" className="max-h-20 flex-1" />
+
+        {/* Outside the group and last in the column, so it sits on the same
+            line as the integrations footer opposite. The grant line leads and
+            the copyright follows, which is what puts © level with the Google
+            services list rather than a row above it. */}
+        <footer className={`mx-auto w-full max-w-sm md:max-w-md lg:max-w-sm ${FOOTER_BAND}`}>
+          <p className={FOOTER_LABEL}>Built with the MLII Innovation Development Grant</p>
+          {/* Two items, so the ends of the rule are the natural anchors —
+              unlike the five-name list opposite, which needs a fixed gutter. */}
+          <div className={`${FOOTER_LINE} flex justify-between gap-4`}>
+            <span>© 2026 MILA</span>
+            <span>Mae Fah Luang University</span>
+          </div>
+        </footer>
+      </section>
     </div>
   )
 }

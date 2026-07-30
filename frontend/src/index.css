@@ -242,9 +242,12 @@
     box-shadow: var(--shadow-glass-lg);
   }
 
+  /* Deliberately no background-color: the root already paints .academic-bg,
+     dots included, and repainting it here covered the dotted canvas that is
+     the design system's signature backdrop — leaving the brand column as flat
+     lavender while the glass panel opposite was the only place it showed. */
   .hero-left-branding {
     position: relative;
-    background-color: var(--academic-bg);
     overflow: hidden;
   }
 
@@ -252,10 +255,12 @@
     content: '';
     position: absolute;
     inset: 0;
+    /* Lightened from .85/.6 so the dots read through. Any heavier and the
+       texture is gone; any lighter and the display type loses its ground. */
     background: linear-gradient(
       135deg,
-      rgba(248, 244, 254, 0.85),
-      rgba(236, 227, 249, 0.6)
+      rgba(248, 244, 254, 0.55),
+      rgba(236, 227, 249, 0.3)
     );
     z-index: 1;
   }

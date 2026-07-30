@@ -46,8 +46,10 @@ export default function App() {
           </Route>
         </Route>
 
-        <Route path="/" element={<Navigate to="/assessments" replace />} />
-        <Route path="*" element={<Navigate to="/assessments" replace />} />
+        {/* Chat is the product's front door — every workflow starts from the
+            composer — so it is where an unrouted visit lands. */}
+        <Route path="/" element={<Navigate to="/chat" replace />} />
+        <Route path="*" element={<Navigate to="/chat" replace />} />
       </Routes>
     </BrowserRouter>
   )

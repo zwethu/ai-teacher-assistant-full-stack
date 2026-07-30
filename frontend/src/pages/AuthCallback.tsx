@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { signInWithCustomToken } from 'firebase/auth'
 import { auth } from '../lib/firebase'
-import PageSpinner from '../components/ui/PageSpinner'
+import LoadingScreen from '../components/ui/LoadingScreen'
 
 export default function AuthCallback() {
   const [searchParams] = useSearchParams()
@@ -18,7 +18,9 @@ export default function AuthCallback() {
     signInWithCustomToken(auth, customToken)
       .then(async (credential) => {
         await credential.user.reload()
-        navigate('/assessments', { replace: true })
+        // Chat is the front door: every workflow starts from the composer, so
+        // signing in lands there rather than on one standalone surface.
+        navigate('/chat', { replace: true })
       })
       .catch((err) => {
         console.error('Custom token sign-in failed:', err)
@@ -26,5 +28,5 @@ export default function AuthCallback() {
       })
   }, [searchParams, navigate])
 
-  return <PageSpinner label="Signing you in…" />
+  return <LoadingScreen label="Signing you in…" />
 }

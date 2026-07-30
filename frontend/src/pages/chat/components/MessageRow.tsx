@@ -36,6 +36,7 @@ import {
   schedulePendingEmail,
   sendPendingEmail,
   updatePendingEmail,
+  type UpdatePendingEmailResult,
 } from '../../../services/chatService'
 import { getChatAttachmentContent } from '../../../services/chatService'
 import {
@@ -93,6 +94,7 @@ export function MessageRow({
   approvalSuperseded = false,
   courseName = '',
   onAskAboutAttachment,
+  onPendingEmailEdited,
 }: {
   msg?: ChatMessage | null
   run?: RunUiState
@@ -103,6 +105,7 @@ export function MessageRow({
   approvalSuperseded?: boolean
   courseName?: string
   onAskAboutAttachment?: (attachment: ChatAttachmentSnapshot) => void
+  onPendingEmailEdited?: (runId: string, result: UpdatePendingEmailResult) => void
 }) {
   const [blueprintMode, setBlueprintMode] = useState<'manual' | 'suggested' | 'edit-suggested' | null>(null)
   const [actionsOpen, setActionsOpen] = useState(false)
@@ -234,7 +237,9 @@ export function MessageRow({
             {!isUser && batchId && <ArtifactExportButton batchId={batchId} msg={msg} />}
             {!isUser && batchId && <BlueprintSaveButton batchId={batchId} msg={msg} />}
             {!isUser && batchId && <GameCreateButton batchId={batchId} msg={msg} />}
-            {!isUser && batchId && <EmailActionButtons batchId={batchId} msg={msg} />}
+            {!isUser && batchId && (
+              <EmailActionButtons batchId={batchId} msg={msg} onEdited={onPendingEmailEdited} />
+            )}
           </div>
         )}
       </div>
@@ -878,7 +883,15 @@ function formatMaybeDate(value: string): string {
   return Number.isNaN(d.getTime()) ? value : d.toLocaleString()
 }
 
-export function EmailActionButtons({ batchId, msg }: { batchId: string; msg: ChatMessage }) {
+export function EmailActionButtons({
+  batchId,
+  msg,
+  onEdited,
+}: {
+  batchId: string
+  msg: ChatMessage
+  onEdited?: (runId: string, result: UpdatePendingEmailResult) => void
+}) {
   const metadata = msg.metadata || {}
   const sendable = metadata.pending_email_sendable === true
   const alreadySent = metadata.email_sent === true
@@ -949,10 +962,14 @@ export function EmailActionButtons({ batchId, msg }: { batchId: string; msg: Cha
     setError('')
     setBusy('edit')
     try {
-      await updatePendingEmail(batchId, chatId, runId, {
+      const result = await updatePendingEmail(batchId, chatId, runId, {
         subject: draft.subject,
         body: draft.body,
       })
+      // Lift the saved draft back into the message list: the backend rewrote the stored
+      // message, but nothing re-fetches it, so the preview card above would keep showing
+      // the pre-edit text and the save would look like a no-op.
+      onEdited?.(runId, result)
       setShowEdit(false)
     } catch (err) {
       onError(err)

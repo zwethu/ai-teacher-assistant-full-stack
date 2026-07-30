@@ -28,6 +28,7 @@ import {
   deleteChatAttachment,
   updateChatTitle,
   type ChatRunRecord,
+  type UpdatePendingEmailResult,
 } from '../../../services/chatService'
 import { generateAssessment, generateLab, generateLessonPlan, invokeAgent } from '../../../services/agentService'
 import {
@@ -1059,6 +1060,34 @@ export function useChatPage() {
     anchorToBottomDuringLiveUpdate()
   }
 
+  /** Merge a saved email edit into the rendered message.
+   *
+   * The backend rewrites the stored message, but messages are fetched once per chat
+   * (listMessages) rather than subscribed to, so without this the preview card and the
+   * Send button's recipient count keep showing the pre-edit draft until the chat is
+   * reopened — making a successful save look like it did nothing. */
+  function applyPendingEmailEdit(runId: string, result: UpdatePendingEmailResult) {
+    if (!runId) return
+    setMessages((prev) =>
+      prev.map((msg) =>
+        msg && msg.role === 'assistant' && msg.run_id === runId
+          ? {
+              ...msg,
+              content: result.preview_markdown || msg.content,
+              metadata: {
+                ...(msg.metadata || {}),
+                artifact_title: result.subject,
+                email_subject: result.subject,
+                email_body: result.body,
+                email_recipients: result.recipients,
+                email_recipient_count: result.recipient_count,
+              },
+            }
+          : msg,
+      ),
+    )
+  }
+
   async function pollFinalMessagesOnce(
     batchId: string,
     chatId: string,
@@ -1344,6 +1373,7 @@ export function useChatPage() {
     handleNewChat,
     handleSend,
     handleApproveOutline,
+    applyPendingEmailEdit,
     handleInputKeyDown,
     handleTextareaInput,
     handleAskAboutAttachment,

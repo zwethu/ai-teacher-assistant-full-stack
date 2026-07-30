@@ -7,6 +7,7 @@ import { type ConnectorsState } from './ConnectorToggles'
 import type { RunUiState } from '../runTypes'
 import type { PendingChatAttachment } from '../hooks/useChatPage'
 import type { ChatAttachmentListItem, ChatAttachmentSnapshot } from '../../../entity/Chat'
+import type { UpdatePendingEmailResult } from '../../../services/chatService'
 
 export type GenerateMode = 'lesson_plan' | 'lab' | 'assessment' | 'course_blueprint' | 'email' | 'game'
 
@@ -406,6 +407,7 @@ type MessagesPanelProps = {
   welcomeContent: React.ReactNode
   onApproveOutline: (message: ChatMessage) => void
   onAskAboutAttachment: (attachment: ChatAttachmentSnapshot) => void
+  onPendingEmailEdited: (runId: string, result: UpdatePendingEmailResult) => void
 }
 
 export function ChatMessagesPanel({
@@ -420,6 +422,7 @@ export function ChatMessagesPanel({
   welcomeContent,
   onApproveOutline,
   onAskAboutAttachment,
+  onPendingEmailEdited,
 }: MessagesPanelProps) {
   const safeMessages = messages.filter(Boolean)
   const completedOutlineRunIds = new Set(
@@ -472,6 +475,7 @@ export function ChatMessagesPanel({
                 approvalSuperseded={Boolean(msg.run_id && supersededOutlineRunIds.has(msg.run_id))}
                 courseName={courseName || ''}
                 onAskAboutAttachment={onAskAboutAttachment}
+                onPendingEmailEdited={onPendingEmailEdited}
               />
             ))}
             {sending && !safeMessages.some((msg) => msg.pending) && <ThinkingIndicator />}

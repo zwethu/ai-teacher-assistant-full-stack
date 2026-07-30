@@ -40,6 +40,11 @@ import {
   type AgentRunStep,
   type AgentRunStreamMeta,
 } from '../../../services/agentRunStream'
+import {
+  subscribeChatAttachments,
+  type ChatAttachmentStatusEvent,
+} from '../../../services/chatAttachmentStream'
+import { createStallWatchdog } from '../../../hooks/streamStallWatchdog'
 import { emitChatCreated } from '../../../utils/chatEvents'
 import type { RunUiState } from '../runTypes'
 import type { GenerateMode } from '../components/ChatConversation'
@@ -75,6 +80,10 @@ const STREAM_DELAY_MESSAGE =
   'Live updates are delayed. I will fetch the final response when ready.'
 
 const MAX_HISTORICAL_RUN_SUBSCRIPTIONS = 5
+
+/** Backstop cadence for attachment readiness. RTDB carries the fast path; this only
+ *  catches the case where the live channel is unconfigured or unreachable. */
+const ATTACHMENT_FALLBACK_POLL_MS = 10_000
 
 function connectorErrorMessage(err: unknown): string {
   if (!axios.isAxiosError(err)) {
@@ -186,7 +195,9 @@ export function useChatPage() {
   const pendingInitialAttachmentIdsRef = useRef<string[]>([])
   const runUnsubscribesRef = useRef<Record<string, () => void>>({})
   const runDeltaIndexesRef = useRef<Record<string, Set<number>>>({})
-  const runFallbackTimerRef = useRef<number | null>(null)
+  // Per-run silence detector for the live channel. Previously a single shared
+  // timeout, so two concurrent runs fought over one slot.
+  const stallWatchdogRef = useRef(createStallWatchdog())
   const runPollIntervalRef = useRef<Record<string, number>>({})
   const workflowModeRunIdsRef = useRef<Record<string, GenerateMode>>({})
   const scrollFrameRef = useRef<number | null>(null)
@@ -245,20 +256,29 @@ export function useChatPage() {
     const transitional = pendingAttachments.filter((item) => item.status === 'processing')
     if (!batchId || !chatId || transitional.length === 0) return
     let cancelled = false
+    const apply = (update: ChatAttachmentStatusEvent) => {
+      if (cancelled) return
+      setPendingAttachments((current) => current.map((item) =>
+        item.attachment_id === update.attachment_id ? { ...item, ...update } : item))
+    }
+
+    // Push. The backend mirrors every status transition, and onChildAdded replays
+    // whatever is already there, so the current state arrives without asking.
+    const unsubscribe = subscribeChatAttachments(chatId, { onStatus: apply })
+
+    // Pull, as a safety net only — RTDB is best-effort and goes quietly unused
+    // when FIREBASE_RTDB_URL is unset. Deliberately slow: this exists so the
+    // composer cannot hang, not to drive the UI.
     const refresh = async () => {
       const updates = await Promise.all(transitional.map(async (item) => {
         try { return await getChatAttachmentRagStatus(batchId, chatId, item.attachment_id) }
         catch { return null }
       }))
       if (cancelled) return
-      setPendingAttachments((current) => current.map((item) => {
-        const update = updates.find((value) => value?.attachment_id === item.attachment_id)
-        return update ? { ...item, ...update } : item
-      }))
+      updates.forEach((update) => { if (update) apply(update) })
     }
-    const timer = window.setInterval(() => void refresh(), 2500)
-    void refresh()
-    return () => { cancelled = true; window.clearInterval(timer) }
+    const timer = window.setInterval(() => void refresh(), ATTACHMENT_FALLBACK_POLL_MS)
+    return () => { cancelled = true; unsubscribe(); window.clearInterval(timer) }
   }, [selectedBatch?.id, activeChat?.chat_id, pendingAttachments.map((item) => `${item.attachment_id}:${item.status}`).join('|')])
 
   const [connectors, setConnectors] = useState<ConnectorsState>({
@@ -481,6 +501,13 @@ export function useChatPage() {
     const pendingId = `pending-${runId}`
     ensureRunState(runId)
 
+    // Any inbound signal means the live channel is working, so push the stall
+    // deadline back rather than letting the one-shot timer fire mid-run.
+    const alive = () => {
+      if (!options?.withPolling) return
+      armStallWatchdog(batchId, chatId, runId, pendingId)
+    }
+
     runUnsubscribesRef.current[runId] = subscribeAgentRun(runId, {
       onMessage: (message) => {
         upsertLiveAssistantMessage(message, pendingId, chatId)
@@ -489,6 +516,7 @@ export function useChatPage() {
       },
       onStatus: (status) => {
         updateRunStatus(runId, status)
+        if (status === 'running' || status === 'awaiting_attachments') alive()
         if (status === 'done') {
           stopFallbackTimers(runId)
           void pollFinalMessagesOnce(batchId, chatId, runId, pendingId).finally(() =>
@@ -506,10 +534,30 @@ export function useChatPage() {
           )
           setSending(false)
         }
+        if (status === 'cancelled') {
+          // Reaches this client on a reload, or in a second tab — the tab that
+          // pressed Stop has already unsubscribed. Settle the same way it does,
+          // so the composer never stays stuck in "sending".
+          stopFallbackTimers(runId)
+          settledRunIdsRef.current.add(runId)
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.message_id === pendingId || (msg.pending && msg.run_id === runId)
+                ? {
+                    ...msg,
+                    pending: false,
+                    status: 'done' as const,
+                    metadata: { ...(msg.metadata || {}), run_cancelled: true },
+                  }
+                : msg,
+            ),
+          )
+          setSending(false)
+        }
       },
-      onEvent: (event) => appendRunEvent(runId, event),
-      onStep: (step) => upsertRunStep(runId, step),
-      onDelta: (delta) => appendRunDelta(runId, delta, chatId, pendingId),
+      onEvent: (event) => { alive(); appendRunEvent(runId, event) },
+      onStep: (step) => { alive(); upsertRunStep(runId, step) },
+      onDelta: (delta) => { alive(); appendRunDelta(runId, delta, chatId, pendingId) },
       onStreamMeta: (meta) => updateRunStreamMeta(runId, meta),
       onRunError: (message) => updateRunError(runId, message),
       onDisconnected: (connected) => updateRunConnection(runId, connected),
@@ -522,15 +570,7 @@ export function useChatPage() {
       },
     })
 
-    if (options?.withPolling) {
-      if (runFallbackTimerRef.current) {
-        window.clearTimeout(runFallbackTimerRef.current)
-      }
-      runFallbackTimerRef.current = window.setTimeout(() => {
-        updateRunStreamError(runId, STREAM_DELAY_MESSAGE)
-        startFallbackPolling(batchId, chatId, runId, pendingId)
-      }, 10000)
-    }
+    if (options?.withPolling) armStallWatchdog(batchId, chatId, runId, pendingId)
   }
 
   function unsubscribeFromRun(runId: string) {
@@ -608,9 +648,7 @@ export function useChatPage() {
       Object.keys(runUnsubscribesRef.current).forEach((runId) => {
         unsubscribeFromRun(runId)
       })
-      if (runFallbackTimerRef.current) {
-        window.clearTimeout(runFallbackTimerRef.current)
-      }
+      stopFallbackTimers()
       if (scrollFrameRef.current !== null) {
         window.cancelAnimationFrame(scrollFrameRef.current)
       }
@@ -1340,6 +1378,46 @@ export function useChatPage() {
     setMessages((prev) => mergePolledMessages(prev, data, runId, pendingId))
   }
 
+  /**
+   * One tick of the fallback. Asks the run document whether it has settled — a
+   * single field — and only pays for the whole message list once it has.
+   * Fetching every message on every tick made one stalled run cost hundreds of
+   * document reads. Returns true when the run is finished.
+   */
+  async function pollRunSettledOnce(
+    batchId: string,
+    chatId: string,
+    runId: string,
+    pendingId: string,
+  ): Promise<boolean> {
+    const record = await getChatRun(batchId, chatId, runId)
+    if (record.status !== 'done' && record.status !== 'failed' && record.status !== 'cancelled') {
+      return false
+    }
+    await pollFinalMessagesOnce(batchId, chatId, runId, pendingId)
+    return true
+  }
+
+  /** Record a live-channel signal and push the stall deadline back. */
+  function armStallWatchdog(
+    batchId: string,
+    chatId: string,
+    runId: string,
+    pendingId: string,
+  ) {
+    stallWatchdogRef.current.alive(runId, {
+      onStall: () => {
+        updateRunStreamError(runId, STREAM_DELAY_MESSAGE)
+        startFallbackPolling(batchId, chatId, runId, pendingId)
+      },
+      onRecover: () => {
+        // The stream came back — stop paying for polls and drop the warning.
+        stopFallbackPolling(runId)
+        updateRunStreamError(runId, '')
+      },
+    })
+  }
+
   function startFallbackPolling(
     batchId: string,
     chatId: string,
@@ -1351,9 +1429,9 @@ export function useChatPage() {
     }
     const startedAt = Date.now()
     runPollIntervalRef.current[runId] = window.setInterval(() => {
-      void pollFinalMessagesOnce(batchId, chatId, runId, pendingId)
-        .then(() => {
-          if (Date.now() - startedAt > 5 * 60_000) {
+      void pollRunSettledOnce(batchId, chatId, runId, pendingId)
+        .then((settled) => {
+          if (settled || Date.now() - startedAt > 5 * 60_000) {
             stopFallbackTimers(runId)
             setSending(false)
           }
@@ -1377,12 +1455,7 @@ export function useChatPage() {
   }
 
   function stopFallbackTimers(runId?: string) {
-    if (!runId || Object.keys(runPollIntervalRef.current).length <= 1) {
-      if (runFallbackTimerRef.current) {
-        window.clearTimeout(runFallbackTimerRef.current)
-        runFallbackTimerRef.current = null
-      }
-    }
+    stallWatchdogRef.current.clear(runId)
     stopFallbackPolling(runId)
   }
 

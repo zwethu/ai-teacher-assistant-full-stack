@@ -377,6 +377,226 @@
     }
   }
 
+  /* ---------------------------------------------------------------------
+     Composer motion.
+
+     The chat composer and the batch page's "start a new chat" box share one
+     definition of their chrome (ComposerSurface.tsx), so they share its
+     motion too — these classes are the vocabulary both use.
+
+     Everything below speaks the same language as the thought animations
+     above rather than inventing a second one:
+
+       · cubic-bezier(0.16, 1, 0.3, 1) for anything arriving or growing —
+         the identical curve .mila-thought-in / -swap use. It decelerates
+         hard with no overshoot, which is MILA's "quiet, no bounces" brief,
+         and it front-loads the travel: by the last third of the transition
+         the box has stopped moving in whole pixels.
+       · 240ms for a shell changing shape, 300ms for something entering,
+         200ms for something leaving on cubic-bezier(0.4, 0, 1, 1). Exits are
+         shorter and accelerate away, because a thing that is leaving should
+         not ask for as much attention as a thing that just arrived. All of
+         it sits inside the 380–420ms band the thought animations set.
+
+     The front-loaded curve is also why the composer can animate its own
+     height at all: ChatLayout measures this box with a ResizeObserver and
+     feeds the result to the transcript's bottom padding, so every distinct
+     integer height during a transition costs one render. An ease-out that
+     settles early stops producing new integers well before it formally
+     ends, and there is no feedback loop — the padding lands on a sibling of
+     the composer, so nothing it does can resize the composer back.
+     --------------------------------------------------------------------- */
+
+  /* Web-search armed → the composer nests inside a tinted violet shell.
+     One element that is always in the DOM, not two class strings swapped on
+     arm/disarm: a swap has nothing to interpolate between, because
+     border-width 0→1px and padding 0→4px cannot animate if the properties
+     exist in only one of the two states. So the resting state declares
+     every property the armed state changes — a transparent hairline and
+     zero padding — and arming only changes their values. */
+  .mila-composer-tint {
+    border: 1px solid transparent;
+    border-radius: 26px;
+    background-color: transparent;
+    padding: 0;
+    transition:
+      padding 240ms cubic-bezier(0.16, 1, 0.3, 1),
+      background-color 240ms cubic-bezier(0.16, 1, 0.3, 1),
+      border-color 240ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .mila-composer-tint[data-active='true'] {
+    border-color: color-mix(in srgb, var(--color-violet-200) 70%, transparent);
+    background-color: color-mix(in srgb, var(--color-violet-50) 60%, transparent);
+    padding: 4px;
+  }
+
+  /* Height easing that survives content changes, not just open↔closed.
+     The height is measured in ComposerCollapse and set inline; CSS owns only
+     the transition and the clip.
+
+     `grid-template-rows: 0fr → 1fr` was tried first and is cheaper — no JS,
+     no observer — but `1fr` resolves to whatever the content currently is, so
+     it eases opening and closing and steps for everything in between: going
+     from two rows of tiles to one jumped. `interpolate-size: allow-keywords`
+     would fix that in CSS alone, but is not broadly supported yet.
+
+     `overflow: hidden` lives here, on the element whose height animates. The
+     child is deliberately unconstrained so it can be measured, and carries the
+     padding that keeps the tiles' overhanging remove buttons out of the clip. */
+  .mila-composer-collapse {
+    height: 0;
+    overflow: hidden;
+    transition: height 240ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .mila-composer-collapse > * {
+    opacity: 0;
+    transform: scale(0.96);
+    transform-origin: bottom center;
+    transition:
+      opacity 200ms cubic-bezier(0.4, 0, 1, 1),
+      transform 200ms cubic-bezier(0.4, 0, 1, 1);
+  }
+
+  .mila-composer-collapse[data-open='true'] > * {
+    opacity: 1;
+    transform: none;
+    transition:
+      opacity 300ms cubic-bezier(0.16, 1, 0.3, 1),
+      transform 300ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  /* In-place entrance/exit for things that do not move their neighbours —
+     the generation-mode chip and the "web search is on" strip both sit in a
+     slot whose other occupants are pinned by a spacer, so they only need to
+     fade and settle. */
+  .mila-composer-in {
+    animation: mila-composer-in 300ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  @keyframes mila-composer-in {
+    from {
+      opacity: 0;
+      transform: translate3d(-6px, 0, 0) scale(0.92);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  .mila-composer-out {
+    pointer-events: none;
+    animation: mila-composer-out 200ms cubic-bezier(0.4, 0, 1, 1) both;
+  }
+
+  @keyframes mila-composer-out {
+    from {
+      opacity: 1;
+      transform: none;
+    }
+    to {
+      opacity: 0;
+      transform: translate3d(-4px, 0, 0) scale(0.92);
+    }
+  }
+
+  /* Attachment tiles. Keyed list items only animate when their DOM node is
+     created, so attaching a second file leaves the first one alone. */
+  .mila-tile-in {
+    animation: mila-tile-in 300ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  @keyframes mila-tile-in {
+    from {
+      opacity: 0;
+      transform: translate3d(0, 8px, 0) scale(0.86);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  /* The same motion backwards, plus a width collapse: a tile removed from
+     the middle of the row has neighbours, and without this they would jump
+     left the instant it unmounts. The negative margin swallows the flex gap
+     the tile was holding open. 104px is the tile's fixed size — the same
+     number AttachmentCard and StagedFileTile draw themselves at. */
+  .mila-tile-out {
+    pointer-events: none;
+    overflow: hidden;
+    animation: mila-tile-out 200ms cubic-bezier(0.4, 0, 1, 1) both;
+  }
+
+  @keyframes mila-tile-out {
+    from {
+      opacity: 1;
+      transform: none;
+      width: 104px;
+      margin-right: 0;
+    }
+    to {
+      opacity: 0;
+      transform: translate3d(0, 6px, 0) scale(0.86);
+      width: 0;
+      margin-right: -0.5rem;
+    }
+  }
+
+  /* The web-search pill used to swap `.maia-glass-tint` for a plain slate
+     hairline — two unrelated rule sets, so arming it changed background,
+     border colour, blur and shadow all at once with nothing interpolating.
+     Restated as one element with two states, the pill now lights up rather
+     than replacing itself. The blur is animated from zero instead of being
+     left on at rest, so the resting pill does not quietly frost the glass
+     surface underneath it. */
+  .mila-toggle-pill {
+    border: 1px solid color-mix(in srgb, var(--color-slate-200) 90%, transparent);
+    background-color: transparent;
+    box-shadow: none;
+    backdrop-filter: blur(0px) saturate(1);
+    -webkit-backdrop-filter: blur(0px) saturate(1);
+    transition:
+      background-color 240ms cubic-bezier(0.16, 1, 0.3, 1),
+      border-color 240ms cubic-bezier(0.16, 1, 0.3, 1),
+      box-shadow 240ms cubic-bezier(0.16, 1, 0.3, 1),
+      backdrop-filter 240ms cubic-bezier(0.16, 1, 0.3, 1),
+      color 240ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .mila-toggle-pill[data-armed='true'] {
+    background-color: var(--surface-glass-tint);
+    border-color: rgba(187, 164, 226, 0.55);
+    box-shadow: var(--shadow-glass);
+    backdrop-filter: blur(20px) saturate(1.6);
+    -webkit-backdrop-filter: blur(20px) saturate(1.6);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .mila-composer-tint,
+    .mila-composer-collapse,
+    .mila-composer-collapse > *,
+    .mila-composer-collapse[data-open='true'] > *,
+    .mila-toggle-pill {
+      transition: none;
+    }
+
+    .mila-composer-in,
+    .mila-tile-in {
+      animation: none;
+    }
+
+    /* An exit with no animation would be a tile sitting there for 200ms
+       after it was removed, which reads as lag rather than as calm. Nothing
+       that is on its way out should be visible at all. */
+    .mila-composer-out,
+    .mila-tile-out {
+      display: none;
+    }
+  }
+
   .no-scrollbar::-webkit-scrollbar {
     display: none;
   }

@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { memo, useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   BookOpen,
@@ -87,7 +87,14 @@ export function parseUserMessageContent(content: string): {
   return { body: bodyLines.join('\n').trim(), references }
 }
 
-export function MessageRow({
+/**
+ * Memoized: every message re-renders its Markdown, and the transcript re-renders
+ * whenever the floating composer's measured height changes — which is now once
+ * per frame while the composer eases open or closed. All props are shallow-
+ * comparable, so callers must pass stable callbacks (see ChatLayout) or the
+ * memo does nothing.
+ */
+export const MessageRow = memo(function MessageRow({
   msg,
   run,
   batchId,
@@ -230,7 +237,7 @@ export function MessageRow({
       </div>
     </div>
   )
-}
+})
 
 /**
  * Attachments shown under a sent user message.

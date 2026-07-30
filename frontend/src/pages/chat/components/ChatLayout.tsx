@@ -133,13 +133,37 @@ export function ChatLayout(props: Props) {
   // reveals it again. Re-pinning to the bottom would technically keep the last
   // line visible, but at the cost of sliding the whole transcript up, which
   // reads as the page jumping.
+  //
+  // Coalesced into one frame: the composer now eases its height rather than
+  // snapping, and the nested collapses have observers of their own, so a single
+  // attach fires this callback several times per frame. Reading offsetHeight
+  // inside the rAF also keeps the layout read out of the observer callback,
+  // where it would force a synchronous reflow each time.
   useLayoutEffect(() => {
     const node = composerRef.current
     if (!node || typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver(() => setComposerHeight(node.offsetHeight))
+    let frame = 0
+    const observer = new ResizeObserver(() => {
+      if (frame) return
+      frame = requestAnimationFrame(() => {
+        frame = 0
+        setComposerHeight(node.offsetHeight)
+      })
+    })
     observer.observe(node)
-    return () => observer.disconnect()
+    return () => {
+      observer.disconnect()
+      if (frame) cancelAnimationFrame(frame)
+    }
   }, [])
+
+  // Stable identity, so the memoized MessageRow actually skips: composerHeight
+  // changes on every frame of the composer's height transition, and an inline
+  // arrow here would defeat the memo for every message in the transcript.
+  const handleRetryMessage = useCallback(
+    (message: Parameters<typeof retryAssistantMessage>[0]) => void retryAssistantMessage(message),
+    [retryAssistantMessage],
+  )
 
   const handleReferenceFromPanel = useCallback(
     (item: Parameters<typeof referencePreviousAttachment>[0]) => {
@@ -241,7 +265,7 @@ export function ChatLayout(props: Props) {
             showWelcome={showWelcome}
             sending={sending}
             onApproveOutline={handleApproveOutline}
-              onRetryMessage={(message) => void retryAssistantMessage(message)}
+              onRetryMessage={handleRetryMessage}
               retryingMessageId={retryingMessageId}
             messagesEndRef={messagesEndRef}
             welcomeContent={

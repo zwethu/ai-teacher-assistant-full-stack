@@ -187,7 +187,10 @@ def claim_run_dispatch(*, batch_id: str, chat_id: str, run_id: str) -> bool:
     def _commit(txn) -> bool:
         snap = run_ref.get(transaction=txn)
         data = snap.to_dict() or {}
-        if not snap.exists or data.get("dispatched") or data.get("status") in {"done", "failed"}:
+        # "cancelled" belongs here with the other terminal states — mark_agent_run_cancelled
+        # treats it as terminal, and without it a deadline-scheduled task keyed on run_id
+        # would flip a run the lecturer stopped back to "running".
+        if not snap.exists or data.get("dispatched") or data.get("status") in {"done", "failed", "cancelled"}:
             return False
         txn.update(run_ref, {"dispatched": True, "status": "running", "updated_at": SERVER_TIMESTAMP})
         return True

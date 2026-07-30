@@ -431,8 +431,36 @@ def create_chat_attachment(
     }
     ref = attachment_ref(batch_id, chat_id, attachment_id)
     ref.set(payload)
+    _mirror_status_to_rtdb(chat_id, attachment_id, lecturer_id, payload)
     snap = ref.get()
     return attachment_to_model(attachment_id, snap.to_dict() or payload)
+
+
+# Readiness fields the composer reacts to. Deliberately the JSON-safe subset of
+# what /attachments/{id}/rag-status returns — the timestamps in that response are
+# Firestore sentinels the client already has from the upload, and are not what it
+# is waiting on.
+_MIRRORED_STATUS_FIELDS = (
+    "status", "parse_status", "vision_status", "token_estimate",
+    "rag_status", "chunk_status", "embedding_status",
+    "semantic_search_ready", "chunk_count", "indexed_chars", "ocr_status",
+)
+
+
+def _mirror_status_to_rtdb(
+    chat_id: str, attachment_id: str, lecturer_id: str, data: dict[str, Any]
+) -> None:
+    """Push readiness to RTDB so the composer can subscribe instead of polling.
+
+    Purely additive — the HTTP endpoint stays the source of truth, so this failing
+    (or RTDB being unconfigured) just means the client falls back to polling.
+    """
+    from utils.rtdb_client import write_attachment_status
+
+    write_attachment_status(
+        chat_id, attachment_id, lecturer_id,
+        {key: data.get(key) for key in _MIRRORED_STATUS_FIELDS if key in data},
+    )
 
 
 def process_chat_attachment(batch_id: str, chat_id: str, attachment_id: str) -> None:
@@ -508,6 +536,11 @@ def process_chat_attachment(batch_id: str, chat_id: str, attachment_id: str) -> 
             "parse_status": "failed" if kind == "document" else str(doc.get("parse_status") or "skipped"),
         })
     ref.update(updates)
+    # Guarded by the processing check above, so a duplicate task delivery returns
+    # early and cannot emit a second terminal transition.
+    _mirror_status_to_rtdb(
+        chat_id, attachment_id, str(doc.get("lecturer_id") or ""), {**doc, **updates},
+    )
 
 
 def get_attachment_status_and_message(batch_id: str, chat_id: str, attachment_id: str) -> tuple[str, str]:
@@ -530,12 +563,16 @@ def fail_stuck_attachment(batch_id: str, chat_id: str, attachment_id: str) -> No
     ref = attachment_ref(batch_id, chat_id, attachment_id)
     data = ref.get().to_dict() or {}
     if str(data.get("status") or "") == "processing":
-        ref.update({
+        timed_out = {
             "status": "failed",
             "parse_status": "failed",
             "vision_error": "Processing timed out.",
             "updated_at": SERVER_TIMESTAMP,
-        })
+        }
+        ref.update(timed_out)
+        _mirror_status_to_rtdb(
+            chat_id, attachment_id, str(data.get("lecturer_id") or ""), {**data, **timed_out},
+        )
 
 
 def get_chat_attachment(batch_id: str, chat_id: str, attachment_id: str, lecturer_id: str) -> ChatAttachment | None:

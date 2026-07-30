@@ -9,6 +9,14 @@
         ".read": "auth != null && data.child('meta/lecturer_id').val() === auth.uid",
         ".write": false
       }
+    },
+
+    "chatAttachments": {
+      "$chat_id": {
+        "//": "Processing status for a chat's attachments, so the composer can subscribe instead of polling an HTTP endpoint every 2.5s. Same ownership model as agentRuns: the backend writes meta/lecturer_id via the Admin SDK and the rule reads it back. Read-only for clients; the Firestore document remains the source of truth.",
+        ".read": "auth != null && data.child('meta/lecturer_id').val() === auth.uid",
+        ".write": false
+      }
     }
   }
 }

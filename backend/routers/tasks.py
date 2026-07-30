@@ -71,6 +71,16 @@ async def _handle_attachment_watchdog(_payload: dict[str, Any]) -> None:
     await asyncio.to_thread(run_attachment_watchdog)
 
 
+async def _handle_attachment_deadline(payload: dict[str, Any]) -> None:
+    """Timeout check for one deferred run, scheduled when the run was deferred."""
+    from services.agent_gateway import release_run_past_deadline
+
+    await asyncio.to_thread(
+        release_run_past_deadline,
+        str(payload["batch_id"]), str(payload["chat_id"]), str(payload["run_id"]),
+    )
+
+
 async def _handle_cron_send_emails(_payload: dict[str, Any]) -> None:
     from services.email_scheduler import check_and_send_emails
     await asyncio.to_thread(check_and_send_emails)
@@ -132,6 +142,11 @@ async def attachment_watchdog_task(request: Request, _: None = Depends(verify_ta
     await _handle_attachment_watchdog({})
 
 
+@router.post("/attachment-deadline", status_code=status.HTTP_204_NO_CONTENT)
+async def attachment_deadline_task(request: Request, _: None = Depends(verify_task_caller)) -> None:
+    await _handle_attachment_deadline(await request.json())
+
+
 @router.post("/cron/send-emails", status_code=status.HTTP_204_NO_CONTENT)
 async def cron_send_emails(request: Request, _: None = Depends(verify_task_caller)) -> None:
     await _handle_cron_send_emails({})
@@ -170,6 +185,7 @@ async def check_indexing_task(request: Request, _: None = Depends(verify_task_ca
 register_local_handler("/tasks/process-attachment", _handle_process_attachment)
 register_local_handler("/tasks/run-agent", _handle_run_agent)
 register_local_handler("/tasks/cron/attachment-watchdog", _handle_attachment_watchdog)
+register_local_handler("/tasks/attachment-deadline", _handle_attachment_deadline)
 register_local_handler("/tasks/index-file", _handle_index_file)
 register_local_handler("/tasks/check-indexing", _handle_check_indexing)
 register_local_handler("/tasks/cron/send-emails", _handle_cron_send_emails)

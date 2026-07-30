@@ -35,6 +35,7 @@ from services.email_dispatch import (
     send_pending_email_now,
 )
 from services.chat_service import (
+    DEFAULT_MESSAGE_LIMIT,
     create_chat,
     delete_chat,
     delete_message,
@@ -311,7 +312,7 @@ async def list_messages_endpoint(
     chat = get_chat(batch_id, chat_id, lecturer_id)
     if chat is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
-    return list_messages(batch_id, chat_id, lecturer_id)
+    return list_messages(batch_id, chat_id, lecturer_id, limit=DEFAULT_MESSAGE_LIMIT)
 
 
 def _export_response(payload: bytes, media_type: str, filename: str) -> Response:

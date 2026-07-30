@@ -260,15 +260,25 @@ async def start_chat_run(
     ]
     run_status = "running"
     if pending_ids:
-        # Deferred run: hold until /tasks/process-attachment reports all ready, or
-        # the watchdog times out at PROCESSING_TIMEOUT. UI shows "Processing your file(s)…".
-        deadline = datetime.now(timezone.utc) + timedelta(minutes=_processing_timeout_minutes())
+        # Deferred run: hold until /tasks/process-attachment reports all ready.
+        # UI shows "Processing your file(s)…".
+        timeout_minutes = _processing_timeout_minutes()
+        deadline = datetime.now(timezone.utc) + timedelta(minutes=timeout_minutes)
         mark_agent_run_awaiting_attachments(
             batch_id=batch_id, chat_id=chat_id, run_id=run_id,
             attachment_ids=pending_ids, deadline=deadline,
         )
         set_run_status(run_id, "awaiting_attachments")
         run_status = "awaiting_attachments"
+        # The deadline is known exactly here, so schedule the timeout check for this
+        # one run instead of sweeping every run's status once a minute forever. The
+        # handler no-ops if the attachments settled first, and claim_run_dispatch
+        # makes a race with the settle path safe either way.
+        enqueue(
+            QUEUE_RUNS, "/tasks/attachment-deadline",
+            {"batch_id": batch_id, "chat_id": chat_id, "run_id": run_id},
+            delay_seconds=timeout_minutes * 60,
+        )
     else:
         dispatch_agent_run(batch_id, chat_id, run_id, background_tasks=background_tasks)
 
@@ -357,27 +367,49 @@ def _refresh_and_dispatch(batch_id: str, chat_id: str, run_id: str, *, backgroun
     dispatch_agent_run(batch_id, chat_id, run_id, background_tasks=background_tasks)
 
 
+def release_run_past_deadline(batch_id: str, chat_id: str, run_id: str) -> bool:
+    """Time out one deferred run: fail whatever is still processing and dispatch it
+    degraded, rather than leaving the lecturer's message stuck forever.
+
+    Idempotent, and safe to arrive late — a run that settled normally, was cancelled,
+    or already ran is no longer ``awaiting_attachments`` and this is a no-op.
+    """
+    run = read_run_doc(batch_id=batch_id, chat_id=chat_id, run_id=run_id) or {}
+    if run.get("status") != "awaiting_attachments":
+        return False
+    deadline = _as_datetime(run.get("awaiting_deadline"))
+    if deadline and deadline > datetime.now(timezone.utc):
+        return False  # re-armed or delivered early; the later task still covers it
+    for attachment_id in (run.get("awaiting_attachment_ids") or []):
+        fail_stuck_attachment(batch_id, chat_id, str(attachment_id))
+    _refresh_and_dispatch(batch_id, chat_id, run_id)
+    return True
+
+
+def _as_datetime(value: Any) -> datetime | None:
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    return value if isinstance(value, datetime) else None
+
+
 def run_attachment_watchdog(limit: int = 50) -> int:
-    """Safety net (Cloud Scheduler): dispatch deferred runs past their deadline,
-    marking any still-processing attachment failed so the run proceeds degraded."""
-    now = datetime.now(timezone.utc)
+    """Backstop sweep for deferred runs whose per-run deadline task never arrived.
+
+    Each deferred run schedules its own timeout via /tasks/attachment-deadline, so
+    this is no longer the primary path — it only covers a dropped task, and local
+    dev, where delayed dispatch is a threading.Timer that dies with the process.
+    """
     dispatched = 0
     for run in list_runs_awaiting_attachments(limit=limit):
-        deadline = run.get("awaiting_deadline")
-        if isinstance(deadline, str):
-            try:
-                deadline = datetime.fromisoformat(deadline.replace("Z", "+00:00"))
-            except ValueError:
-                deadline = None
-        if not deadline or deadline > now:
-            continue
-        batch_id = str(run.get("batch_id") or "")
-        chat_id = str(run.get("chat_id") or "")
-        run_id = str(run.get("run_id") or "")
-        for attachment_id in (run.get("awaiting_attachment_ids") or []):
-            fail_stuck_attachment(batch_id, chat_id, str(attachment_id))
-        _refresh_and_dispatch(batch_id, chat_id, run_id)
-        dispatched += 1
+        if release_run_past_deadline(
+            str(run.get("batch_id") or ""),
+            str(run.get("chat_id") or ""),
+            str(run.get("run_id") or ""),
+        ):
+            dispatched += 1
     return dispatched
 
 

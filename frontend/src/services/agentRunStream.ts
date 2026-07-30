@@ -116,7 +116,8 @@ export function subscribeAgentRun(
             status === 'awaiting_attachments' ||
             status === 'running' ||
             status === 'done' ||
-            status === 'failed'
+            status === 'failed' ||
+            status === 'cancelled'
           ) {
             options.onStatus?.(status)
           }

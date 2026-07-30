@@ -15,7 +15,7 @@ import { Spinner } from '../design-system'
 
 export default function ChatHistory() {
   const navigate = useNavigate()
-  const { sessions, loading, refresh } = useAllSessions({ includePreviews: true })
+  const { sessions, loading, refresh } = useAllSessions()
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')

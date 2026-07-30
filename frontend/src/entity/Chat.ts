@@ -89,6 +89,9 @@ export type Chat = {
   batch_id: string
   lecturer_id: string
   title: string
+  /** First user message, snapshotted server-side. Absent on chats created before
+   *  the field existed — fall back to `title` rather than fetching messages. */
+  preview?: string
   agent_session_id?: string
   agent_user_id?: string
   active_run_id?: string

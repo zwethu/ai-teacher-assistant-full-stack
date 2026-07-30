@@ -4,6 +4,8 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
+import pytest
+
 from services import agent_gateway as gw
 
 
@@ -76,30 +78,84 @@ def test_run_agent_task_runs_from_stash(monkeypatch):
     assert captured["agent_session_id"] == "s1"
 
 
-# --- watchdog: past deadline -> fail stuck file, proceed ------------------------
+# --- deadline release: past deadline -> fail stuck file, proceed ----------------
+#
+# The timeout is scheduled per run when the run is deferred, rather than found by
+# sweeping every run's status once a minute. Cloud Tasks gives no delivery-time
+# guarantee and no dedup, so the handler has to be safe early, late and twice.
 
-def test_watchdog_fails_stuck_and_dispatches(monkeypatch):
-    past = datetime.now(timezone.utc) - timedelta(minutes=1)
-    monkeypatch.setattr(gw, "list_runs_awaiting_attachments", lambda limit=50: [{
-        "batch_id": "b1", "chat_id": "c1", "run_id": "run1",
-        "awaiting_attachment_ids": ["a1"], "awaiting_deadline": past,
-    }])
+def _deferred_run(monkeypatch, *, deadline, status="awaiting_attachments"):
+    monkeypatch.setattr(gw, "read_run_doc", lambda **k: {
+        "batch_id": "b1", "chat_id": "c1", "run_id": "run1", "status": status,
+        "awaiting_attachment_ids": ["a1"], "awaiting_deadline": deadline,
+    })
     failed, dispatched = [], []
     monkeypatch.setattr(gw, "fail_stuck_attachment", lambda b, c, a: failed.append(a))
     monkeypatch.setattr(gw, "_refresh_and_dispatch", lambda b, c, r, **k: dispatched.append(r))
-    count = gw.run_attachment_watchdog()
-    assert count == 1 and failed == ["a1"] and dispatched == ["run1"]
+    return failed, dispatched
 
 
-def test_watchdog_leaves_runs_before_deadline(monkeypatch):
-    future = datetime.now(timezone.utc) + timedelta(minutes=4)
-    monkeypatch.setattr(gw, "list_runs_awaiting_attachments", lambda limit=50: [{
-        "batch_id": "b1", "chat_id": "c1", "run_id": "run1",
-        "awaiting_attachment_ids": ["a1"], "awaiting_deadline": future,
-    }])
-    dispatched = []
-    monkeypatch.setattr(gw, "_refresh_and_dispatch", lambda *a, **k: dispatched.append(a))
-    assert gw.run_attachment_watchdog() == 0 and dispatched == []
+def test_deadline_release_fails_stuck_and_dispatches(monkeypatch):
+    failed, dispatched = _deferred_run(
+        monkeypatch, deadline=datetime.now(timezone.utc) - timedelta(minutes=1))
+    assert gw.release_run_past_deadline("b1", "c1", "run1") is True
+    assert failed == ["a1"] and dispatched == ["run1"]
+
+
+def test_deadline_release_noop_before_deadline(monkeypatch):
+    """Delivered early — the scheduled task fires again later, so do nothing now."""
+    failed, dispatched = _deferred_run(
+        monkeypatch, deadline=datetime.now(timezone.utc) + timedelta(minutes=4))
+    assert gw.release_run_past_deadline("b1", "c1", "run1") is False
+    assert failed == [] and dispatched == []
+
+
+@pytest.mark.parametrize("status", ["running", "done", "failed", "cancelled"])
+def test_deadline_release_noop_once_run_left_awaiting(monkeypatch, status):
+    """The attachments settled (or the lecturer stopped it) before the deadline —
+    a late task must not resurrect the run or fail its files."""
+    failed, dispatched = _deferred_run(
+        monkeypatch, status=status,
+        deadline=datetime.now(timezone.utc) - timedelta(minutes=1))
+    assert gw.release_run_past_deadline("b1", "c1", "run1") is False
+    assert failed == [] and dispatched == []
+
+
+def test_deadline_release_handles_iso_string_deadline(monkeypatch):
+    """Firestore hands the deadline back as a datetime; RTDB round-trips give ISO."""
+    past = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    _, dispatched = _deferred_run(monkeypatch, deadline=past)
+    assert gw.release_run_past_deadline("b1", "c1", "run1") is True
+    assert dispatched == ["run1"]
+
+
+def test_watchdog_backstop_still_releases_overdue_runs(monkeypatch):
+    """Kept for a dropped task, and for local dev where the delayed dispatch is a
+    threading.Timer that does not survive a restart."""
+    _deferred_run(monkeypatch, deadline=datetime.now(timezone.utc) - timedelta(minutes=1))
+    monkeypatch.setattr(gw, "list_runs_awaiting_attachments", lambda limit=50: [
+        {"batch_id": "b1", "chat_id": "c1", "run_id": "run1"},
+    ])
+    assert gw.run_attachment_watchdog() == 1
+
+
+def test_deadline_handler_is_registered_and_routes(monkeypatch):
+    """The scheduled task has to reach a handler both in prod (HTTP route) and
+    locally (registered dispatcher), or a deferred run silently never times out."""
+    import routers.tasks as t
+    from services.cloud_tasks import _LOCAL_HANDLERS
+
+    assert "/tasks/attachment-deadline" in _LOCAL_HANDLERS
+    assert any(
+        getattr(route, "path", "") == "/tasks/attachment-deadline"
+        for route in t.router.routes
+    )
+
+    seen = []
+    monkeypatch.setattr(gw, "release_run_past_deadline", lambda b, c, r: seen.append((b, c, r)))
+    asyncio.run(_LOCAL_HANDLERS["/tasks/attachment-deadline"](
+        {"batch_id": "b1", "chat_id": "c1", "run_id": "run1"}))
+    assert seen == [("b1", "c1", "run1")]
 
 
 # --- start_chat_run branch: defer vs immediate (unit on the decision) -----------

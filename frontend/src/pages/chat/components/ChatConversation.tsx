@@ -14,6 +14,7 @@ import type { GenerateMode } from './ComposerSurface'
 import {
   COMPOSER_TEXTAREA_CLASS,
   ComposerAddMenu,
+  ComposerCollapse,
   ComposerControls,
   ComposerHint,
   ComposerModeChip,
@@ -22,6 +23,8 @@ import {
   ComposerTint,
   WebSearchToggle,
   modeSpec,
+  useComposerPresence,
+  useExitDelay,
 } from './ComposerSurface'
 
 // Defined with the mode table it drives; re-exported here so the many existing
@@ -57,6 +60,14 @@ type Props = {
   batchId?: string
   chatId?: string
   onOpenFilesPanel?: () => void
+}
+
+/** One attachment tile in the composer strip, whatever it was attached by. */
+type ComposerTile = {
+  key: string
+  attachment: PreviewableAttachment
+  status: string
+  remove: () => void
 }
 
 export function ChatInput({
@@ -127,6 +138,38 @@ export function ChatInput({
     (attachment) => attachment.status === 'too_large' || attachment.status === 'failed',
   )
 
+  // Re-referenced earlier files and newly attached ones are one strip: from
+  // the lecturer's side they are the same act, and they animate in and out as
+  // one row rather than as two lists that happen to sit next to each other.
+  const tiles: ComposerTile[] = [
+    ...referencedAttachments.map((attachment) => ({
+      key: `ref-${attachment.attachment_id}`,
+      attachment,
+      status: 'earlier attachment',
+      remove: () => onRemoveReferenced(attachment.attachment_id),
+    })),
+    ...pendingAttachments.map((attachment) => ({
+      key: attachment.attachment_id,
+      attachment,
+      status: attachmentStatusLabel(attachment),
+      remove: () => onRemoveAttachment(attachment.attachment_id),
+    })),
+  ]
+  // Departed tiles stay one exit animation longer than the props say, so
+  // removing one — or sending, which clears the lot — plays the arrival
+  // backwards instead of blinking out.
+  const tileEntries = useComposerPresence(tiles, (tile) => tile.key)
+  // Keyed on the entries, not the props, so removing the last tile reads as two
+  // beats — the tile leaves, then the box closes behind it. Keying on `tiles`
+  // collapses the strip while the tile is still fading, which squashes it.
+  const hasTiles = tileEntries.length > 0
+  const webSearchStripMounted = useExitDelay(connectors.web_search)
+  // The warnings sit above the composer and appear and vanish on exactly the
+  // same gestures, so they get the same easing — otherwise attaching a file
+  // still jumps the layout, just one line higher up.
+  const processingNotice = pendingAttachments.some((attachment) => attachment.status === 'processing')
+  const noticesMounted = useExitDelay(processingNotice || hasBlockingAttachment || attachmentErrors.length > 0)
+
   return (
     <footer
       className={`relative z-10 px-4 pb-5 pt-6 bg-gradient-to-t from-white/90 via-white/65 to-transparent backdrop-blur-sm flex-shrink-0 transition-opacity ${
@@ -134,63 +177,68 @@ export function ChatInput({
       }`}
     >
       <div className="max-w-3xl mx-auto">
-        {attachmentErrors.map((error) => <p key={error} className="mb-1 text-xs text-red-600">{error}</p>)}
-        {pendingAttachments.some((attachment) => attachment.status === 'processing') && (
-          <p className="mb-1 text-xs text-slate-500">Some attachments are still processing — you can send now, and the assistant may note a file isn't ready yet.</p>
-        )}
-        {hasBlockingAttachment && (
-          <p className="mb-1 text-xs text-amber-600">Remove the flagged attachment to send. Large files belong in Course Space, where they’re indexed for retrieval.</p>
-        )}
+        <ComposerCollapse
+          open={processingNotice || hasBlockingAttachment || attachmentErrors.length > 0}
+          region="notices"
+          className="pb-1"
+        >
+          {noticesMounted && (
+            <>
+              {attachmentErrors.map((error) => <p key={error} className="text-xs text-red-600">{error}</p>)}
+              {processingNotice && (
+                <p className="text-xs text-slate-500">Some attachments are still processing — you can send now, and the assistant may note a file isn't ready yet.</p>
+              )}
+              {hasBlockingAttachment && (
+                <p className="text-xs text-amber-600">Remove the flagged attachment to send. Large files belong in Course Space, where they’re indexed for retrieval.</p>
+              )}
+            </>
+          )}
+        </ComposerCollapse>
         <ComposerTint active={connectors.web_search}>
-          {connectors.web_search && (
-            <div className="flex items-center gap-2 px-3.5 py-1.5 text-xs font-medium text-violet-800">
-              <Globe className="h-3.5 w-3.5 flex-shrink-0" />
-              <span className="min-w-0 flex-1 truncate">
-                Web search is on — MILA will look things up for this message.
-              </span>
-              <button
-                type="button"
-                onClick={() => onConnectorsChange('web_search', false)}
-                className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-violet-700 hover:bg-violet-100"
-                aria-label="Turn off web search"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          )}
+          {/* The strip's own height is what the tint shell grows around, so it
+              eases open with it rather than appearing inside a box that has
+              already finished moving. */}
+          <ComposerCollapse open={connectors.web_search} region="web-search" className="px-3.5 py-1.5">
+            {webSearchStripMounted && (
+              <div className="flex items-center gap-2 text-xs font-medium text-violet-800">
+                <Globe className="h-3.5 w-3.5 flex-shrink-0" />
+                <span className="min-w-0 flex-1 truncate">
+                  Web search is on — MILA will look things up for this message.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => onConnectorsChange('web_search', false)}
+                  className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-violet-700 hover:bg-violet-100"
+                  aria-label="Turn off web search"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
+          </ComposerCollapse>
         <ComposerSurface>
-          {/* Attachments live inside the composer now, so the box grows to hold
-              them instead of them floating above it. */}
-          {(pendingAttachments.length > 0 || referencedAttachments.length > 0) && (
-            <div className="flex flex-wrap gap-2 px-1 pb-1 pt-2">
-              {/* Re-referenced earlier files sit in the same row as newly
-                  attached ones and look identical — from the lecturer's side
-                  they are the same act. They cannot be previewed-and-removed
-                  differently just because of where they came from. */}
-              {referencedAttachments.map((attachment) => (
-                <AttachmentCard
-                  key={`ref-${attachment.attachment_id}`}
-                  batchId={batchId}
-                  chatId={chatId}
-                  attachment={attachment}
-                  status="earlier attachment"
-                  onOpen={() => setPreviewAttachment(attachment)}
-                  onRemove={() => onRemoveReferenced(attachment.attachment_id)}
-                />
-              ))}
-              {pendingAttachments.map((attachment) => (
-                <AttachmentCard
-                  key={attachment.attachment_id}
-                  batchId={batchId}
-                  chatId={chatId}
-                  attachment={attachment}
-                  status={attachmentStatusLabel(attachment)}
-                  onOpen={() => setPreviewAttachment(attachment)}
-                  onRemove={() => onRemoveAttachment(attachment.attachment_id)}
-                />
+          {/* Attachments live inside the composer, so the box grows to hold
+              them instead of them floating above it — and the growth is the
+              strip's own, eased, rather than the composer jumping a tile's
+              worth of height in one frame. The padding sits on the collapse's
+              clipper because that is what clips: the tiles' remove buttons
+              hang outside their tile, and this is the room they need. */}
+          <ComposerCollapse open={hasTiles} region="attachments" className="px-1.5 pb-1 pt-2">
+            <div className="flex flex-wrap gap-2">
+              {tileEntries.map(({ key, item, leaving }) => (
+                <div key={key} className={leaving ? 'mila-tile-out' : 'mila-tile-in'}>
+                  <AttachmentCard
+                    batchId={batchId}
+                    chatId={chatId}
+                    attachment={item.attachment}
+                    status={item.status}
+                    onOpen={() => setPreviewAttachment(item.attachment)}
+                    onRemove={item.remove}
+                  />
+                </div>
               ))}
             </div>
-          )}
+          </ComposerCollapse>
           <input
             ref={attachmentInputRef}
             type="file"
@@ -237,9 +285,9 @@ export function ChatInput({
               onChange={(value) => onConnectorsChange('web_search', value)}
             />
 
-            {activeGenerateMode && (
-              <ComposerModeChip mode={activeGenerateMode} onClear={onClearGenerateMode} />
-            )}
+            {/* Unguarded: the chip owns its own presence so it can animate out
+                when the mode is cleared or the run consumes it. */}
+            <ComposerModeChip mode={activeGenerateMode} onClear={onClearGenerateMode} />
 
             <ComposerSpacer />
 

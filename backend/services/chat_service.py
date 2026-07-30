@@ -18,6 +18,14 @@ MESSAGES_SUBCOLLECTION = "messages"
 RUNS_SUBCOLLECTION = "runs"
 ATTACHMENTS_SUBCOLLECTION = "attachments"
 
+# Length of the denormalised chat subtitle. Matches what the two list views used to
+# slice off the first user message themselves.
+PREVIEW_MAX_CHARS = 120
+
+# Newest-first cap for the messages endpoint. Chats never come close in practice;
+# this only stops a runaway conversation from becoming an unbounded read.
+DEFAULT_MESSAGE_LIMIT = 200
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -56,6 +64,10 @@ def _chat_to_dict(doc_id: str, data: dict[str, Any]) -> dict[str, Any]:
         "batch_id": str(data.get("batch_id") or ""),
         "lecturer_id": str(data.get("lecturer_id") or ""),
         "title": str(data.get("title") or "New Chat"),
+        # Denormalised first-user-message snippet, so listing chats does not have to
+        # read every chat's messages just to render a subtitle. Empty for chats
+        # created before this field existed — callers fall back to the title.
+        "preview": str(data.get("preview") or ""),
         "agent_session_id": str(data.get("agent_session_id") or ""),
         "agent_user_id": str(data.get("agent_user_id") or ""),
         "active_run_id": str(data.get("active_run_id") or ""),
@@ -118,6 +130,7 @@ def create_chat(
             "week": week,
             "hidden": hidden,
             "title": title.strip() or "New Chat",
+            "preview": "",
             "created_at": SERVER_TIMESTAMP,
             "updated_at": SERVER_TIMESTAMP,
         }
@@ -137,6 +150,7 @@ def create_chat(
         "week": week,
         "hidden": hidden,
         "title": title,
+        "preview": "",
     }
 
 
@@ -424,7 +438,13 @@ def add_user_message_with_attachments(
             from services.attachment_constants import get_chat_attachment_retention_days
             from datetime import datetime, timedelta, timezone
             txn.update(ref, {"message_id": msg_id, "expires_at": datetime.now(timezone.utc) + timedelta(days=get_chat_attachment_retention_days()), "updated_at": SERVER_TIMESTAMP})
-        txn.update(chat_ref, {"updated_at": SERVER_TIMESTAMP})
+        chat_updates: dict[str, Any] = {"updated_at": SERVER_TIMESTAMP}
+        # Snapshot the opening request as the chat's subtitle. Written once, inside
+        # the same transaction that persists the message, so listing chats never has
+        # to read their messages to render it.
+        if not chat_data.get("preview") and content.strip():
+            chat_updates["preview"] = content.strip()[:PREVIEW_MAX_CHARS]
+        txn.update(chat_ref, chat_updates)
         return snapshots, records
 
     snapshots, records = _commit(transaction)
@@ -487,16 +507,25 @@ def update_assistant_message_content_for_run(
         msg.reference.update(update)
 
 
-def list_messages(batch_id: str, chat_id: str, lecturer_id: str) -> list[dict[str, Any]]:
-    """Return messages for a chat oldest-first, after ownership check."""
+def list_messages(
+    batch_id: str, chat_id: str, lecturer_id: str, limit: int | None = None
+) -> list[dict[str, Any]]:
+    """Return messages for a chat oldest-first, after ownership check.
+
+    ``limit`` keeps the newest N. Left as None by the export path, which needs the
+    whole conversation; the messages endpoint passes a cap so a long chat cannot
+    turn one request into an unbounded read.
+    """
     chat = get_chat(batch_id, chat_id, lecturer_id)
     if chat is None:
         return []
     col = _messages_col(batch_id, chat_id)
-    return [
-        _msg_to_dict(doc.id, doc.to_dict() or {})
-        for doc in col.order_by("created_at").stream()
-    ]
+    if limit is None:
+        docs = col.order_by("created_at").stream()
+        return [_msg_to_dict(doc.id, doc.to_dict() or {}) for doc in docs]
+    # Newest N, then flip back to chronological for the caller.
+    docs = col.order_by("created_at", direction=firestore.Query.DESCENDING).limit(limit).stream()
+    return [_msg_to_dict(doc.id, doc.to_dict() or {}) for doc in docs][::-1]
 
 
 def get_message(

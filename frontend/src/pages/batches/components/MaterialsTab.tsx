@@ -29,7 +29,6 @@ import {
   createChat,
   deleteChat,
   listChats,
-  listMessages,
   updateChatTitle,
   uploadChatAttachment,
 } from '../../../services/chatService'
@@ -41,8 +40,10 @@ import { getCurrentCourseBlueprint, type CourseBlueprint } from '../../../servic
 import { IconButton, Spinner } from '../../../design-system'
 import type { GenerateMode } from '../../chat/components/ComposerSurface'
 import {
+  COMPOSER_EXIT_MS,
   COMPOSER_TEXTAREA_CLASS,
   ComposerAddMenu,
+  ComposerCollapse,
   ComposerControls,
   ComposerHint,
   ComposerModeChip,
@@ -51,6 +52,7 @@ import {
   ComposerTint,
   WebSearchToggle,
   modeSpec,
+  useComposerPresence,
 } from '../../chat/components/ComposerSurface'
 
 type Props = {
@@ -64,8 +66,6 @@ type Props = {
   onRefreshFiles: () => void
   onOpenPlanning: () => void
 }
-
-type ChatWithPreview = Chat & { preview: string }
 
 /** A file chosen in the composer but not yet uploaded anywhere. */
 type StagedFile = { id: string; file: File; previewUrl: string }
@@ -131,7 +131,7 @@ export function MaterialsTab({
 }: Props) {
   const atFileLimit = files.length >= MAX_COURSE_SPACE_FILES
   const navigate = useNavigate()
-  const [chats, setChats] = useState<ChatWithPreview[]>([])
+  const [chats, setChats] = useState<Chat[]>([])
   const [chatsLoading, setChatsLoading] = useState(true)
   const [input, setInput] = useState('')
   const [creating, setCreating] = useState(false)
@@ -148,6 +148,10 @@ export function MaterialsTab({
   // touches the server before then, so browsing away — or attaching a file and
   // changing your mind — cannot leave an empty "New Chat" behind.
   const [stagedFiles, setStagedFiles] = useState<StagedFile[]>([])
+  // Holds a removed tile for the length of its exit animation — see
+  // useComposerPresence. Sending clears the whole list at once, and that is
+  // the case this makes look deliberate rather than abrupt.
+  const stagedEntries = useComposerPresence(stagedFiles, (staged) => staged.id)
   const [attachmentErrors, setAttachmentErrors] = useState<string[]>([])
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const renameInputRef = useRef<HTMLInputElement>(null)
@@ -157,19 +161,9 @@ export function MaterialsTab({
   const loadChats = useCallback(async () => {
     setChatsLoading(true)
     try {
-      const data = await listChats(batchId)
-      const withPreviews = await Promise.all(
-        data.map(async (chat) => {
-          try {
-            const messages = await listMessages(batchId, chat.chat_id)
-            const firstUser = messages.find((m) => m.role === 'user')
-            return { ...chat, preview: firstUser?.content?.slice(0, 120) ?? '' }
-          } catch {
-            return { ...chat, preview: '' }
-          }
-        }),
-      )
-      setChats(withPreviews)
+      // One request. The preview rides along on each chat document, so this no
+      // longer fans out into a messages fetch per chat on every visit.
+      setChats(await listChats(batchId))
     } catch (err) {
       console.error(err)
       setChats([])
@@ -237,7 +231,12 @@ export function MaterialsTab({
   function removeStagedFile(id: string) {
     setStagedFiles((prev) => {
       const removed = prev.find((item) => item.id === id)
-      if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl)
+      // Revoked after the tile has finished leaving, not as it starts: the
+      // ghost is still on screen for COMPOSER_EXIT_MS and is still rendering
+      // from this URL.
+      if (removed?.previewUrl) {
+        window.setTimeout(() => URL.revokeObjectURL(removed.previewUrl), COMPOSER_EXIT_MS)
+      }
       return prev.filter((item) => item.id !== id)
     })
   }
@@ -306,7 +305,7 @@ export function MaterialsTab({
     navigate(`/batches/${batchId}/chats/${chatId}`)
   }
 
-  function startRename(chat: ChatWithPreview) {
+  function startRename(chat: Chat) {
     setRenamingId(chat.chat_id)
     setRenameValue(chat.title)
     setMenuOpenId(null)
@@ -328,7 +327,7 @@ export function MaterialsTab({
     setRenamingId(null)
   }
 
-  async function doDelete(chat: ChatWithPreview) {
+  async function doDelete(chat: Chat) {
     await deleteChat(batchId, chat.chat_id)
     setChats((prev) => prev.filter((item) => item.chat_id !== chat.chat_id))
     setConfirmDeleteId(null)
@@ -623,17 +622,21 @@ export function MaterialsTab({
           ))}
           <ComposerTint active={webSearch}>
             <ComposerSurface>
-              {stagedFiles.length > 0 && (
-                <div className="flex flex-wrap gap-2 px-1 pb-1 pt-2">
-                  {stagedFiles.map((staged) => (
-                    <StagedFileTile
-                      key={staged.id}
-                      staged={staged}
-                      onRemove={() => removeStagedFile(staged.id)}
-                    />
+              {/* Same eased growth as the chat composer, from the same shared
+                  primitives — a staged file arriving here must not feel like a
+                  different product from one attached in a chat. */}
+              {/* Keyed on the entries, not stagedFiles, so removing the last
+                  tile plays as two beats: the tile leaves, then the box closes
+                  behind it. */}
+              <ComposerCollapse open={stagedEntries.length > 0} region="attachments" className="px-1.5 pb-1 pt-2">
+                <div className="flex flex-wrap gap-2">
+                  {stagedEntries.map(({ key, item, leaving }) => (
+                    <div key={key} className={leaving ? 'mila-tile-out' : 'mila-tile-in'}>
+                      <StagedFileTile staged={item} onRemove={() => removeStagedFile(item.id)} />
+                    </div>
                   ))}
                 </div>
-              )}
+              </ComposerCollapse>
               <input
                 ref={attachmentInputRef}
                 type="file"
@@ -675,9 +678,7 @@ export function MaterialsTab({
                   disabled={creating}
                   onChange={setWebSearch}
                 />
-                {generateMode && (
-                  <ComposerModeChip mode={generateMode} onClear={() => setGenerateMode(null)} />
-                )}
+                <ComposerModeChip mode={generateMode} onClear={() => setGenerateMode(null)} />
                 <ComposerSpacer />
                 <IconButton
                   variant="solid"

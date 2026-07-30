@@ -55,7 +55,10 @@ export function BatchSelectorBar({
           onClick={handleChipClick}
           /* Tinted violet glass once a space is chosen — MILA's variant for
              selected liquid surfaces. Plain glass while nothing is selected. */
-          className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+          /* pointer-events-auto: the composer wrapper this sits in floats over
+             the transcript and disables pointer events, so only the controls
+             themselves take clicks — the rest of the band stays see-through. */
+          className={`pointer-events-auto inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
             selectedBatch
               ? 'maia-glass-tint text-violet-900'
               : 'border border-violet-200/70 bg-white/70 text-slate-700 hover:bg-violet-50/60'
@@ -94,7 +97,7 @@ export function BatchSelectorBar({
       </div>
 
       {open && batches.length > 0 && (
-        <div className="absolute left-4 right-4 bottom-full mb-1 max-w-sm mx-auto rounded-xl border border-slate-200 bg-white shadow-lg z-30 overflow-hidden">
+        <div className="pointer-events-auto absolute left-4 right-4 bottom-full mb-1 max-w-sm mx-auto rounded-xl border border-slate-200 bg-white shadow-lg z-30 overflow-hidden">
           <div className="max-h-56 overflow-y-auto py-1">
             {batches.map((batch) => (
               <button

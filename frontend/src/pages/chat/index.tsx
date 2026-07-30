@@ -9,6 +9,7 @@ export default function Chat() {
     <ChatErrorBoundary>
       <ChatLayout
         selectedBatch={state.selectedBatch}
+        setSelectedBatch={state.setSelectedBatch}
         batches={state.batches}
         batchesLoading={state.batchesLoading}
         activeChat={state.activeChat}

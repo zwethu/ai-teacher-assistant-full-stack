@@ -6,12 +6,14 @@ import { ChatInput, ChatMessagesPanel } from './ChatConversation'
 import { ChatPageHeader } from './ChatPageHeader'
 import { ChatSidePanel, type ChatSidePanelSection } from './ChatSidePanel'
 import { ChatWelcomeScreen } from './ChatWelcomeScreen'
+import { BatchSelectorBar } from './BatchSelectorBar'
 import { NoBatchesView } from './NoBatchesView'
 import { Spinner } from '../../../design-system'
 
 type Props = Pick<
   ChatPageState,
   | 'selectedBatch'
+  | 'setSelectedBatch'
   | 'batches'
   | 'batchesLoading'
   | 'activeChat'
@@ -63,6 +65,7 @@ type Props = Pick<
 export function ChatLayout(props: Props) {
   const {
     selectedBatch,
+    setSelectedBatch,
     batches,
     batchesLoading,
     activeChat,
@@ -297,6 +300,21 @@ export function ChatLayout(props: Props) {
           ref={composerRef}
           className="chat-composer-enter pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col bg-transparent"
         >
+          {/* The space picker rides with the composer rather than the header:
+              it is part of "what this message will be sent against", and it is
+              the only way to choose a batch on /chat. Hidden while a canonical
+              /batches/:id/chats/:id route is still resolving, so it does not
+              flash "Select a batch" over a chat that already has one. */}
+          {!isRouteInvalid &&
+            routeHydration !== 'hydrating' &&
+            (batchesLoading || batches.length > 0 || selectedBatch) && (
+              <BatchSelectorBar
+                batches={batches}
+                batchesLoading={batchesLoading}
+                selectedBatch={selectedBatch}
+                onSelectBatch={setSelectedBatch}
+              />
+            )}
           <ChatInput
             input={input}
             sending={sending}

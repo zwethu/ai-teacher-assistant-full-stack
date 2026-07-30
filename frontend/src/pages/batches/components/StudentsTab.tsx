@@ -1,6 +1,7 @@
 import type { ChangeEvent, FormEvent } from 'react'
 import type { BatchStudent } from '../../../entity/Batch'
-import { Loader2, Plus, Trash2, Upload, UserPlus, Users } from 'lucide-react'
+import { Plus, Trash2, Upload, UserPlus, Users } from 'lucide-react'
+import { Spinner, Button } from '../../../design-system'
 
 type Props = {
   students: BatchStudent[]
@@ -30,7 +31,7 @@ export function StudentsTab({
       <div className="lg:col-span-1 space-y-5">
         <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
           <h2 className="text-sm font-semibold text-slate-800 mb-4 flex items-center gap-2">
-            <UserPlus className="w-4 h-4 text-emerald-600" />
+            <UserPlus className="w-4 h-4 text-violet-600" />
             Add student
           </h2>
           <form onSubmit={onAddStudent} className="space-y-3">
@@ -42,7 +43,7 @@ export function StudentsTab({
                 value={studentForm.name}
                 onChange={(e) => setStudentForm((f) => ({ ...f, name: e.target.value }))}
                 placeholder="e.g. Jane Smith"
-                className="block w-full rounded-md border border-slate-300 shadow-sm py-2 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500"
+                className="block w-full rounded-md border border-slate-300 shadow-sm py-2 px-3 text-sm focus:border-violet-500 focus:ring-violet-500"
               />
             </div>
             <div>
@@ -53,23 +54,19 @@ export function StudentsTab({
                 value={studentForm.email}
                 onChange={(e) => setStudentForm((f) => ({ ...f, email: e.target.value }))}
                 placeholder="e.g. jane@school.edu"
-                className="block w-full rounded-md border border-slate-300 shadow-sm py-2 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500"
+                className="block w-full rounded-md border border-slate-300 shadow-sm py-2 px-3 text-sm focus:border-violet-500 focus:ring-violet-500"
               />
             </div>
-            <button
-              type="submit"
-              disabled={addingStudent}
-              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm disabled:opacity-70"
-            >
-              {addingStudent ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+            <Button type="submit" loading={addingStudent} block>
+              <Plus className="w-4 h-4" />
               Add student
-            </button>
+            </Button>
           </form>
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
           <h2 className="text-sm font-semibold text-slate-800 mb-2 flex items-center gap-2">
-            <Upload className="w-4 h-4 text-emerald-600" />
+            <Upload className="w-4 h-4 text-violet-600" />
             Bulk import (CSV)
           </h2>
           <p className="text-xs text-slate-500 mb-3">
@@ -87,7 +84,7 @@ export function StudentsTab({
             <span className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-md border border-slate-300 text-slate-700 bg-white hover:bg-slate-50 transition-colors disabled:opacity-70">
               {csvUploading ? (
                 <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <Spinner size={16} />
                   Importing…
                 </>
               ) : (
@@ -104,7 +101,7 @@ export function StudentsTab({
       <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
         {studentsLoading ? (
           <div className="flex flex-col items-center justify-center py-20 gap-3">
-            <Loader2 className="w-8 h-8 text-emerald-600 animate-spin" />
+            <Spinner size={32} />
             <p className="text-sm text-slate-500">Loading students…</p>
           </div>
         ) : students.length === 0 ? (
@@ -132,7 +129,7 @@ export function StudentsTab({
                 {students.map((student) => (
                   <tr key={student.id} className="group hover:bg-slate-50/90 transition-colors">
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-slate-900 group-hover:text-emerald-600 transition-colors">
+                      <div className="text-sm font-medium text-slate-900 group-hover:text-violet-600 transition-colors">
                         {student.name}
                       </div>
                     </td>

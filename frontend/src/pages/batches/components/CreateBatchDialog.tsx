@@ -1,7 +1,8 @@
-import { ArrowLeft, Loader2, Plus, Upload, UserPlus, X } from 'lucide-react'
+import { ArrowLeft, Plus, Upload, UserPlus, X } from 'lucide-react'
 import { BTN_BACK, BTN_PRIMARY, INPUT_CLASS } from '../constants'
 import type { BatchesPageState } from '../hooks/useBatchesPage'
 import { modalTitle } from '../utils/modalTitle'
+import { Spinner } from '../../../design-system'
 
 type Props = Pick<
   BatchesPageState,
@@ -163,10 +164,10 @@ export function CreateBatchDialog(props: Props) {
               <div className="grid grid-cols-2 gap-3">
                 <button
                   type="button"
-                  className="group relative flex flex-col items-center text-center p-4 border-2 border-slate-200 rounded-xl hover:border-emerald-500 hover:bg-emerald-50/20 transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500"
+                  className="group relative flex flex-col items-center text-center p-4 border-2 border-slate-200 rounded-xl hover:border-violet-500 hover:bg-violet-50/20 transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-violet-500"
                   onClick={() => setCreateStep('csv')}
                 >
-                  <div className="w-10 h-10 rounded-lg bg-emerald-100 text-emerald-600 flex items-center justify-center group-hover:bg-emerald-200 transition-colors">
+                  <div className="w-10 h-10 rounded-lg bg-violet-100 text-violet-600 flex items-center justify-center group-hover:bg-violet-200 transition-colors">
                     <Upload className="w-5 h-5" />
                   </div>
                   <div className="font-semibold text-slate-900 text-sm mt-3 mb-1">Upload CSV File</div>
@@ -214,7 +215,7 @@ export function CreateBatchDialog(props: Props) {
                     className="sr-only"
                   />
                   <div className="flex items-center gap-3 w-full rounded-md border border-slate-300 bg-slate-50 px-3 py-2.5 hover:bg-slate-100 transition-colors">
-                    <span className="inline-flex items-center justify-center px-4 py-2 text-sm font-semibold rounded-md text-white bg-emerald-600 hover:bg-emerald-700 flex-shrink-0">
+                    <span className="inline-flex items-center justify-center px-4 py-2 text-sm font-semibold rounded-md text-white bg-violet-600 hover:bg-violet-700 flex-shrink-0">
                       Choose File
                     </span>
                     <span
@@ -234,7 +235,7 @@ export function CreateBatchDialog(props: Props) {
               {csvError && <p className="text-xs font-medium text-red-600">{csvError}</p>}
               {createStatus && (
                 <p
-                  className={`text-xs font-medium ${createStatus.includes('Creating') ? 'text-emerald-600 animate-pulse' : 'text-red-600'}`}
+                  className={`text-xs font-medium ${createStatus.includes('Creating') ? 'text-violet-600 animate-pulse' : 'text-red-600'}`}
                 >
                   {createStatus}
                 </p>
@@ -282,7 +283,7 @@ export function CreateBatchDialog(props: Props) {
                 >
                   {isSubmitting ? (
                     <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <Spinner size={16} />
                       Creating…
                     </>
                   ) : (
@@ -306,7 +307,7 @@ export function CreateBatchDialog(props: Props) {
                     onKeyDown={(e) =>
                       e.key === 'Enter' && (e.preventDefault(), handleAddManualStudent())
                     }
-                    className="block w-full rounded-md border border-emerald-200 bg-slate-50 focus:bg-white focus:border-emerald-500 py-2.5 px-2 text-sm"
+                    className="block w-full rounded-md border border-violet-200 bg-slate-50 focus:bg-white focus:border-violet-500 py-2.5 px-2 text-sm"
                   />
                   <input
                     type="email"
@@ -316,12 +317,12 @@ export function CreateBatchDialog(props: Props) {
                     onKeyDown={(e) =>
                       e.key === 'Enter' && (e.preventDefault(), handleAddManualStudent())
                     }
-                    className="block w-full rounded-md border border-emerald-200 bg-slate-50 focus:bg-white focus:border-emerald-500 py-2.5 px-2 text-sm"
+                    className="block w-full rounded-md border border-violet-200 bg-slate-50 focus:bg-white focus:border-violet-500 py-2.5 px-2 text-sm"
                   />
                   <button
                     type="button"
                     onClick={handleAddManualStudent}
-                    className="inline-flex items-center justify-center w-8 h-8 rounded-full border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:border-emerald-400 shadow-sm transition-colors"
+                    className="inline-flex items-center justify-center w-8 h-8 rounded-full border border-violet-300 bg-violet-50 text-violet-700 hover:bg-violet-100 hover:border-violet-400 shadow-sm transition-colors"
                     aria-label="Add student"
                   >
                     <Plus className="w-4 h-4" />
@@ -362,7 +363,7 @@ export function CreateBatchDialog(props: Props) {
 
               {createStatus && (
                 <p
-                  className={`text-xs font-medium ${createStatus.includes('Creating') ? 'text-emerald-600 animate-pulse' : 'text-red-600'}`}
+                  className={`text-xs font-medium ${createStatus.includes('Creating') ? 'text-violet-600 animate-pulse' : 'text-red-600'}`}
                 >
                   {createStatus}
                 </p>
@@ -386,7 +387,7 @@ export function CreateBatchDialog(props: Props) {
                 >
                   {isSubmitting ? (
                     <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <Spinner size={16} />
                       Creating…
                     </>
                   ) : (

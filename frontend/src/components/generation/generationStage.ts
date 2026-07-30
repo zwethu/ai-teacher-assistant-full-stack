@@ -15,6 +15,7 @@ export type GenerationStage =
   | 'preview'
   | 'done'
   | 'failed'
+  | 'cancelled'
 
 export type DerivedStage = {
   stage: GenerationStage
@@ -45,7 +46,9 @@ export function deriveGenerationStage(run: GenerationRunState): DerivedStage {
   const runState = active?.run_id ? runStates[active.run_id] : undefined
 
   if (!active) {
-    // Optimistic assistant slot not created yet — we are mid-kickoff.
+    // No assistant slot: mid-kickoff while a phase is armed, otherwise nothing
+    // is running (e.g. the run was stopped before it produced a placeholder).
+    if (!activePhase) return { stage: 'idle', activeMessage: null, runState }
     return {
       stage: activePhase === 'full' ? 'generating_full' : 'generating_outline',
       activeMessage: null,
@@ -54,6 +57,9 @@ export function deriveGenerationStage(run: GenerationRunState): DerivedStage {
   }
 
   const status = runState?.status
+  if (status === 'cancelled') {
+    return { stage: 'cancelled', activeMessage: active, runState }
+  }
   if (active.status === 'failed' || status === 'failed') {
     return { stage: 'failed', activeMessage: active, runState }
   }

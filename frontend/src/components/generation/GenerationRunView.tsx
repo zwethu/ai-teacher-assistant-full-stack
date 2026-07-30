@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Info, Loader2, Pencil } from 'lucide-react'
+import { Info, Pencil, Square } from 'lucide-react'
 import type { Batch } from '../../entity/Batch'
 import type { GenerationRunState } from '../../hooks/useGenerationRun'
 import {
@@ -15,6 +15,7 @@ import { GenerationStepper } from './GenerationStepper'
 import { RefineField } from './RefineField'
 import { RunInspector } from './RunInspector'
 import { ACCENT, type GenAccent } from './generationTheme'
+import { Spinner } from '../../design-system'
 
 /**
  * Non-chat renderer for a single generation run. Presents the workflow as
@@ -26,7 +27,7 @@ import { ACCENT, type GenAccent } from './generationTheme'
 export function GenerationRunView({
   batch,
   run,
-  accent = 'emerald',
+  accent = 'primary',
   emptyHint,
   onBlueprintSaved,
 }: {
@@ -47,12 +48,6 @@ export function GenerationRunView({
   }, [stage])
 
   const generating = stage === 'generating_outline' || stage === 'generating_full'
-  const heading =
-    stage === 'generating_full'
-      ? 'Generating the full preview…'
-      : run.activePhase === 'refine'
-        ? 'Applying your changes…'
-        : 'Drafting the outline…'
 
   const refineTrigger = (label: string) => (
     <button
@@ -84,10 +79,9 @@ export function GenerationRunView({
 
         {generating && (
           <div className="space-y-3">
-            <div className="flex items-center gap-2 text-sm font-medium text-slate-600">
-              <Loader2 className={`h-4 w-4 animate-spin ${theme.text}`} />
-              {heading}
-            </div>
+            {/* No status heading and no loading spinner here: the stepper above
+                already names the phase, and the thinking line is the one live
+                element. Two competing "we're working" animations read as noise. */}
             {runState && (
               <ThinkingPanel
                 events={runState.events}
@@ -102,6 +96,28 @@ export function GenerationRunView({
                 background. Come back anytime and you'll see the progress right here.
               </span>
             </div>
+            <button
+              type="button"
+              onClick={() => void run.cancelRun()}
+              disabled={run.cancelling}
+              className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {run.cancelling ? (
+                <Spinner size={14} tone="muted" />
+              ) : (
+                <Square className="h-3 w-3 fill-current" />
+              )}
+              {run.cancelling ? 'Stopping…' : 'Stop generating'}
+            </button>
+          </div>
+        )}
+
+        {stage === 'cancelled' && (
+          <div className="space-y-3">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+              Request cancelled. Nothing was saved — adjust the form and generate again.
+            </div>
+            {runState && <RunInspector run={runState} />}
           </div>
         )}
 

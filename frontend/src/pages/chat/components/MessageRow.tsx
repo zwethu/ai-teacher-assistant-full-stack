@@ -1,26 +1,26 @@
-import { useEffect, useId, useState } from 'react'
+import { memo, useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   BookOpen,
-  Bot,
   CalendarClock,
-  ChevronDown,
+  Check,
+  CircleSlash,
+  Copy,
+  CornerUpLeft,
+  Download,
   ExternalLink,
-  FileText,
   FileQuestion,
+  FileText,
   FlaskConical,
   Gamepad2,
-  Loader2,
   Mail,
   Map as MapIcon,
   Maximize2,
-  MoreHorizontal,
   Pencil,
+  RefreshCw,
   Save,
   Send,
-  User,
   X,
-  Image as ImageIcon,
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
@@ -28,7 +28,8 @@ import rehypeKatex from 'rehype-katex'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import 'katex/dist/katex.min.css'
-import type { ChatAttachmentSnapshot, ChatMessage } from '../../../entity/Chat'
+import { ThinkingRow, Spinner, Button } from '../../../design-system'
+import type { ChatMessage } from '../../../entity/Chat'
 import { startGoogleOAuth } from '../../../services/authService'
 import {
   exportPendingQuizToGoogleForms,
@@ -38,7 +39,6 @@ import {
   updatePendingEmail,
   type UpdatePendingEmailResult,
 } from '../../../services/chatService'
-import { getChatAttachmentContent } from '../../../services/chatService'
 import {
   exportArtifactDraftToGoogleDocs,
   exportQuizDraftToGoogleForms,
@@ -58,11 +58,16 @@ import {
 } from '../utils/webCitations'
 import { RunDetails } from './run/RunDetails'
 import { ThinkingPanel } from './run/ThinkingPanel'
-import { CourseBlueprintReviewModal } from './CourseBlueprintReviewModal'
-import type { CourseBlueprint } from '../../../services/courseBlueprintService'
 import { createGameFromRun } from '../../../services/gameService'
-import { normalizeCourseBlueprintRecommendation, saveBlueprintFromRun } from '../../../services/courseBlueprintService'
-import { SuggestedCourseBlueprintModal } from './SuggestedCourseBlueprintModal'
+import { saveBlueprintFromRun } from '../../../services/courseBlueprintService'
+import { EXPORT_FORMAT_LABELS, exportMessage, type ChatExportFormat } from '../../../services/chatService'
+import type { PreviewableAttachment } from './AttachmentPreview'
+import {
+  AttachmentThumbnail,
+  AttachmentViewer,
+  attachmentFromReference,
+} from './AttachmentPreview'
+import { EXPORT_FORMATS, EXPORT_FORMAT_ICONS } from './exportFormatIcons'
 
 // Referenced prior attachments are conveyed to the agent as an id mention appended to the
 // message (the backend rejects re-sending an already-sent attachment via attachment_ids).
@@ -70,21 +75,189 @@ import { SuggestedCourseBlueprintModal } from './SuggestedCourseBlueprintModal'
 // how they appear in the composer — so the user never sees the raw "Attachment ID:" text.
 const REFERENCED_ATTACHMENT_RE = /^Please use the earlier attachment (.+)\. Attachment ID: (\S+)$/
 
+/**
+ * Quote-reply travels the same way a re-referenced attachment does: as a line
+ * inside the message the lecturer sends.
+ *
+ * That is not a shortcut around the backend — it is the only channel the agent
+ * reads. `agent_gateway.start_chat_run` stashes the message `content` verbatim
+ * and hands that string to Agent Engine; message `metadata` never reaches it.
+ * So for the agent to know what is being replied to, the quote has to be in the
+ * text. Stripping it back out here is what keeps the raw marker off screen.
+ *
+ * Whitespace is collapsed on the way out so the marker stays one line and this
+ * regex can stay anchored.
+ */
+const REPLY_QUOTE_RE = /^In reply to this part of your earlier response: "(.+)"$/
+
+/** Excerpts ride along in every later turn's context, so they are capped. */
+export const MAX_QUOTE_CHARS = 600
+
+/** Build the marker line the agent reads and the parser below strips. */
+export function formatQuoteMention(excerpt: string): string {
+  const flat = excerpt.replace(/\s+/g, ' ').trim()
+  const capped = flat.length > MAX_QUOTE_CHARS ? `${flat.slice(0, MAX_QUOTE_CHARS).trimEnd()}…` : flat
+  return `In reply to this part of your earlier response: "${capped}"`
+}
+
+/**
+ * Copy-to-clipboard for the lecturer's own message.
+ *
+ * Mirrors the affordance already on assistant responses — same icons, same
+ * 1800ms revert to the copy glyph, same emerald tick — because they do the same
+ * thing and two different copy buttons in one transcript would be noise.
+ *
+ * Hidden until the row is hovered or the button is focused: a request is
+ * usually read, not copied, and a control on every turn competes with the
+ * conversation. `focus-visible` is what keeps it reachable by keyboard.
+ */
+function CopyRequestButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    if (!copied) return undefined
+    const timer = window.setTimeout(() => setCopied(false), 1800)
+    return () => window.clearTimeout(timer)
+  }, [copied])
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+    } catch {
+      // Clipboard access can be denied outright; a silent no-op beats an error
+      // banner over the lecturer's own message.
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => void handleCopy()}
+      className="inline-flex h-8 w-8 flex-none items-center justify-center rounded-full text-slate-400 opacity-0 transition-[opacity,color,background-color] duration-150 hover:bg-white/80 hover:text-violet-700 focus-visible:opacity-100 group-hover:opacity-100"
+      aria-label={copied ? 'Copied to clipboard' : 'Copy your message'}
+    >
+      {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+    </button>
+  )
+}
+
 export function parseUserMessageContent(content: string): {
   body: string
   references: { title: string; id: string }[]
+  quote: string
 } {
   const references: { title: string; id: string }[] = []
   const bodyLines: string[] = []
+  let quote = ''
   for (const line of content.split('\n')) {
     const match = line.match(REFERENCED_ATTACHMENT_RE)
+    const quoted = line.match(REPLY_QUOTE_RE)
     if (match) references.push({ title: match[1], id: match[2] })
+    else if (quoted) quote = quoted[1]
     else bodyLines.push(line)
   }
-  return { body: bodyLines.join('\n').trim(), references }
+  return { body: bodyLines.join('\n').trim(), references, quote }
 }
 
-export function MessageRow({
+/**
+ * The "Reply" affordance over a selection inside an assistant response.
+ *
+ * Deliberately a sibling of the message body, owning its own state and drawing
+ * the button through a portal. Two bugs came from doing it the obvious way:
+ *
+ *   - With the button *inside* the body, the body's own `mouseup` fired when
+ *     you clicked the button. That recomputed a selection the click had just
+ *     collapsed, unmounted the button, and the `click` never dispatched — so
+ *     tapping Reply did nothing at all.
+ *   - With the state on MessageRow, setting it re-rendered ReactMarkdown, and
+ *     rebuilding those nodes dropped the browser's selection. The highlight
+ *     vanished the instant the button appeared.
+ *
+ * Keeping the state here means the message body never re-renders, so the
+ * highlight survives; `preventDefault` on mousedown is what stops the browser
+ * collapsing the selection as the button is pressed.
+ */
+function QuoteReplyOverlay({
+  sourceRef,
+  onQuote,
+}: {
+  sourceRef: React.RefObject<HTMLDivElement | null>
+  onQuote: (excerpt: string) => void
+}) {
+  const [anchor, setAnchor] = useState<{ text: string; top: number; left: number } | null>(null)
+  const buttonRef = useRef<HTMLButtonElement | null>(null)
+
+  useEffect(() => {
+    const node = sourceRef.current
+    if (!node) return undefined
+
+    function readSelection() {
+      const active = window.getSelection()
+      if (!node || !active || active.isCollapsed || active.rangeCount === 0) return setAnchor(null)
+      const range = active.getRangeAt(0)
+      // Both ends inside this message: a drag running on into the next
+      // response would otherwise quote two turns as though they were one.
+      if (!node.contains(range.startContainer) || !node.contains(range.endContainer)) {
+        return setAnchor(null)
+      }
+      const text = active.toString().trim()
+      if (!text) return setAnchor(null)
+      // Viewport coordinates, because the button is portalled to <body>.
+      // Optional-called: a collapsed or detached range can report nothing, and
+      // jsdom does not implement it at all.
+      const rect = range.getBoundingClientRect?.()
+      setAnchor({ text, top: (rect?.top ?? 0) - 42, left: rect?.left ?? 0 })
+    }
+
+    function dismiss(event: MouseEvent) {
+      if (!(event.target instanceof Node)) return setAnchor(null)
+      if (node?.contains(event.target)) return
+      // The button is portalled to <body>, so it is "outside" the message and
+      // this handler would unmount it on mousedown — before the click it was
+      // pressed for ever dispatched. Pressing Reply must not dismiss Reply.
+      if (buttonRef.current?.contains(event.target)) return
+      setAnchor(null)
+    }
+
+    node.addEventListener('mouseup', readSelection)
+    document.addEventListener('mousedown', dismiss)
+    return () => {
+      node.removeEventListener('mouseup', readSelection)
+      document.removeEventListener('mousedown', dismiss)
+    }
+  }, [sourceRef])
+
+  if (!anchor) return null
+
+  return createPortal(
+    <button
+      ref={buttonRef}
+      type="button"
+      style={{ position: 'fixed', top: anchor.top, left: anchor.left }}
+      // Without this the press collapses the selection before the click lands.
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={() => {
+        onQuote(anchor.text)
+        setAnchor(null)
+      }}
+      className="z-[400] inline-flex items-center gap-1.5 rounded-full border border-violet-200 bg-white px-3 py-1.5 text-xs font-semibold text-violet-700 shadow-lg hover:bg-violet-50"
+    >
+      <CornerUpLeft className="h-3.5 w-3.5" />
+      Reply
+    </button>,
+    document.body,
+  )
+}
+
+/**
+ * Memoized: every message re-renders its Markdown, and the transcript re-renders
+ * whenever the floating composer's measured height changes — which is now once
+ * per frame while the composer eases open or closed. All props are shallow-
+ * comparable, so callers must pass stable callbacks (see ChatLayout) or the
+ * memo does nothing.
+ */
+export const MessageRow = memo(function MessageRow({
   msg,
   run,
   batchId,
@@ -92,30 +265,37 @@ export function MessageRow({
   approvalDisabled = false,
   approvalCompleted = false,
   approvalSuperseded = false,
-  courseName = '',
-  onAskAboutAttachment,
   onPendingEmailEdited,
+  onRetry,
+  onQuoteReply,
+  retrying = false,
 }: {
   msg?: ChatMessage | null
   run?: RunUiState
   batchId?: string
+  /** Discard this response and re-run the request that produced it. */
+  onRetry?: (message: ChatMessage) => void
+  /** Quote a selected passage of this response into the composer. */
+  onQuoteReply?: (excerpt: string) => void
+  retrying?: boolean
   onApproveOutline?: (message: ChatMessage) => void
   approvalDisabled?: boolean
   approvalCompleted?: boolean
   approvalSuperseded?: boolean
-  courseName?: string
-  onAskAboutAttachment?: (attachment: ChatAttachmentSnapshot) => void
   onPendingEmailEdited?: (runId: string, result: UpdatePendingEmailResult) => void
 }) {
-  const [blueprintMode, setBlueprintMode] = useState<'manual' | 'suggested' | 'edit-suggested' | null>(null)
-  const [actionsOpen, setActionsOpen] = useState(false)
-  const [savedBlueprint, setSavedBlueprint] = useState<CourseBlueprint | null>(null)
   if (!msg) return null
 
   const isUser = msg.role === 'user'
+  const quoteSourceRef = useRef<HTMLDivElement | null>(null)
   const isFinal = !msg.pending && msg.status !== 'pending'
   const isPending = Boolean(msg.pending || msg.status === 'pending')
   const isFailed = msg.status === 'failed' || run?.status === 'failed'
+  // The lecturer pressed Stop. Whatever streamed first is discarded server-side,
+  // so this replaces the body rather than annotating it. The metadata flag is
+  // the durable half: run state can be dropped (resubscribe, remount) while the
+  // message itself still needs to say it was stopped.
+  const isCancelled = run?.status === 'cancelled' || msg.metadata?.run_cancelled === true
   // Run created but held until its attachments finish processing.
   const isAwaitingAttachments = run?.status === 'awaiting_attachments'
   const shouldUseArtifactCard = isGeneratedArtifactPreviewMessage(msg, isPending)
@@ -123,62 +303,76 @@ export function MessageRow({
   const assistantIntro = typeof msg.metadata?.assistant_intro === 'string'
     ? msg.metadata.assistant_intro.trim()
     : ''
-  const canSaveBlueprint = Boolean(batchId && courseName && !savedBlueprint && isCourseBlueprintSourceEligible(msg, isPending, isFailed))
-  const blueprintRecommendation = normalizeCourseBlueprintRecommendation(msg.metadata?.course_blueprint_recommendation)
-  const showSuggestedBlueprintButton = canSaveBlueprint &&
-    msg.metadata?.course_blueprint_save_suggested === true &&
-    msg.metadata?.course_blueprint_suggestion_confidence === 'high' &&
-    Boolean(blueprintRecommendation)
-
   return (
-    <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : ''}`}>
-      <div
-        className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
-          isUser
-            ? 'bg-emerald-500/90 text-white shadow-md shadow-emerald-500/20'
-            : 'bg-white/70 border border-white/60 text-slate-600 shadow-sm'
-        }`}
-      >
-        {isUser ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
-      </div>
+    <div className="flex">
       <div className={`flex-1 min-w-0 pt-1 ${isUser ? 'flex justify-end' : ''}`}>
         {isUser ? (() => {
-          const { body, references } = parseUserMessageContent(msg.content)
+          const { body, references, quote } = parseUserMessageContent(msg.content)
           return (
           <div className="max-w-full">
+            {/* What the lecturer was replying to, shown above their own words
+                the way a quoted reply reads in any messaging app. */}
+            {quote && (
+              /* "You are replying to this." Three things carry that, and the
+                 previous version had none of them:
+                   - the same corner-up-left glyph the Reply button used, so the
+                     gesture and its result share one mark;
+                   - a narrower measure than the bubble, right-aligned to the
+                     same edge, so it reads as subordinate and attached rather
+                     than as a message of its own;
+                   - the assistant's own neutral, not the lecturer's violet, so
+                     it is legible as *quoted from the other side*.
+                 Clamped to two lines: it is a pointer, not the content. */
+              <div className="flex justify-end">
+                <div className="flex max-w-[75%] items-start gap-2.5 rounded-2xl rounded-br-md border border-white/75 bg-white/65 px-2.5 py-2 shadow-[0_4px_12px_rgba(63,47,107,0.07)] backdrop-blur-sm">
+                  <span className="mt-0.5 inline-flex h-5 w-5 flex-none items-center justify-center rounded-md bg-violet-100 text-violet-700">
+                    <CornerUpLeft className="h-3 w-3" />
+                  </span>
+                  <span className="min-w-0 text-left">
+                    <span className="block text-[10px] font-semibold uppercase tracking-[0.08em] text-violet-700">Replying to</span>
+                    <span className="mt-0.5 block text-xs leading-5 text-slate-700 line-clamp-2">{quote}</span>
+                  </span>
+                </div>
+              </div>
+            )}
             {body && (
-              <div className="inline-block max-w-full text-[15px] leading-7 whitespace-pre-wrap px-4 py-2.5 rounded-3xl rounded-br-md bg-emerald-500/15 border border-emerald-300/30 text-slate-800">
-                {body}
+              /* The copy control sits outside the bubble, to its left, so it
+                 never reflows the text or eats into the bubble's padding. The
+                 row is the hover group; `min-w-0` lets the bubble still shrink
+                 to the column now that it shares a flex line. */
+              <div className="group mt-1 flex items-center justify-end gap-1">
+                <CopyRequestButton text={body} />
+                <div className="min-w-0 max-w-[75%] text-[15px] leading-7 whitespace-pre-wrap px-4 py-2.5 rounded-3xl rounded-br-md bg-violet-500/15 border border-violet-300/30 text-violet-900">
+                  {body}
+                </div>
               </div>
             )}
-            {references.length > 0 && (
-              <div className="mt-1 flex flex-wrap justify-end gap-2">
-                {references.map((ref) => (
-                  <div key={ref.id} className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50/80 px-2.5 py-1.5 shadow-sm">
-                    <FileText className="h-4 w-4 flex-shrink-0 text-emerald-600" />
-                    <span className="max-w-[220px] truncate text-xs font-medium text-slate-700">{ref.title}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-            {batchId && msg.attachments && msg.attachments.length > 0 && (
-              <MessageAttachments batchId={batchId} chatId={msg.chat_id} attachments={msg.attachments} onAsk={onAskAboutAttachment} />
-            )}
+            {/* Re-referenced files render exactly like freshly attached ones:
+                same preview, same tap-to-view. They are the same file, so the
+                sent message should not distinguish them by provenance. Real
+                attachments win on id collisions — they carry full metadata. */}
+            {batchId && (() => {
+              const attached = msg.attachments || []
+              const attachedIds = new Set(attached.map((item) => item.attachment_id))
+              const referenced = references
+                .filter((ref) => !attachedIds.has(ref.id))
+                .map((ref) => attachmentFromReference(ref.id, ref.title))
+              const all = [...attached, ...referenced]
+              return all.length > 0 ? (
+                <MessageAttachments batchId={batchId} chatId={msg.chat_id} attachments={all} />
+              ) : null
+            })()}
           </div>
           )
         })() : (
-          <div className="max-w-full text-[15px] leading-7 text-slate-700">
-            {canSaveBlueprint && (
-              <div className="relative mb-1 flex justify-end">
-                <button type="button" onClick={() => setActionsOpen((value) => !value)} className="rounded-md p-1 text-slate-400 hover:bg-white/70 hover:text-slate-700" aria-label="Message actions"><MoreHorizontal className="h-4 w-4" /></button>
-                {actionsOpen && (
-                  <div className="absolute right-0 top-7 z-30 w-56 rounded-lg border border-slate-200 bg-white py-1 shadow-xl">
-                    <button type="button" onClick={() => { setActionsOpen(false); setBlueprintMode('manual') }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"><Save className="h-4 w-4 text-emerald-600" />Save to Course Blueprint...</button>
-                  </div>
-                )}
-              </div>
+          <div
+            ref={quoteSourceRef}
+            data-quote-source=""
+            className="max-w-full text-[15px] leading-7 text-slate-700"
+          >
+            {onQuoteReply && (
+              <QuoteReplyOverlay sourceRef={quoteSourceRef} onQuote={onQuoteReply} />
             )}
-            {savedBlueprint && <p className="mb-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800">Course Blueprint v{savedBlueprint.version} saved.</p>}
             {!isAwaitingAttachments && <RunDetails run={run} isFinal={isFinal} />}
             {run && !isAwaitingAttachments && (
               <div className="mt-2">
@@ -189,16 +383,27 @@ export function MessageRow({
               </div>
             )}
             <div className={run ? 'mt-3' : ''}>
-              {isFailed && !msg.content ? (
+              {isCancelled ? (
+                <div className="flex items-start gap-2 text-sm text-slate-600">
+                  <CircleSlash className="mt-0.5 h-4 w-4 flex-shrink-0 text-slate-400" />
+                  <span>
+                    You stopped this request.
+                    {msg.content ? ' Everything generated before that was discarded.' : ''}
+                  </span>
+                </div>
+              ) : isFailed && !msg.content ? (
                 <p className="text-sm text-slate-600">
                   The agent run failed before producing a final response.
                 </p>
               ) : isAwaitingAttachments && !msg.content ? (
                 <p className="flex items-center gap-2 text-[15px] text-slate-600">
-                  <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin text-emerald-600" />
+                  <Spinner size={16} className="flex-shrink-0" />
                   Processing your file(s)…
                 </p>
-              ) : isPending && !msg.content ? (
+              ) : isPending && !msg.content && !run ? (
+                /* Only when there is no run yet — once a run exists the
+                   ThinkingPanel above already shows the garland, and rendering
+                   both put two identical marks on screen. */
                 <ThinkingIndicator />
               ) : msg.content ? (
                 shouldUseOutlineCard ? (
@@ -218,22 +423,19 @@ export function MessageRow({
                     <ArtifactPreviewCard content={msg.content} metadata={msg.metadata || {}} />
                   </>
                 ) : (
-                  <ResponseMarkdown content={msg.content} streaming={isPending} metadata={msg.metadata} />
+                  <ResponseMarkdown
+                    content={msg.content}
+                    streaming={isPending}
+                    metadata={msg.metadata}
+                    batchId={batchId}
+                    chatId={msg.chat_id}
+                    messageId={msg.message_id}
+                    onRetry={onRetry && msg.message_id ? () => onRetry(msg) : undefined}
+                    retrying={retrying}
+                  />
                 )
               ) : null}
             </div>
-            {showSuggestedBlueprintButton && (
-              <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50/70 p-3">
-                <button type="button" onClick={() => setBlueprintMode('suggested')} className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700"><Save className="h-4 w-4" />Save to Course Blueprint</button>
-                <p className="mt-2 text-xs leading-5 text-emerald-800">Suggested by the consultant because this response looks reusable as course planning memory.</p>
-              </div>
-            )}
-            {blueprintMode === 'suggested' && batchId && blueprintRecommendation && (
-              <SuggestedCourseBlueprintModal batchId={batchId} message={msg} recommendation={blueprintRecommendation} onClose={() => setBlueprintMode(null)} onEdit={() => setBlueprintMode('edit-suggested')} onSaved={(blueprint) => { setSavedBlueprint(blueprint); setBlueprintMode(null) }} />
-            )}
-            {(blueprintMode === 'manual' || blueprintMode === 'edit-suggested') && batchId && (
-              <CourseBlueprintReviewModal batchId={batchId} courseName={courseName} message={msg} initialContent={blueprintMode === 'edit-suggested' ? blueprintRecommendation || undefined : undefined} onClose={() => setBlueprintMode(null)} onSaved={(blueprint) => { setSavedBlueprint(blueprint); setBlueprintMode(null) }} />
-            )}
             {!isUser && batchId && <ArtifactExportButton batchId={batchId} msg={msg} />}
             {!isUser && batchId && <BlueprintSaveButton batchId={batchId} msg={msg} />}
             {!isUser && batchId && <GameCreateButton batchId={batchId} msg={msg} />}
@@ -245,94 +447,62 @@ export function MessageRow({
       </div>
     </div>
   )
-}
+})
 
+/**
+ * Attachments shown under a sent user message.
+ *
+ * Images show their thumbnail; everything else shows a format badge. The whole
+ * chip opens the viewer, so there is no separate "view" action. Availability is
+ * probed rather than read from the snapshot: the snapshot is frozen at send
+ * time and keeps claiming a thumbnail long after the file has aged out.
+ */
+/**
+ * Attachments under a sent user message — preview only.
+ *
+ * Deliberately no filename, size or actions: the thumbnail already says what
+ * was sent, and the row sits under the message where every extra word competes
+ * with the message itself. Tap opens the full viewer.
+ */
 function MessageAttachments({
-  batchId, chatId, attachments, onAsk,
+  batchId, chatId, attachments,
 }: {
   batchId: string
   chatId: string
-  attachments: ChatAttachmentSnapshot[]
-  onAsk?: (attachment: ChatAttachmentSnapshot) => void
+  attachments: PreviewableAttachment[]
 }) {
-  const [urls, setUrls] = useState<Record<string, string>>({})
-
-  useEffect(() => {
-    let cancelled = false
-    const created: string[] = []
-    async function loadThumbnails() {
-      for (const attachment of attachments) {
-        if (attachment.attachment_kind !== 'image' || !attachment.thumbnail_available) continue
-        try {
-          const blob = await getChatAttachmentContent(batchId, chatId, attachment.attachment_id, true)
-          if (cancelled) return
-          const url = URL.createObjectURL(blob)
-          created.push(url)
-          setUrls((prev) => ({ ...prev, [attachment.attachment_id]: url }))
-        } catch {
-          // Keep the metadata card usable when a preview cannot be loaded.
-        }
-      }
-    }
-    void loadThumbnails()
-    return () => {
-      cancelled = true
-      created.forEach((url) => URL.revokeObjectURL(url))
-    }
-  }, [attachments, batchId, chatId])
-
-  async function viewAttachment(attachment: ChatAttachmentSnapshot) {
-    try {
-      const blob = await getChatAttachmentContent(batchId, chatId, attachment.attachment_id)
-      const url = URL.createObjectURL(blob)
-      window.open(url, '_blank', 'noopener,noreferrer')
-      window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
-    } catch {
-      // The card retains status metadata even if the object has expired.
-    }
-  }
+  const [preview, setPreview] = useState<PreviewableAttachment | null>(null)
 
   return (
     <div className="mt-2 flex flex-wrap justify-end gap-2">
       {attachments.map((attachment) => (
-        <div
+        <button
           key={attachment.attachment_id}
-          className="flex max-w-xs items-center gap-2 rounded-xl border border-slate-200 bg-white/85 p-2 text-left shadow-sm hover:bg-white"
+          type="button"
+          onClick={() => setPreview(attachment)}
+          className="overflow-hidden rounded-xl border border-white/70 bg-white/70 shadow-sm transition-transform hover:scale-[1.03]"
+          aria-label={`Preview ${attachment.file_name}`}
+          title={attachment.file_name}
         >
-          {urls[attachment.attachment_id] ? (
-            <img src={urls[attachment.attachment_id]} alt="" className="h-11 w-11 rounded-lg object-cover" />
-          ) : attachment.attachment_kind === 'image' ? (
-            <ImageIcon className="h-5 w-5 text-sky-600" />
-          ) : (
-            <FileText className="h-5 w-5 text-emerald-600" />
-          )}
-          <span className="min-w-0">
-            <span className="block truncate text-xs font-medium text-slate-700">{attachment.file_title || attachment.file_name}</span>
-            <span className="block text-[11px] text-slate-400" title={attachment.attachment_kind === 'image' && attachment.vision_status !== 'ready' ? 'Image analysis was unavailable; the assistant was instructed not to guess its contents.' : undefined}>
-              {attachment.attachment_kind === 'image' ? `Image · chat-only · vision ${attachment.vision_status}` : `Document · ${attachment.parse_status}`}
-            </span>
-          </span>
-          <span className="flex flex-col gap-1">
-            <button type="button" onClick={() => void viewAttachment(attachment)} className="rounded px-1.5 py-0.5 text-[10px] font-medium text-slate-500 hover:bg-slate-100">View</button>
-            <button type="button" onClick={() => onAsk?.(attachment)} className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">{attachment.attachment_kind === 'image' ? 'Ask about image' : 'Ask about file'}</button>
-          </span>
-        </div>
+          <AttachmentThumbnail
+            batchId={batchId}
+            chatId={chatId}
+            attachment={attachment}
+            className="h-20 w-20"
+          />
+        </button>
       ))}
+
+      {preview && (
+        <AttachmentViewer
+          batchId={batchId}
+          chatId={chatId}
+          attachment={preview}
+          onClose={() => setPreview(null)}
+        />
+      )}
     </div>
   )
-}
-
-export function isCourseBlueprintSourceEligible(
-  msg: ChatMessage,
-  isPending = Boolean(msg.pending || msg.status === 'pending'),
-  isFailed = msg.status === 'failed',
-): boolean {
-  const metadata = msg.metadata || {}
-  const exportResult = metadata.export_result === true || Boolean(metadata.doc_url || metadata.form_url)
-  return msg.role === 'assistant' && !isPending && !isFailed && Boolean(msg.content.trim()) &&
-    metadata.outline_approvable !== true && metadata.artifact_preview_card !== true &&
-    metadata.pending_exportable !== true && metadata.exportable !== true && !exportResult &&
-    !metadata.course_blueprint_saved_id
 }
 
 function AssistantIntro({ content, metadata }: { content: string; metadata?: Record<string, unknown> }) {
@@ -368,25 +538,22 @@ export function OutlineApprovalCard({
   const label = type === 'lab' ? 'Lab Outline' : type === 'quiz' ? 'Assessment Configuration' : type === 'course_blueprint' ? 'Course Plan Outline' : 'Lesson Plan Outline'
   const Icon = type === 'lab' ? FlaskConical : type === 'quiz' ? FileQuestion : BookOpen
   return (
-    <div className="overflow-hidden rounded-lg border border-emerald-200/80 bg-white/75 shadow-sm backdrop-blur-sm">
-      <div className="flex items-center gap-3 border-b border-emerald-100 bg-emerald-50/40 px-4 py-3.5">
-        <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
+    <div className="overflow-hidden rounded-lg border border-violet-200/80 bg-white/75 shadow-sm backdrop-blur-sm">
+      <div className="flex items-center gap-3 border-b border-violet-100 bg-violet-50/40 px-4 py-3.5">
+        <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-violet-100 text-violet-700">
           <Icon className="h-5 w-5" />
         </div>
         <div className="min-w-0">
-          <div className="text-xs font-semibold uppercase tracking-wide text-emerald-700">{label}</div>
+          <div className="text-xs font-semibold uppercase tracking-wide text-violet-700">{label}</div>
           <div className="truncate font-semibold text-slate-900">{String(metadata.outline_title || metadata.artifact_title || '')}</div>
         </div>
       </div>
-      <div className="px-5 py-4"><ResponseMarkdown content={msg.content} streaming={false} /></div>
+      {/* metadata carries web_sources — without it every citation in the
+          outline would be unresolvable and get dropped. */}
+      <div className="px-5 py-4"><ResponseMarkdown content={msg.content} streaming={false} metadata={msg.metadata} /></div>
       <div className="flex flex-col gap-2 border-t border-slate-200/80 bg-slate-50/50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-xs leading-5 text-slate-500">Reply with changes to revise the outline before generation.</p>
-        <button
-          type="button"
-          disabled={disabled || locked}
-          onClick={onApprove}
-          className="inline-flex flex-shrink-0 items-center justify-center rounded-md bg-emerald-600 px-3.5 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
-        >
+        <Button type="button" disabled={disabled || locked} onClick={onApprove} className="flex-shrink-0">
           {completed
             ? 'Full preview generated'
             : isSuperseded
@@ -396,7 +563,7 @@ export function OutlineApprovalCard({
               : disabled
                 ? 'Generating full preview...'
                 : type === 'course_blueprint' ? 'Approve and generate course plan' : 'Approve and generate full preview'}
-        </button>
+        </Button>
       </div>
     </div>
   )
@@ -478,20 +645,20 @@ export function ArtifactPreviewCard({
 
   return (
     <>
-      <div className="overflow-hidden rounded-xl border border-emerald-200 bg-white/70 shadow-sm transition-colors hover:bg-white/80">
+      <div className="overflow-hidden rounded-xl border border-violet-200 bg-white/70 shadow-sm transition-colors hover:bg-white/80">
         <button type="button" onClick={() => setOpen(true)} aria-haspopup="dialog" className="w-full px-4 py-4 text-left">
           <div className="flex items-start gap-3">
-            <div className="mt-0.5 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
+            <div className="mt-0.5 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-violet-100 text-violet-700">
               <Icon className="h-5 w-5" />
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                <span className="text-xs font-semibold uppercase tracking-wide text-emerald-700">{label}</span>
+                <span className="text-xs font-semibold uppercase tracking-wide text-violet-700">{label}</span>
                 {weekLabel && <span className="text-xs text-slate-500">{weekLabel}</span>}
               </div>
               <h3 className="mt-1 text-base font-semibold leading-6 text-slate-900">{title}</h3>
               {summary && <p className="mt-1.5 line-clamp-3 text-sm leading-5 text-slate-600">{summary}</p>}
-              <div className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-emerald-700">
+              <div className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-violet-700">
                 <Maximize2 className="h-4 w-4" />
                 Open full preview
               </div>
@@ -512,10 +679,10 @@ export function ArtifactPreviewCard({
             aria-labelledby={headingId}
             className="flex h-[96vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-white/60 bg-white shadow-2xl sm:h-auto sm:max-h-[90vh]"
           >
-            <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-emerald-100 bg-white/95 px-4 py-3 backdrop-blur sm:px-6">
-              <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700"><Icon className="h-5 w-5" /></div>
+            <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-violet-100 bg-white/95 px-4 py-3 backdrop-blur sm:px-6">
+              <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-violet-100 text-violet-700"><Icon className="h-5 w-5" /></div>
               <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-wide text-emerald-700">
+                <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-wide text-violet-700">
                   <span>{label}</span>{weekLabel && <span className="text-slate-500">{weekLabel}</span>}
                 </div>
                 <h2 id={headingId} className="truncate text-lg font-semibold text-slate-900">{title}</h2>
@@ -523,7 +690,7 @@ export function ArtifactPreviewCard({
               <button type="button" onClick={() => setOpen(false)} aria-label="Close preview" className="rounded-full p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900"><X className="h-5 w-5" /></button>
             </header>
             <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-8 sm:py-7">
-              <div className="mx-auto max-w-5xl"><ResponseMarkdown content={content} streaming={false} /></div>
+              <div className="mx-auto max-w-5xl"><ResponseMarkdown content={content} streaming={false} metadata={metadata} /></div>
             </div>
           </section>
         </div>,
@@ -561,14 +728,208 @@ function stripInlineMarkdown(value: string) {
     .trim()
 }
 
+/**
+ * Actions under an assistant response: download, copy, sources, retry.
+ *
+ * Download and retry need the message to exist server-side, so both are hidden
+ * while a response is still streaming (no message_id yet) — a half-written
+ * answer is not worth exporting, and retrying mid-stream would race the run.
+ */
+function MessageActionBar({
+  batchId,
+  chatId,
+  messageId,
+  content,
+  sources,
+  onOpenSources,
+  onRetry,
+  retrying = false,
+}: {
+  batchId?: string
+  chatId?: string
+  messageId?: string
+  content: string
+  /** Web sources behind this response; drives the favicon stack and count. */
+  sources: WebSourceMetadata[]
+  onOpenSources: () => void
+  onRetry?: () => void
+  retrying?: boolean
+}) {
+  const [downloadOpen, setDownloadOpen] = useState(false)
+  const [exporting, setExporting] = useState<ChatExportFormat | null>(null)
+  const [copied, setCopied] = useState(false)
+  const [error, setError] = useState('')
+  const downloadRef = useRef<HTMLDivElement>(null)
+
+  const canExport = Boolean(batchId && chatId && messageId)
+  const sourceCount = sources.length
+  // Three is enough to read as "several sources" without crowding the row.
+  const previewSources = sources.slice(0, 3)
+
+  useEffect(() => {
+    if (!downloadOpen) return undefined
+    function onPointerDown(event: MouseEvent) {
+      if (downloadRef.current && !downloadRef.current.contains(event.target as Node)) {
+        setDownloadOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    return () => document.removeEventListener('mousedown', onPointerDown)
+  }, [downloadOpen])
+
+  // Let "Copied" fade back to the copy icon on its own.
+  useEffect(() => {
+    if (!copied) return undefined
+    const timer = window.setTimeout(() => setCopied(false), 1800)
+    return () => window.clearTimeout(timer)
+  }, [copied])
+
+  async function handleExport(format: ChatExportFormat) {
+    if (!batchId || !chatId || !messageId) return
+    setExporting(format)
+    setError('')
+    try {
+      await exportMessage(batchId, chatId, messageId, format)
+      setDownloadOpen(false)
+    } catch {
+      setError(`Could not export as ${EXPORT_FORMAT_LABELS[format]}.`)
+    } finally {
+      setExporting(null)
+    }
+  }
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(content)
+      setCopied(true)
+      setError('')
+    } catch {
+      setError('Could not copy to clipboard.')
+    }
+  }
+
+  const iconButton =
+    'inline-flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-white/80 hover:text-violet-700 disabled:cursor-not-allowed disabled:opacity-40'
+
+  return (
+    <div className="mt-3">
+      <div className="flex items-center gap-1">
+        {canExport && (
+          <div className="relative" ref={downloadRef}>
+            <button
+              type="button"
+              onClick={() => setDownloadOpen((open) => !open)}
+              className={iconButton}
+              aria-label="Download this response"
+              aria-expanded={downloadOpen}
+            >
+              {exporting ? <Spinner size={14} /> : <Download className="h-4 w-4" />}
+            </button>
+            {downloadOpen && (
+              <div className="absolute bottom-full left-0 z-30 mb-2 w-44 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-xl">
+                {EXPORT_FORMATS.map((format) => {
+                  const FormatIcon = EXPORT_FORMAT_ICONS[format]
+                  return (
+                    <button
+                      key={format}
+                      type="button"
+                      disabled={exporting !== null}
+                      onClick={() => void handleExport(format)}
+                      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-slate-600 hover:bg-violet-50 hover:text-violet-900 disabled:opacity-50"
+                    >
+                      {exporting === format ? (
+                        <Spinner size={14} />
+                      ) : (
+                        <FormatIcon className="h-3.5 w-3.5 text-violet-600" />
+                      )}
+                      Export as {EXPORT_FORMAT_LABELS[format]}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={() => void handleCopy()}
+          className={iconButton}
+          aria-label={copied ? 'Copied to clipboard' : 'Copy this response'}
+        >
+          {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+        </button>
+
+        {onRetry && (
+          <button
+            type="button"
+            onClick={onRetry}
+            disabled={retrying}
+            className={iconButton}
+            aria-label="Retry this request"
+            title="Discard this response and ask again"
+          >
+            {retrying ? <Spinner size={14} /> : <RefreshCw className="h-4 w-4" />}
+          </button>
+        )}
+
+        {/* Overlapping favicons then the count — the sources identify themselves,
+            so the word "Sources" is redundant next to them. */}
+        {sourceCount > 0 && (
+          <button
+            type="button"
+            onClick={onOpenSources}
+            className="ml-1 inline-flex items-center gap-2 rounded-full px-2 py-1.5 text-xs font-medium text-slate-500 transition-colors hover:bg-white/80 hover:text-violet-700"
+            aria-label={`Show ${sourceCount} source${sourceCount === 1 ? '' : 's'}`}
+          >
+            {previewSources.length > 0 && (
+              <span className="flex items-center">
+                {previewSources.map((source, index) => (
+                  <span
+                    key={`${source.url || source.domain || index}`}
+                    className={`inline-flex h-5 w-5 items-center justify-center overflow-hidden rounded-full border border-white bg-white shadow-sm ${
+                      index > 0 ? '-ml-1.5' : ''
+                    }`}
+                    // stack left-over-right so the first source stays legible
+                    style={{ zIndex: previewSources.length - index }}
+                  >
+                    <SourceFavicon
+                      domain={source.domain}
+                      url={source.url}
+                      className="h-3.5 w-3.5 rounded-sm"
+                    />
+                  </span>
+                ))}
+              </span>
+            )}
+            {sourceCount} source{sourceCount === 1 ? '' : 's'}
+          </button>
+        )}
+      </div>
+
+      {error && <p className="mt-1 text-[11px] text-red-600">{error}</p>}
+    </div>
+  )
+}
+
 export function ResponseMarkdown({
   content,
   streaming,
   metadata,
+  batchId,
+  chatId,
+  messageId,
+  onRetry,
+  retrying,
 }: {
   content: string
   streaming: boolean
   metadata?: Record<string, unknown>
+  batchId?: string
+  chatId?: string
+  messageId?: string
+  onRetry?: () => void
+  retrying?: boolean
 }) {
   const [sourcesOpen, setSourcesOpen] = useState(false)
   const [selectedSource, setSelectedSource] = useState<WebSourceMetadata | null>(null)
@@ -581,23 +942,24 @@ export function ResponseMarkdown({
     <div className="animate-in fade-in duration-300">
       {streaming && (
         <div className="mb-1 inline-flex items-center gap-2 text-xs font-medium text-slate-500">
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          <span className="h-1.5 w-1.5 rounded-full bg-violet-400 animate-pulse" />
           Generating...
         </div>
       )}
       <MarkdownBlock content={body || content} webSources={webSources} onCitationSelect={setSelectedSource} />
-      {(sources || webSources.length > 0) && (
-        <div className="mt-3">
-          <button
-            type="button"
-            onClick={() => setSourcesOpen(true)}
-            className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-white hover:text-slate-900"
-          >
-            <FileText className="h-3.5 w-3.5" />
-            Sources
-            <ChevronDown className={`h-3.5 w-3.5 transition-transform ${sourcesOpen ? 'rotate-180' : ''}`} />
-          </button>
-        </div>
+      {/* Actions only once the answer has settled: a streaming response has no
+          message_id to export, and retrying mid-run would race it. */}
+      {!streaming && (
+        <MessageActionBar
+          batchId={batchId}
+          chatId={chatId}
+          messageId={messageId}
+          content={content}
+          sources={webSources}
+          onOpenSources={() => setSourcesOpen(true)}
+          onRetry={onRetry}
+          retrying={retrying}
+        />
       )}
       {sourcesOpen && <SourcesModal queries={webQueries} sources={webSources} citations={citations} markdownSources={sources} onClose={() => setSourcesOpen(false)} />}
       {selectedSource && <CitationSourceModal source={selectedSource} citedText={citations.find((citation) => citation.source_index === selectedSource.index)?.cited_text || ''} onClose={() => setSelectedSource(null)} />}
@@ -645,7 +1007,7 @@ export function CitationSourceModal({ source, citedText, onClose }: { source: We
   useModalLifecycle(onClose)
   const supportText = source.supports || citedText
   const visibleDomain = source.display_domain || source.domain
-  return createPortal(<div className="fixed inset-0 z-[360] flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={`Source ${source.index}`} onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><div className="w-full max-w-md rounded-2xl border border-white/60 bg-white/80 p-5 shadow-2xl backdrop-blur-xl"><div className="flex items-start justify-between gap-3"><div><div className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Source [{source.index}]</div><h2 className="mt-1 text-lg font-semibold text-slate-900">{source.title}</h2>{visibleDomain && <p className="mt-1 flex items-center gap-1.5 text-sm text-slate-500"><SourceFavicon domain={visibleDomain} url={source.url} className="h-4 w-4 flex-shrink-0 rounded-sm" />{visibleDomain}</p>}</div><button type="button" onClick={onClose} className="rounded-full p-2 text-slate-500 hover:bg-slate-100" aria-label="Close source popup"><X className="h-4 w-4" /></button></div>{supportText && <p className="mt-4 text-sm leading-6 text-slate-600">{supportText}</p>}{source.link_type === 'google_grounding_redirect' && <p className="mt-3 text-xs text-slate-400">Google grounded link</p>}<a href={source.url} target="_blank" rel="noreferrer" className="mt-5 inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-emerald-700"><ExternalLink className="h-4 w-4" />Open source</a></div></div>, document.body)
+  return createPortal(<div className="fixed inset-0 z-[360] flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={`Source ${source.index}`} onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><div className="w-full max-w-md rounded-2xl border border-white/60 bg-white/80 p-5 shadow-2xl backdrop-blur-xl"><div className="flex items-start justify-between gap-3"><div><div className="text-xs font-semibold uppercase tracking-wide text-violet-700">Source [{source.index}]</div><h2 className="mt-1 text-lg font-semibold text-slate-900">{source.title}</h2>{visibleDomain && <p className="mt-1 flex items-center gap-1.5 text-sm text-slate-600"><SourceFavicon domain={visibleDomain} url={source.url} className="h-4 w-4 flex-shrink-0 rounded-sm" />{visibleDomain}</p>}</div><button type="button" onClick={onClose} className="rounded-full p-2 text-slate-500 hover:bg-slate-100" aria-label="Close source popup"><X className="h-4 w-4" /></button></div>{supportText && <p className="mt-4 text-sm leading-6 text-slate-600">{supportText}</p>}{source.link_type === 'google_grounding_redirect' && <p className="mt-3 text-xs text-slate-600">Google grounded link</p>}<a href={source.url} target="_blank" rel="noreferrer" className="mt-5 inline-flex items-center gap-2 rounded-lg bg-violet-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-violet-700"><ExternalLink className="h-4 w-4" />Open source</a></div></div>, document.body)
 }
 
 export function SourcesModal({ queries, sources, citations, markdownSources, onClose }: { queries: string[]; sources: WebSourceMetadata[]; citations: ReturnType<typeof normalizeWebCitations>; markdownSources: string; onClose: () => void }) {
@@ -699,7 +1061,7 @@ export function MarkdownBlock({ content, webSources = [], onCitationSelect }: { 
       components={{
         h1: ({ ...props }) => <h1 className="mb-4 mt-2 border-b border-slate-200 pb-2 text-2xl font-bold text-slate-950" {...props} />,
         h2: ({ ...props }) => <h2 className="mb-2 mt-7 text-xl font-semibold text-slate-900" {...props} />,
-        h3: ({ ...props }) => <h3 className="mb-2 mt-5 text-base font-semibold text-emerald-900" {...props} />,
+        h3: ({ ...props }) => <h3 className="mb-2 mt-5 text-base font-semibold text-violet-900" {...props} />,
         p: ({ ...props }) => <p className="my-3 leading-7" {...props} />,
         ul: ({ ...props }) => <ul className="my-3 list-disc space-y-1.5 pl-6" {...props} />,
         ol: ({ ...props }) => <ol className="my-3 list-decimal space-y-1.5 pl-6" {...props} />,
@@ -707,8 +1069,6 @@ export function MarkdownBlock({ content, webSources = [], onCitationSelect }: { 
         a: ({ href, children, ...props }) => {
           const source = href ? sourceByUrl.get(href) : undefined
           const isCitation = Boolean(source && /^\[\d+\]$/.test(String(children)))
-          const unavailableCitation = Boolean(href?.startsWith('#citation-unavailable-') && /^\[\d+\]$/.test(String(children)))
-          if (unavailableCitation) return <span className="mx-0.5 inline-flex rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0.5 align-baseline text-xs font-semibold text-slate-400" title="Source not available in captured metadata.">{children}</span>
           if (isCitation && source) {
             const chipLabel = source.display_domain || source.domain || source.title
             return (
@@ -726,7 +1086,7 @@ export function MarkdownBlock({ content, webSources = [], onCitationSelect }: { 
           return (
             <a
               href={href}
-              className="break-words font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-800"
+              className="break-words font-medium text-violet-700 underline underline-offset-2 hover:text-violet-800"
               target="_blank"
               rel="noreferrer"
               {...props}
@@ -738,7 +1098,7 @@ export function MarkdownBlock({ content, webSources = [], onCitationSelect }: { 
             <table className="min-w-full border-collapse divide-y divide-slate-200 text-sm" {...props} />
           </div>
         ),
-        th: ({ ...props }) => <th className="bg-emerald-50 px-3 py-2.5 text-left font-semibold text-emerald-950" {...props} />,
+        th: ({ ...props }) => <th className="bg-violet-50 px-3 py-2.5 text-left font-semibold text-violet-900" {...props} />,
         td: ({ ...props }) => <td className="border-t border-slate-100 px-3 py-2.5 align-top leading-6" {...props} />,
         code: ({ className, children, ...props }) => {
           if (!String(children).trim()) return null
@@ -757,7 +1117,7 @@ export function MarkdownBlock({ content, webSources = [], onCitationSelect }: { 
           <pre className="my-4 max-w-full overflow-x-auto whitespace-pre rounded-xl border border-slate-800 bg-slate-950 px-4 py-4 font-mono text-slate-100 shadow-sm" {...props} />
         ),
         blockquote: ({ ...props }) => (
-          <blockquote className="my-4 rounded-r-lg border-l-4 border-emerald-400 bg-emerald-50/80 px-4 py-2 text-emerald-950" {...props} />
+          <blockquote className="my-4 border-l-2 border-violet-300 bg-violet-50/60 px-4 py-2 text-violet-900" {...props} />
         ),
       }}
     >
@@ -797,19 +1157,14 @@ export function BlueprintSaveButton({ batchId, msg, onSaved }: { batchId: string
   return (
     <div className="mt-2">
       {isSaved ? (
-        <span className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-700">
+        <span className="inline-flex items-center gap-1.5 text-sm font-medium text-violet-700">
           <Save className="h-4 w-4" /> Saved as course plan{savedVersion ? ` (v${savedVersion})` : ''}
         </span>
       ) : (
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={saving || !chatId || !runId}
-          className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
-        >
-          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+        <Button type="button" onClick={handleSave} loading={saving} disabled={!chatId || !runId} size="sm">
+          <Save className="h-4 w-4" />
           Save as course plan
-        </button>
+        </Button>
       )}
       {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
     </div>
@@ -852,20 +1207,15 @@ export function GameCreateButton({ batchId, msg }: { batchId: string; msg: ChatM
   return (
     <div className="mt-2">
       {created ? (
-        <span className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-700">
+        <span className="inline-flex items-center gap-1.5 text-sm font-medium text-violet-700">
           <Gamepad2 className="h-4 w-4" />
           Game created{created.itemCount ? ` · ${created.itemCount} pairs` : ''}
         </span>
       ) : (
-        <button
-          type="button"
-          onClick={handleCreate}
-          disabled={creating || !chatId || !runId}
-          className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
-        >
-          {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Gamepad2 className="h-4 w-4" />}
+        <Button type="button" onClick={handleCreate} loading={creating} disabled={!chatId || !runId} size="sm">
+          <Gamepad2 className="h-4 w-4" />
           Create game{itemCount ? ` (${itemCount} pairs)` : ''}
-        </button>
+        </Button>
       )}
       {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
     </div>
@@ -1004,7 +1354,7 @@ export function EmailActionButtons({
   if (done) {
     return (
       <div className="mt-3 border-t border-slate-200 pt-3">
-        <span className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-700">
+        <span className="inline-flex items-center gap-1.5 text-sm font-medium text-violet-700">
           <Mail className="h-4 w-4" />
           {done.kind === 'sent'
             ? `Email sent${done.detail ? ` — ${done.detail}` : ''}`
@@ -1021,9 +1371,9 @@ export function EmailActionButtons({
           type="button"
           onClick={() => void handleSend()}
           disabled={busy !== null}
-          className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-70"
+          className="inline-flex items-center gap-2 rounded-md bg-violet-600 px-3 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-70"
         >
-          {busy === 'send' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          {busy === 'send' ? <Spinner tone="inverse" size={16} /> : <Send className="h-4 w-4" />}
           {busy === 'send' ? 'Sending…' : `Send now${recipientCount ? ` (${recipientCount})` : ''}`}
         </button>
         <button
@@ -1034,7 +1384,7 @@ export function EmailActionButtons({
             setError('')
           }}
           disabled={busy !== null}
-          className="inline-flex items-center gap-2 rounded-md border border-emerald-200 bg-white px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-70"
+          className="inline-flex items-center gap-2 rounded-md border border-violet-200 bg-white px-3 py-2 text-sm font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-70"
         >
           <Pencil className="h-4 w-4" />
           {showEdit ? 'Cancel edit' : 'Edit'}
@@ -1047,7 +1397,7 @@ export function EmailActionButtons({
             if (!sendAt) setSendAt(minScheduleLocalValue())
           }}
           disabled={busy !== null}
-          className="inline-flex items-center gap-2 rounded-md border border-emerald-200 bg-white px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-70"
+          className="inline-flex items-center gap-2 rounded-md border border-violet-200 bg-white px-3 py-2 text-sm font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-70"
         >
           <CalendarClock className="h-4 w-4" />
           Schedule
@@ -1056,14 +1406,14 @@ export function EmailActionButtons({
           <button
             type="button"
             onClick={startGoogleOAuth}
-            className="inline-flex items-center rounded-md border border-emerald-200 bg-white px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50"
+            className="inline-flex items-center rounded-md border border-violet-200 bg-white px-3 py-2 text-sm font-medium text-violet-700 hover:bg-violet-50"
           >
             Connect Google
           </button>
         )}
       </div>
       {showEdit && (
-        <div className="flex flex-col gap-2 rounded-lg border border-emerald-100 bg-emerald-50/60 p-3">
+        <div className="flex flex-col gap-2 rounded-lg border border-violet-100 bg-violet-50/60 p-3">
           <label className="text-xs font-semibold text-slate-600">
             Subject
             <input
@@ -1071,7 +1421,7 @@ export function EmailActionButtons({
               value={draft.subject}
               onChange={(e) => setDraft((d) => ({ ...d, subject: e.target.value }))}
               disabled={busy !== null}
-              className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-normal text-slate-800 focus:border-emerald-500 focus:ring-emerald-500 disabled:opacity-60"
+              className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-normal text-slate-800 focus:border-violet-500 focus:ring-violet-500 disabled:opacity-60"
             />
           </label>
           <label className="text-xs font-semibold text-slate-600">
@@ -1081,7 +1431,7 @@ export function EmailActionButtons({
               value={draft.body}
               onChange={(e) => setDraft((d) => ({ ...d, body: e.target.value }))}
               disabled={busy !== null}
-              className="mt-1 block w-full resize-y rounded-md border border-slate-300 px-3 py-2 text-sm font-normal text-slate-800 focus:border-emerald-500 focus:ring-emerald-500 disabled:opacity-60"
+              className="mt-1 block w-full resize-y rounded-md border border-slate-300 px-3 py-2 text-sm font-normal text-slate-800 focus:border-violet-500 focus:ring-violet-500 disabled:opacity-60"
             />
           </label>
           <p className="text-[11px] text-slate-500">
@@ -1092,9 +1442,9 @@ export function EmailActionButtons({
               type="button"
               onClick={() => void handleSaveEdit()}
               disabled={busy !== null}
-              className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-70"
+              className="inline-flex items-center gap-2 rounded-md bg-violet-600 px-3 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-70"
             >
-              {busy === 'edit' ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {busy === 'edit' ? <Spinner tone="inverse" size={16} /> : null}
               {busy === 'edit' ? 'Saving…' : 'Save changes'}
             </button>
             <button
@@ -1128,10 +1478,10 @@ export function EmailActionButtons({
             type="button"
             onClick={() => void handleSchedule()}
             disabled={busy !== null}
-            className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-70"
+            className="inline-flex items-center gap-2 rounded-md bg-violet-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-70"
           >
             {busy === 'schedule' ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <Spinner tone="inverse" size={16} />
             ) : (
               <CalendarClock className="h-4 w-4" />
             )}
@@ -1320,10 +1670,10 @@ export function ArtifactExportButton({
           type="button"
           onClick={() => void handleExport()}
           disabled={exporting}
-          className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
+          className="inline-flex items-center gap-2 rounded-md bg-violet-600 px-3 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-70"
         >
           {exporting ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
+            <Spinner tone="inverse" size={16} />
           ) : (
             <FileText className="h-4 w-4" />
           )}
@@ -1334,7 +1684,7 @@ export function ArtifactExportButton({
         <button
           type="button"
           onClick={startGoogleOAuth}
-          className="inline-flex items-center rounded-md border border-emerald-200 bg-white px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50"
+          className="inline-flex items-center rounded-md border border-violet-200 bg-white px-3 py-2 text-sm font-medium text-violet-700 hover:bg-violet-50"
         >
           Connect Google
         </button>
@@ -1386,7 +1736,7 @@ function ExportLink({ href, label }: { href?: string; label: string }) {
       href={href}
       target="_blank"
       rel="noreferrer"
-      className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+      className="inline-flex items-center gap-2 rounded-md bg-violet-600 px-3 py-2 text-sm font-medium text-white hover:bg-violet-700"
     >
       <ExternalLink className="h-4 w-4" />
       {label}
@@ -1394,23 +1744,17 @@ function ExportLink({ href, label }: { href?: string; label: string }) {
   )
 }
 
+/**
+ * Shown while an assistant message is pending with no content yet.
+ *
+ * The bot avatar and the bouncing-dots bubble are both gone; what remains is
+ * the MILA garland on its own. It is the same mark the thinking rows use, so
+ * "the agent is working" reads identically wherever it appears.
+ */
 export function ThinkingIndicator() {
   return (
-    <div className="flex gap-3">
-      <div className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center bg-white/70 border border-white/60 text-slate-600 shadow-sm">
-        <Bot className="w-4 h-4" />
-      </div>
-      <div className="pt-2">
-        <div className="inline-flex items-center gap-1 px-4 py-3 rounded-2xl bg-white/50 border border-white/50">
-          {[0, 150, 300].map((delay) => (
-            <span
-              key={delay}
-              className="w-2 h-2 rounded-full bg-slate-400 animate-bounce"
-              style={{ animationDelay: `${delay}ms` }}
-            />
-          ))}
-        </div>
-      </div>
+    <div className="py-1">
+      <ThinkingRow label="Thinking…" size={32} />
     </div>
   )
 }

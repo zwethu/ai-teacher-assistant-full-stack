@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { BookOpen, Clock, ExternalLink, FileText, Loader2, Plus, Sparkles } from 'lucide-react'
+import { BookOpen, Clock, ExternalLink, FileText, Plus, Sparkles } from 'lucide-react'
 import type { ToastMessage } from '../types'
 import Toast from '../components/ui/Toast'
 import { getErrorMessage } from '../utils/errors'
@@ -10,6 +10,7 @@ import { GenerationAttachments } from '../components/generation/GenerationAttach
 import { PlanHintBanner } from '../components/generation/PlanHintBanner'
 import { listArtifacts, type Artifact } from '../services/artifactService'
 import { timeAgo } from '../utils/formatDate'
+import { Spinner } from '../design-system'
 
 const GRADES = ['Undergraduate Y1', 'Undergraduate Y2', 'Undergraduate Y3', 'Undergraduate Y4', 'Postgraduate']
 const DURATIONS = [30, 45, 60, 90, 120, 180]
@@ -21,6 +22,7 @@ const PLAN_TYPES = [
 ]
 
 const INITIAL_FORM = {
+  title: '',
   topic: '',
   week: 1,
   grade: GRADES[0],
@@ -33,9 +35,23 @@ const INITIAL_FORM = {
 }
 
 function buildMessage(f: typeof INITIAL_FORM): string {
-  const lines = [`Generate a lesson plan for week ${f.week}.`]
+  const lines = [
+    `Generate a lesson plan for week ${f.week}.`,
+    // Standalone form already collected required fields — do not ask follow-up questions.
+    'Standalone form submission: all required fields below are confirmed. Do not ask clarifying questions; proceed to begin_lesson_plan_workflow.',
+  ]
+  if (f.title.trim()) lines.push(`Preferred lesson plan title: ${f.title.trim()}`)
+  else {
+    lines.push(
+      'Preferred lesson plan title: not specified — auto-name the lesson plan. If an active Course Plan exists, derive the title from that week\'s theme/goal; otherwise name it from the topic and course.',
+    )
+  }
   if (f.topic.trim()) lines.push(`Topic: ${f.topic.trim()}`)
-  else lines.push('Topic: not specified — choose a suitable topic for this week, using the course plan if one exists.')
+  else {
+    lines.push(
+      'Topic: not specified — choose a suitable topic for this week from the active Course Plan week guidance if available; otherwise pick a suitable topic for the course.',
+    )
+  }
   lines.push(
     `Grade/level: ${f.grade}`,
     `Duration: ${f.duration} minutes`,
@@ -47,6 +63,9 @@ function buildMessage(f: typeof INITIAL_FORM): string {
     `Prior knowledge: ${f.priorKnowledge.trim()}`,
   )
   if (f.instructions.trim()) lines.push(`Additional instructions: ${f.instructions.trim()}`)
+  lines.push(
+    'If course_blueprint_status is active, you MUST reference the Course Plan (especially course_blueprint_week_plan) when choosing topic/title and aligning objectives.',
+  )
   return lines.join('\n')
 }
 
@@ -119,7 +138,7 @@ export default function LessonPlans() {
   const missing = missingRequiredInputs(form, Boolean(selectedBatch))
 
   return (
-    <div>
+    <div className="pb-12">
       <Toast toast={toast} onDismiss={() => setToast(null)} />
 
       <div className="mb-6">
@@ -141,8 +160,8 @@ export default function LessonPlans() {
               <Plus className="h-4 w-4" /> Generate another
             </button>
           </div>
-          <div className="rounded-xl border border-slate-200 bg-white shadow-sm min-h-[24rem] max-h-[80vh] overflow-y-auto">
-            <GenerationRunView batch={selectedBatch} run={run} accent="emerald" />
+          <div className="rounded-xl border border-slate-200 bg-white shadow-sm min-h-[24rem]">
+            <GenerationRunView batch={selectedBatch} run={run} accent="primary" />
           </div>
         </div>
       ) : (
@@ -154,7 +173,7 @@ export default function LessonPlans() {
               value={selectedBatchId ?? ''}
               onChange={(e) => setSelectedBatchId(e.target.value)}
               disabled={batchesLoading}
-              className="block w-full rounded-md border border-slate-300 py-2.5 px-2 text-sm focus:border-emerald-500 focus:ring-emerald-500"
+              className="block w-full rounded-md border border-slate-300 py-2.5 px-2 text-sm focus:border-violet-500 focus:ring-violet-500"
             >
               {batches.map((b) => (
                 <option key={b.id} value={b.id}>{b.batch_name} — {b.course_name}</option>
@@ -167,15 +186,23 @@ export default function LessonPlans() {
               <label className="block text-sm font-semibold text-slate-700 mb-1.5">Week</label>
               <input type="number" min={1} required value={form.week}
                 onChange={(e) => setForm((f) => ({ ...f, week: Number(e.target.value || 1) }))}
-                className="block w-full rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500" />
+                className="block w-full rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-violet-500 focus:ring-violet-500" />
             </div>
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-1.5">Duration (min)</label>
               <select value={form.duration} onChange={(e) => setForm((f) => ({ ...f, duration: Number(e.target.value) }))}
-                className="block w-full rounded-md border border-slate-300 py-2.5 px-2 text-sm focus:border-emerald-500 focus:ring-emerald-500">
+                className="block w-full rounded-md border border-slate-300 py-2.5 px-2 text-sm focus:border-violet-500 focus:ring-violet-500">
                 {DURATIONS.map((d) => <option key={d} value={d}>{d}</option>)}
               </select>
             </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1.5">Lesson plan name (optional)</label>
+            <input type="text" value={form.title}
+              onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+              placeholder="Leave blank — agent names it from the course plan or topic"
+              className="block w-full rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-violet-500 focus:ring-violet-500" />
           </div>
 
           <div>
@@ -183,35 +210,35 @@ export default function LessonPlans() {
             <input type="text" value={form.topic}
               onChange={(e) => setForm((f) => ({ ...f, topic: e.target.value }))}
               placeholder="Leave blank to let the agent choose from the course plan"
-              className="block w-full rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500" />
+              className="block w-full rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-violet-500 focus:ring-violet-500" />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-1.5">Level</label>
               <select value={form.grade} onChange={(e) => setForm((f) => ({ ...f, grade: e.target.value }))}
-                className="block w-full rounded-md border border-slate-300 py-2.5 px-2 text-sm focus:border-emerald-500 focus:ring-emerald-500">
+                className="block w-full rounded-md border border-slate-300 py-2.5 px-2 text-sm focus:border-violet-500 focus:ring-violet-500">
                 {GRADES.map((g) => <option key={g} value={g}>{g}</option>)}
               </select>
             </div>
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-1.5">Difficulty</label>
               <select value={form.difficulty} onChange={(e) => setForm((f) => ({ ...f, difficulty: e.target.value }))}
-                className="block w-full rounded-md border border-slate-300 py-2.5 px-2 text-sm focus:border-emerald-500 focus:ring-emerald-500 capitalize">
+                className="block w-full rounded-md border border-slate-300 py-2.5 px-2 text-sm focus:border-violet-500 focus:ring-violet-500 capitalize">
                 {DIFFICULTIES.map((d) => <option key={d} value={d}>{d}</option>)}
               </select>
             </div>
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-1.5">Approach</label>
               <select value={form.approach} onChange={(e) => setForm((f) => ({ ...f, approach: e.target.value }))}
-                className="block w-full rounded-md border border-slate-300 py-2.5 px-2 text-sm focus:border-emerald-500 focus:ring-emerald-500">
+                className="block w-full rounded-md border border-slate-300 py-2.5 px-2 text-sm focus:border-violet-500 focus:ring-violet-500">
                 {APPROACHES.map((a) => <option key={a} value={a}>{a}</option>)}
               </select>
             </div>
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-1.5">Plan type</label>
               <select value={form.planType} onChange={(e) => setForm((f) => ({ ...f, planType: e.target.value }))}
-                className="block w-full rounded-md border border-slate-300 py-2.5 px-2 text-sm focus:border-emerald-500 focus:ring-emerald-500">
+                className="block w-full rounded-md border border-slate-300 py-2.5 px-2 text-sm focus:border-violet-500 focus:ring-violet-500">
                 {PLAN_TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
               </select>
             </div>
@@ -222,7 +249,7 @@ export default function LessonPlans() {
             <textarea rows={2} required value={form.priorKnowledge}
               onChange={(e) => setForm((f) => ({ ...f, priorKnowledge: e.target.value }))}
               placeholder="What students already know before this lesson, e.g. basic spreadsheet and database concepts"
-              className="block w-full rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500 resize-y" />
+              className="block w-full rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-violet-500 focus:ring-violet-500 resize-y" />
           </div>
 
           <div>
@@ -230,7 +257,7 @@ export default function LessonPlans() {
             <textarea rows={2} value={form.instructions}
               onChange={(e) => setForm((f) => ({ ...f, instructions: e.target.value }))}
               placeholder="Anything else the agent should consider…"
-              className="block w-full rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500 resize-y" />
+              className="block w-full rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-violet-500 focus:ring-violet-500 resize-y" />
           </div>
 
           {selectedBatch && <GenerationAttachments run={run} />}
@@ -240,8 +267,8 @@ export default function LessonPlans() {
 
           <div>
             <button type="submit" disabled={run.sending || missing.length > 0}
-              className="inline-flex w-full items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm transition-colors disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none disabled:cursor-not-allowed">
-              {run.sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+              className="inline-flex w-full items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-md text-white bg-violet-600 hover:bg-violet-700 shadow-sm transition-colors disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none disabled:cursor-not-allowed">
+              {run.sending ? <Spinner tone="inverse" size={16} /> : <Sparkles className="w-4 h-4" />}
               Generate outline
             </button>
             {missing.length > 0 && !run.sending && (
@@ -259,12 +286,12 @@ export default function LessonPlans() {
           <h2 className="text-sm font-semibold text-slate-700">Saved lesson plans</h2>
           {selectedBatchId && (
             <button type="button" onClick={() => void refreshArtifacts(selectedBatchId)}
-              className="text-xs text-emerald-700 hover:underline">Refresh</button>
+              className="text-xs text-violet-700 hover:underline">Refresh</button>
           )}
         </div>
         {listLoading ? (
           <div className="flex items-center gap-2 text-sm text-slate-500 py-6">
-            <Loader2 className="w-4 h-4 animate-spin" /> Loading…
+            <Spinner size={16} /> Loading…
           </div>
         ) : artifacts.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-10 text-center rounded-xl border border-slate-100 bg-white">

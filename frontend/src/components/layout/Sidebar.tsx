@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { NavLink } from 'react-router-dom'
+import { MilaLogo } from '../brand/MilaLogo'
 import type { LucideIcon } from 'lucide-react'
 import {
   Activity,
@@ -135,11 +136,11 @@ function navLinkClass(
 
   if (isActive) {
     const activeBg = showLabels
-      ? 'bg-gradient-to-r from-emerald-100 to-white'
-      : 'bg-emerald-100/90'
-    return `relative flex items-center ${layout} text-sm font-medium rounded-xl whitespace-nowrap group text-emerald-800 ${activeBg} border border-emerald-300 shadow-md -translate-y-0.5 transition-all`
+      ? 'bg-gradient-to-r from-violet-100 to-white'
+      : 'bg-violet-100/90'
+    return `relative flex items-center ${layout} text-sm font-medium rounded-xl whitespace-nowrap group text-violet-800 ${activeBg} border border-violet-300 shadow-md -translate-y-0.5 transition-all`
   }
-  return `flex items-center ${layout} text-sm font-medium rounded-xl whitespace-nowrap group text-slate-600 hover:text-slate-900 hover:bg-gradient-to-r hover:from-white hover:via-emerald-50/60 hover:to-white border border-transparent hover:border-slate-200 hover:shadow-sm hover:-translate-y-0.5 transition-all`
+  return `flex items-center ${layout} text-sm font-medium rounded-xl whitespace-nowrap group text-slate-600 hover:text-slate-900 hover:bg-gradient-to-r hover:from-white hover:via-violet-50/60 hover:to-white border border-transparent hover:border-slate-200 hover:shadow-sm hover:-translate-y-0.5 transition-all`
 }
 
 interface NavItemsProps {
@@ -176,8 +177,8 @@ function NavItems({ showLabels, collapsed = false, onNavigate }: NavItemsProps) 
                 <Icon
                   className={`w-5 h-5 flex-shrink-0 transition-colors ${
                     isActive
-                      ? 'text-emerald-700'
-                      : 'text-slate-500 group-hover:text-emerald-600'
+                      ? 'text-violet-700'
+                      : 'text-slate-500 group-hover:text-violet-600'
                   }`}
                 />
                 {showLabels && (
@@ -199,20 +200,29 @@ interface ProfileBlockProps {
   onSignOut: () => void
 }
 
-function ProfileAvatar({ photoURL }: { photoURL?: string | null }) {
-  if (photoURL) {
-    return (
-      <img
-        src={photoURL}
-        alt=""
-        className="w-9 h-9 rounded-full object-cover border-2 border-white shadow-sm"
-      />
-    )
-  }
+function ProfileAvatarFallback() {
   return (
-    <span className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-gradient-to-tr from-blue-500 to-blue-700 text-white shadow-md shadow-blue-300/70">
+    <span className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-gradient-to-tr from-violet-500 to-violet-700 text-white shadow-md shadow-violet-300/70">
       <User className="w-5 h-5" />
     </span>
+  )
+}
+
+function ProfileAvatar({ photoURL }: { photoURL?: string | null }) {
+  const [failed, setFailed] = useState(false)
+
+  if (!photoURL || failed) {
+    return <ProfileAvatarFallback />
+  }
+
+  return (
+    <img
+      src={photoURL}
+      alt=""
+      referrerPolicy="no-referrer"
+      className="w-9 h-9 rounded-full object-cover border-2 border-white shadow-sm"
+      onError={() => setFailed(true)}
+    />
   )
 }
 
@@ -246,7 +256,7 @@ function ProfileBlock({ collapsed, onSignOut }: ProfileBlockProps) {
         <button
           type="button"
           onClick={() => setMenuOpen((v) => !v)}
-          className="rounded-full p-0.5 hover:ring-2 hover:ring-emerald-200 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+          className="rounded-full p-0.5 hover:ring-2 hover:ring-violet-200 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
           aria-label="Open profile menu"
           aria-expanded={menuOpen}
           aria-haspopup="menu"
@@ -340,7 +350,8 @@ export default function Sidebar({
       )}
 
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex w-full max-w-xs flex-col bg-white pb-4 pt-5 shadow-2xl rounded-r-2xl transition-transform duration-300 md:hidden ${
+        /* Strong glass (white/75, blur 28) — the DS variant for panels and modals. */
+        className={`maia-glass-strong fixed inset-y-0 left-0 z-50 flex w-full max-w-xs flex-col pb-4 pt-5 rounded-r-2xl transition-transform duration-300 md:hidden ${
           mobileOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
         aria-hidden={!mobileOpen}
@@ -349,7 +360,7 @@ export default function Sidebar({
           <button
             type="button"
             onClick={onMobileClose}
-            className="flex h-10 w-10 items-center justify-center rounded-full bg-white/90 hover:bg-emerald-50 shadow transition"
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-white/90 hover:bg-violet-50 shadow transition"
             aria-label="Close menu"
           >
             <X className="h-6 w-6 text-slate-700" />
@@ -357,9 +368,7 @@ export default function Sidebar({
         </div>
 
         <div className="flex flex-shrink-0 items-center px-6 pt-6 pb-4 pr-14">
-          <span className="text-lg font-bold text-slate-900 tracking-tight leading-snug">
-            AI Teaching Companion
-          </span>
+          <MilaLogo height={46} />
         </div>
 
         <nav className="flex-1 space-y-2 px-5 pt-2 pb-4 overflow-y-auto">
@@ -379,26 +388,30 @@ export default function Sidebar({
 
       <aside
         id="mainSidebar"
-        className={`hidden md:flex flex-col border-r border-blue-200/60 bg-white/80 backdrop-blur-xl h-screen sticky top-0 transition-all duration-300 ease-in-out shadow-[10px_0_40px_rgba(15,23,42,0.08)] flex-shrink-0 ${sidebarWidth}`}
+        /* Liquid glass, as the design system's own app shell builds it:
+           .maia-glass for the surface, --shadow-sidebar for the cast shadow. */
+        className={`maia-glass hidden md:flex flex-col h-screen sticky top-0 transition-all duration-300 ease-in-out flex-shrink-0 ${sidebarWidth}`}
+        style={{ borderRight: '1px solid var(--border-academic)', boxShadow: 'var(--shadow-sidebar)' }}
       >
         <div className={`flex-shrink-0 pt-6 pb-5 ${collapsed ? 'px-2' : 'px-5'}`}>
           <div
-            className={`flex items-center min-w-0 ${
-              collapsed ? 'justify-center' : 'justify-between gap-3'
+            className={`flex min-w-0 ${
+              collapsed ? 'flex-col items-center gap-3' : 'items-center justify-between gap-3'
             }`}
           >
-            {!collapsed && (
-              <NavLink
-                to="/chat"
-                className="min-w-0 flex-1 text-lg font-bold leading-snug tracking-tight text-slate-900"
-              >
-                AI Teaching Companion
-              </NavLink>
-            )}
+            {/* Expanded: the horizontal lockup. Collapsed: the mark alone —
+                the wordmark never enters icon-sized surfaces. */}
+            <NavLink
+              to="/chat"
+              className={collapsed ? 'flex-shrink-0' : 'min-w-0 flex-1'}
+              aria-label="MILA — home"
+            >
+              <MilaLogo variant={collapsed ? 'mark' : 'lockup'} height={collapsed ? 40 : 54} />
+            </NavLink>
             <button
               type="button"
               onClick={onToggleCollapsed}
-              className={`flex-shrink-0 p-2.5 rounded-xl hover:bg-emerald-100 text-slate-500 border border-slate-200/80 transition-all active:scale-95 shadow-sm ${
+              className={`flex-shrink-0 p-2.5 rounded-xl hover:bg-violet-100 text-slate-500 border border-slate-200/80 transition-all active:scale-95 shadow-sm ${
                 collapsed ? 'mx-auto' : ''
               }`}
               title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}

@@ -1,0 +1,146 @@
+/* MILA color tokens — the finalized identity: MLII royal purple is the functional
+   primary, MLII gold is the accent (insight), lavender keeps the signature dotted
+   academic canvas. Slate stays the neutral ramp; emerald survives ONLY as success.
+   Legacy azure / cyan / indigo token names are kept as aliases into the purple
+   ramp so existing surfaces repaint automatically. */
+:root {
+  /* Primary — MLII royal purple ("institutional, warm, ownable") */
+  --violet-50: #f6f1fc;
+  --violet-100: #ece3f9;
+  --violet-200: #dacbf2;
+  --violet-300: #bba4e2;
+  --violet-400: #9d80cb;
+  --violet-500: #7d5fb3;
+  --violet-600: #5f489c;
+  --violet-700: #4f3b85;
+  --violet-800: #3f2f6b;
+  --violet-900: #2a1e52;
+  --brand-purple: #7b5cc9; /* electric brand purple — gradients & wordmark only */
+
+  /* Accent — MLII gold (the insight bead / pillar I) */
+  --gold-50: #fef7e0;
+  --gold-200: #fbe49a;
+  --gold-400: #fcc018;
+  --gold-600: #e0a70c;
+
+  /* Legacy aliases — repaint old azure/cyan/indigo surfaces in purple */
+  --azure-50: var(--violet-50);
+  --azure-100: var(--violet-100);
+  --azure-200: var(--violet-200);
+  --azure-300: var(--violet-300);
+  --azure-400: var(--violet-400);
+  --azure-500: var(--violet-500);
+  --azure-600: var(--violet-600);
+  --azure-700: var(--violet-700);
+  --azure-800: var(--violet-800);
+  --azure-900: var(--violet-900);
+  --brand-blue: var(--brand-purple);
+  --cyan-50: #f6f1fc;
+  --cyan-200: #dacbf2;
+  --cyan-300: #c9b5ea;
+  --cyan-400: #9d80cb;
+  --cyan-500: #7d5fb3;
+  --cyan-600: #6c5aa0;
+  --indigo-400: #9d80cb;
+  --indigo-500: #5f489c;
+  --indigo-600: #4f3b85;
+
+  /* Secondary — Sky (info semantic only) */
+  --sky-50: #f0f9ff;
+  --sky-100: #e0f2fe;
+  --sky-200: #bae6fd;
+  --amber-700: #b45309;
+  --sky-300: #7dd3fc;
+  --sky-400: #38bdf8;
+  --sky-500: #0ea5e9;
+  --sky-600: #0284c7;
+  --sky-700: #0369a1;
+
+  /* Neutral — Slate */
+  --slate-50: #f8fafc;
+  --slate-100: #f1f5f9;
+  --slate-200: #e2e8f0;
+  --slate-300: #cbd5e1;
+  --slate-400: #94a3b8;
+  --slate-500: #64748b;
+  --slate-600: #475569;
+  --slate-700: #334155;
+  --slate-800: #1e293b;
+  --slate-900: #0f172a;
+
+  /* Academic canvas — signature dotted backdrop, now lavender */
+  --academic-bg: #efe9fb;
+  --academic-dot: #d9ccf1;
+  --academic-tint: #f8f4fe;
+
+  /* Status ramps */
+  --emerald-50: #ecfdf5;
+  --emerald-200: #a7f3d0;
+  --emerald-400: #34d399;
+  --emerald-500: #10b981;
+  --emerald-600: #059669;
+  --emerald-700: #047857;
+  --amber-50: #fffbeb;
+  --amber-200: #fde68a;
+  --amber-500: #f59e0b;
+  --amber-600: #d97706;
+  --orange-500: #f97316;
+  --red-50: #fef2f2;
+  --red-200: #fecaca;
+  --red-500: #ef4444;
+  --red-600: #dc2626;
+  --red-700: #b91c1c;
+
+  /* ---- Semantic aliases (use these in product UI) ---- */
+  --color-primary: var(--violet-600);
+  --color-primary-hover: var(--violet-700);
+  --color-primary-soft: var(--violet-50);
+  --color-primary-soft-border: var(--violet-200);
+  --color-primary-on: #ffffff;
+
+  --color-accent: var(--gold-400);
+  --color-accent-soft: var(--gold-50);
+
+  --text-heading: var(--slate-900);
+  --text-body: var(--slate-800);
+  --text-muted: var(--slate-500);
+  --text-subtle: var(--slate-400);
+  --text-on-primary: #ffffff;
+  --text-link: var(--violet-700);
+  --text-link-hover: var(--violet-800);
+
+  --surface-page: var(--academic-bg);
+  --surface-card: #ffffff;
+  --surface-muted: var(--slate-50);
+  --surface-glass: rgba(255, 255, 255, 0.55);
+  --surface-glass-strong: rgba(255, 255, 255, 0.75);
+  --surface-glass-header: rgba(255, 255, 255, 0.35);
+  --surface-glass-tint: rgba(218, 203, 242, 0.45); /* violet-200 glass */
+
+  --border-subtle: var(--slate-100);
+  --border-default: var(--slate-200);
+  --border-strong: var(--slate-300);
+  --border-primary: var(--violet-300);
+  --border-glass: rgba(255, 255, 255, 0.65);
+  --border-academic: rgba(218, 203, 242, 0.6);
+
+  --status-success: var(--emerald-600);
+  --status-success-soft: var(--emerald-50);
+  --status-info: var(--sky-600);
+  --status-info-soft: var(--sky-50);
+  --status-warning: var(--amber-600);
+  --status-warning-soft: var(--amber-50);
+  --status-danger: var(--red-600);
+  --status-danger-soft: var(--red-50);
+
+  /* Wellness / stress signal (low → max) */
+  --stress-low: var(--emerald-500);
+  --stress-high: var(--orange-500);
+  --stress-max: var(--red-500);
+
+  --focus-ring: rgba(95, 72, 156, 0.40); /* violet-600/40 */
+
+  /* Brand gradients — wordmark, hero text, CTA glow */
+  --brand-gradient: linear-gradient(120deg, var(--brand-purple), var(--violet-600), var(--violet-800));
+  --liquid-gradient: linear-gradient(120deg, var(--violet-400), var(--violet-500), var(--violet-600));
+}

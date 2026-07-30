@@ -3,20 +3,19 @@ import { createPortal } from 'react-dom'
 import {
   ChevronDown,
   ExternalLink,
-  FileText,
   Gamepad2,
-  Image as ImageIcon,
   Link2,
-  Loader2,
   Paperclip,
   Trash2,
   X,
 } from 'lucide-react'
 import type { ChatAttachmentListItem, ChatMessage } from '../../../entity/Chat'
-import { deleteChatAttachment, getChatAttachmentContent, listChatAttachments } from '../../../services/chatService'
+import { deleteChatAttachment, listChatAttachments } from '../../../services/chatService'
 import { deleteGame, listGames, type GameSession } from '../../../services/gameService'
 import { collectUniqueChatWebLinks } from '../utils/webCitations'
 import { SourceFavicon } from './SourceFavicon'
+import { Spinner } from '../../../design-system'
+import { AttachmentThumbnail, AttachmentViewer } from './AttachmentPreview'
 
 export type ChatSidePanelSection = 'links' | 'files' | 'games'
 
@@ -28,6 +27,30 @@ type Props = {
   messages: ChatMessage[]
   initialSection?: ChatSidePanelSection | null
   onReferenceAttachment: (item: ChatAttachmentListItem) => void
+}
+
+/**
+ * True when there is room for three columns (nav + conversation + resources).
+ *
+ * Falls back to `true` where matchMedia is unavailable (jsdom does not
+ * implement it), so tests exercise the inline column — the primary layout.
+ */
+function useIsWideViewport(query = '(min-width: 1024px)'): boolean {
+  const [matches, setMatches] = useState(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return true
+    return window.matchMedia(query).matches
+  })
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined
+    const mql = window.matchMedia(query)
+    const onChange = () => setMatches(mql.matches)
+    setMatches(mql.matches)
+    mql.addEventListener('change', onChange)
+    return () => mql.removeEventListener('change', onChange)
+  }, [query])
+
+  return matches
 }
 
 function AccordionSection({
@@ -108,6 +131,7 @@ export function ChatSidePanel({
   initialSection = null,
   onReferenceAttachment,
 }: Props) {
+  const isWideViewport = useIsWideViewport()
   const [rendered, setRendered] = useState(false)
   const [visible, setVisible] = useState(false)
   const [linksOpen, setLinksOpen] = useState(false)
@@ -115,9 +139,8 @@ export function ChatSidePanel({
   const [items, setItems] = useState<ChatAttachmentListItem[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [preview, setPreview] = useState<ChatAttachmentListItem | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [thumbnails, setThumbnails] = useState<Record<string, string>>({})
-  const thumbnailUrlsRef = useRef<string[]>([])
   const loadedChatKeyRef = useRef('')
   // Games belong to the batch, not the chat, so they load and reset on batchId alone.
   const [gamesOpen, setGamesOpen] = useState(false)
@@ -155,8 +178,10 @@ export function ChatSidePanel({
 
   useEffect(() => {
     if (!open) return
+    // Locking body scroll is overlay behaviour. As an inline column the panel is
+    // not modal — the conversation beside it must stay scrollable.
     const previous = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
+    if (!isWideViewport) document.body.style.overflow = 'hidden'
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose()
     }
@@ -165,17 +190,18 @@ export function ChatSidePanel({
       document.body.style.overflow = previous
       window.removeEventListener('keydown', onKey)
     }
-  }, [open, onClose])
-
-  useEffect(() => () => {
-    thumbnailUrlsRef.current.forEach((url) => URL.revokeObjectURL(url))
-    thumbnailUrlsRef.current = []
-  }, [])
+  }, [open, onClose, isWideViewport])
 
   useEffect(() => {
     if (!open || !filesOpen) return
     const key = `${batchId}:${chatId}`
-    if (loadedChatKeyRef.current === key && items.length > 0) return
+    if (loadedChatKeyRef.current === key) return
+    // Claim the key up front. This effect used to depend on `items.length`, so
+    // its own setItems re-triggered it: the cleanup cancelled the in-flight
+    // load mid thumbnail-fetch, its `finally` skipped setLoading(false) because
+    // `cancelled` was true, and the re-run then bailed on the guard — leaving
+    // "Loading files…" on screen forever.
+    loadedChatKeyRef.current = key
 
     let cancelled = false
     async function load() {
@@ -185,20 +211,14 @@ export function ChatSidePanel({
         const data = await listChatAttachments(batchId, chatId)
         if (cancelled) return
         setItems(data)
-        loadedChatKeyRef.current = key
-        for (const item of data.filter((value) => value.attachment_kind === 'image' && value.thumbnail_available).slice(0, 20)) {
-          try {
-            const blob = await getChatAttachmentContent(batchId, chatId, item.attachment_id, true)
-            if (cancelled) return
-            const url = URL.createObjectURL(blob)
-            thumbnailUrlsRef.current.push(url)
-            setThumbnails((prev) => ({ ...prev, [item.attachment_id]: url }))
-          } catch {
-            /* metadata remains usable */
-          }
-        }
+        // Thumbnails are decoration: the list is already usable, so stop the
+        // spinner before fetching them rather than after.
+        setLoading(false)
       } catch {
-        if (!cancelled) setError('Chat files are unavailable.')
+        if (cancelled) return
+        setError('Chat files are unavailable.')
+        // Allow a retry: the key must not stay claimed after a failure.
+        loadedChatKeyRef.current = ''
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -207,14 +227,12 @@ export function ChatSidePanel({
     return () => {
       cancelled = true
     }
-  }, [open, filesOpen, batchId, chatId, items.length])
+  }, [open, filesOpen, batchId, chatId])
 
   useEffect(() => {
     loadedChatKeyRef.current = ''
     setItems([])
-    setThumbnails({})
-    thumbnailUrlsRef.current.forEach((url) => URL.revokeObjectURL(url))
-    thumbnailUrlsRef.current = []
+    setPreview(null)
   }, [batchId, chatId])
 
   useEffect(() => {
@@ -253,15 +271,6 @@ export function ChatSidePanel({
     try {
       await deleteChatAttachment(batchId, chatId, item.attachment_id)
       setItems((prev) => prev.filter((entry) => entry.attachment_id !== item.attachment_id))
-      const thumb = thumbnails[item.attachment_id]
-      if (thumb) {
-        URL.revokeObjectURL(thumb)
-        setThumbnails((prev) => {
-          const next = { ...prev }
-          delete next[item.attachment_id]
-          return next
-        })
-      }
     } catch {
       setError('Could not delete that file. Only unsent files can be removed.')
     } finally {
@@ -282,25 +291,8 @@ export function ChatSidePanel({
     }
   }
 
-  if (!rendered) return null
-
-  return createPortal(
-    <div
-      className={`fixed inset-0 z-[200] flex justify-end transition-colors duration-300 ${
-        visible ? 'bg-slate-950/40 backdrop-blur-sm' : 'bg-transparent'
-      }`}
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose()
-      }}
-    >
-      <aside
-        className={`flex h-full w-full max-w-md flex-col overflow-hidden bg-white shadow-2xl transition-transform duration-300 ease-out ${
-          visible ? 'translate-x-0' : 'translate-x-full'
-        }`}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Chat links, files, and games"
-      >
+  const panelBody = (
+    <>
         <header className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
           <div>
             <h2 className="text-sm font-semibold text-slate-900">Chat resources</h2>
@@ -336,13 +328,13 @@ export function ChatSidePanel({
                       href={source.url}
                       target="_blank"
                       rel="noreferrer"
-                      className="group flex items-start gap-2 rounded-lg border border-slate-100 px-2.5 py-2 transition-colors hover:border-emerald-200 hover:bg-emerald-50/50"
+                      className="group flex items-start gap-2 rounded-lg border border-slate-100 px-2.5 py-2 transition-colors hover:border-violet-200 hover:bg-violet-50/50"
                     >
                       <SourceFavicon
                         domain={source.display_domain || source.domain}
                         url={source.url}
                         className="mt-0.5 h-4 w-4 flex-shrink-0 rounded-sm"
-                        fallback={<ExternalLink className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-slate-400 group-hover:text-emerald-600" />}
+                        fallback={<ExternalLink className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-slate-400 group-hover:text-violet-600" />}
                       />
                       <span className="min-w-0">
                         <span className="block truncate text-xs font-medium text-slate-800">
@@ -367,12 +359,12 @@ export function ChatSidePanel({
             count={items.length}
           >
             <p className="mb-3 text-[10px] leading-4 text-slate-500">
-              Chat files stay available in this chat for 7 days, then are removed. They are not saved to Course Space.
+              Chat files stay available in this chat for 30 days, then are removed. They are not saved to Course Space.
               Images remain chat-only. Sent files can be referenced again but not deleted here.
             </p>
             {loading ? (
               <div className="flex items-center gap-2 py-3 text-xs text-slate-500">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <Spinner size={14} />
                 Loading files…
               </div>
             ) : error ? (
@@ -388,21 +380,32 @@ export function ChatSidePanel({
                       key={item.attachment_id}
                       className="flex items-center gap-2 rounded-lg border border-slate-100 p-2"
                     >
-                      {thumbnails[item.attachment_id] ? (
-                        <img
-                          src={thumbnails[item.attachment_id]}
-                          alt=""
-                          className="h-9 w-9 rounded object-cover"
+                      {/* Same affordance as the composer: the preview is the
+                          control, and tapping it opens the full viewer. Images
+                          and PDFs both have a server-rendered thumbnail, so
+                          AttachmentThumbnail handles the fallback itself. */}
+                      <button
+                        type="button"
+                        onClick={() => setPreview(item)}
+                        className="flex-shrink-0 overflow-hidden rounded-lg border border-white/70 bg-white/70 shadow-sm transition-transform hover:scale-[1.04]"
+                        aria-label={`Preview ${item.file_title || item.file_name}`}
+                        title={item.file_title || item.file_name}
+                      >
+                        <AttachmentThumbnail
+                          batchId={batchId}
+                          chatId={chatId}
+                          attachment={item}
+                          className="h-11 w-11"
                         />
-                      ) : item.attachment_kind === 'image' ? (
-                        <ImageIcon className="h-5 w-5 flex-shrink-0 text-sky-600" />
-                      ) : (
-                        <FileText className="h-5 w-5 flex-shrink-0 text-emerald-600" />
-                      )}
+                      </button>
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-xs font-medium text-slate-700">
+                        <button
+                          type="button"
+                          onClick={() => setPreview(item)}
+                          className="block w-full truncate text-left text-xs font-medium text-slate-700 hover:text-violet-700"
+                        >
                           {item.file_title || item.file_name}
-                        </p>
+                        </button>
                         <p className="text-[11px] text-slate-400">
                           {item.attachment_kind === 'image'
                             ? `chat-only · vision ${item.vision_status === 'ready' ? 'ready' : item.vision_status}`
@@ -423,7 +426,7 @@ export function ChatSidePanel({
                             onReferenceAttachment(item)
                             onClose()
                           }}
-                          className="rounded-md bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-700 transition-colors hover:bg-emerald-100"
+                          className="rounded-md bg-violet-50 px-2 py-1 text-[11px] font-medium text-violet-700 transition-colors hover:bg-violet-100"
                         >
                           Reference
                         </button>
@@ -436,7 +439,7 @@ export function ChatSidePanel({
                             aria-label={`Delete ${item.file_title || item.file_name}`}
                           >
                             {deletingId === item.attachment_id ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              <Spinner size={14} />
                             ) : (
                               <Trash2 className="h-3.5 w-3.5" />
                             )}
@@ -463,7 +466,7 @@ export function ChatSidePanel({
             </p>
             {gamesLoading ? (
               <div className="flex items-center gap-2 py-3 text-xs text-slate-500">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <Spinner size={14} />
                 Loading games…
               </div>
             ) : gamesError ? (
@@ -482,7 +485,7 @@ export function ChatSidePanel({
                       key={game.gameId}
                       className="flex items-center gap-2 rounded-lg border border-slate-100 p-2"
                     >
-                      <Gamepad2 className="h-5 w-5 flex-shrink-0 text-emerald-600" />
+                      <Gamepad2 className="h-5 w-5 flex-shrink-0 text-violet-600" />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-xs font-medium text-slate-700">{game.title}</p>
                         <p className="text-[11px] text-slate-400">
@@ -499,7 +502,7 @@ export function ChatSidePanel({
                         aria-label={`Delete ${game.title}`}
                       >
                         {deletingGameId === game.gameId ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          <Spinner size={14} />
                         ) : (
                           <Trash2 className="h-3.5 w-3.5" />
                         )}
@@ -511,8 +514,71 @@ export function ChatSidePanel({
             )}
           </AccordionSection>
         </div>
+
+      {/* Same viewer the composer uses, so a file opens identically whether it
+          is being attached or looked up later. */}
+      {preview && (
+        <AttachmentViewer
+          batchId={batchId}
+          chatId={chatId}
+          attachment={preview}
+          onClose={() => setPreview(null)}
+        />
+      )}
+    </>
+  )
+
+  // Rendered as a column OR as an overlay — never both. Doing it with CSS alone
+  // would leave two copies of the whole panel in the DOM, which duplicates every
+  // control and breaks any query that expects one.
+  if (isWideViewport) {
+    return (
+      // Wide screens: a real column beside the conversation, so the chat stays
+      // readable while resources are open. Width animates from 0, so the
+      // conversation gives up space rather than being covered.
+      <aside
+        className={`shrink-0 overflow-hidden transition-[width] duration-300 ease-out ${
+          open ? 'w-[360px]' : 'w-0'
+        }`}
+        aria-hidden={!open}
+        aria-label="Chat links, files, and games"
+      >
+        <div
+          className="maia-glass flex h-full w-[360px] flex-col overflow-hidden"
+          style={{ borderLeft: '1px solid var(--border-academic)' }}
+        >
+          {panelBody}
+        </div>
       </aside>
-    </div>,
-    document.body,
+    )
+  }
+
+  return (
+    <>
+      {/* Narrow: no room for three columns, so it stays an overlay. */}
+      {rendered &&
+        createPortal(
+          <div
+            className={`fixed inset-0 z-[200] flex justify-end transition-colors duration-300 ${
+              visible ? 'bg-slate-950/40 backdrop-blur-sm' : 'bg-transparent'
+            }`}
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) onClose()
+            }}
+          >
+            <aside
+              className={`flex h-full w-full max-w-md flex-col overflow-hidden bg-white shadow-2xl transition-transform duration-300 ease-out ${
+                visible ? 'translate-x-0' : 'translate-x-full'
+              }`}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Chat links, files, and games"
+            >
+              {panelBody}
+            </aside>
+          </div>,
+          document.body,
+        )}
+    </>
   )
 }

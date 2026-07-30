@@ -40,8 +40,9 @@ def start_scheduler() -> None:
 
     Two env knobs (local dev only — ignored when Cloud Tasks is enabled) keep these
     crons from silently draining Firestore read quota:
-      - ENABLE_LOCAL_SCHEDULER=false → run the backend with NO background crons.
-      - *_INTERVAL_MINUTES           → override how often each cron runs.
+      - ENABLE_LOCAL_SCHEDULER / MAINTENANCE_SCHEDULER_ENABLED = false
+        → run the backend with NO background crons (either flag disables).
+      - *_INTERVAL_MINUTES → override how often each cron runs.
     The watchdog and file-recovery sweeps re-read on every tick, so their defaults are
     deliberately gentle; the email sweep stays at 2m so scheduled sends fire promptly.
     """
@@ -50,14 +51,18 @@ def start_scheduler() -> None:
     if cloud_tasks_enabled():
         logger.info("Cloud Tasks enabled — cron handled by Cloud Scheduler; APScheduler not started")
         return
-    if not _env_flag("ENABLE_LOCAL_SCHEDULER", True):
-        logger.info("ENABLE_LOCAL_SCHEDULER=false — maintenance crons disabled for this process")
+    if not _env_flag("ENABLE_LOCAL_SCHEDULER", True) or not _env_flag("MAINTENANCE_SCHEDULER_ENABLED", True):
+        logger.info("Local maintenance crons disabled (ENABLE_LOCAL_SCHEDULER / MAINTENANCE_SCHEDULER_ENABLED)")
         return
     if _scheduler and _scheduler.running: return
 
     email_min = _env_int("EMAIL_SEND_INTERVAL_MINUTES", 2)
-    recover_min = _env_int("FILE_RECOVERY_INTERVAL_MINUTES", 10)  # was 2
-    watchdog_min = _env_int("ATTACHMENT_WATCHDOG_INTERVAL_MINUTES", 5)  # was 1
+    # 15 min, not 2: run_index_file_task takes a 120-minute recovery lease, so a
+    # faster sweep just re-reads the same files and enqueues tasks that no-op.
+    recover_min = _env_int("FILE_RECOVERY_INTERVAL_MINUTES", 15)
+    # Backstop only: every deferred run now schedules its own /tasks/attachment-deadline
+    # check, so a gentle default just covers a dropped task or a restart that lost the timer.
+    watchdog_min = _env_int("ATTACHMENT_WATCHDOG_INTERVAL_MINUTES", 30)
 
     _scheduler = BackgroundScheduler()
     _scheduler.add_job(check_and_send_emails, "interval", minutes=email_min, id="scheduled-emails", max_instances=1)

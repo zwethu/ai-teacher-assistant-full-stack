@@ -242,16 +242,30 @@ export function citationRemarkPlugin(sourceByIndex: Map<number, WebSourceMetadat
         let match: RegExpExecArray | null
         while ((match = pattern.exec(child.value))) {
           if (match.index > cursor) next.push({ type: 'text', value: child.value.slice(cursor, match.index) })
-          const indices = match[1].split(',').map((value) => Number(value.trim()))
-          indices.forEach((index, position) => {
-            const source = sourceByIndex.get(index)
+          // Only indices we can name become chips. An index with no captured
+          // source has nothing to show — a bare "[10]" beside real chips reads
+          // as a broken footnote, so it is dropped rather than rendered.
+          const resolved = match[1]
+            .split(',')
+            .map((value) => Number(value.trim()))
+            .map((index) => ({ index, source: sourceByIndex.get(index) }))
+            .filter((entry): entry is { index: number; source: WebSourceMetadata } =>
+              Boolean(entry.source),
+            )
+          if (resolved.length === 0) {
+            // Drop the space that led into the marker too, or the sentence ends
+            // up as "… methodology ." once the marker is gone.
+            const last = next[next.length - 1]
+            if (last?.type === 'text' && typeof last.value === 'string' && last.value.endsWith(' ')) {
+              last.value = last.value.slice(0, -1)
+            }
+          }
+          resolved.forEach(({ index, source }, position) => {
             if (position > 0) next.push({ type: 'text', value: ' ' })
             next.push({
               type: 'link',
-              url: source?.url || `#citation-unavailable-${index}`,
-              title: source
-                ? `${source.title} — ${source.display_domain || source.domain}`
-                : 'Source not available in captured metadata.',
+              url: source.url || `#citation-unavailable-${index}`,
+              title: `${source.title} — ${source.display_domain || source.domain}`,
               children: [{ type: 'text', value: `[${index}]` }],
             })
           })

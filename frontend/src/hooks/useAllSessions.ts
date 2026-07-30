@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { listBatches } from '../services/batchService'
-import { listChats, listMessages } from '../services/chatService'
+import { listChats } from '../services/chatService'
 import { CHAT_CREATED_EVENT } from '../utils/chatEvents'
 
 export type SessionItem = {
@@ -21,7 +21,7 @@ type CacheEntry = {
 
 let sessionsCache: CacheEntry | null = null
 
-async function buildSessions(includePreviews: boolean): Promise<SessionItem[]> {
+async function buildSessions(): Promise<SessionItem[]> {
   const batches = await listBatches()
   const results: SessionItem[] = []
 
@@ -29,23 +29,15 @@ async function buildSessions(includePreviews: boolean): Promise<SessionItem[]> {
     batches.map(async (batch) => {
       const chats = await listChats(batch.id)
       for (const chat of chats) {
-        let preview = ''
-        if (includePreviews) {
-          try {
-            const messages = await listMessages(batch.id, chat.chat_id)
-            const firstUser = messages.find((m) => m.role === 'user')
-            preview = firstUser?.content?.slice(0, 120) ?? ''
-          } catch {
-            preview = ''
-          }
-        }
         results.push({
           chat_id: chat.chat_id,
           batch_id: batch.id,
           batch_name: batch.batch_name,
           title: chat.title,
           updated_at: chat.updated_at ?? chat.created_at,
-          preview,
+          // Written onto the chat doc with the first user message. Chats that
+          // predate the field have none, and fall back to the title.
+          preview: chat.preview ?? '',
         })
       }
     }),
@@ -60,8 +52,9 @@ async function buildSessions(includePreviews: boolean): Promise<SessionItem[]> {
   return results
 }
 
-export function useAllSessions(options?: { includePreviews?: boolean; limit?: number }) {
-  const includePreviews = options?.includePreviews ?? false
+// Previews now ride along on the chat document, so there is no longer an
+// `includePreviews` opt-in — they cost nothing to include.
+export function useAllSessions(options?: { limit?: number }) {
   const limit = options?.limit
   const [sessions, setSessions] = useState<SessionItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -82,7 +75,7 @@ export function useAllSessions(options?: { includePreviews?: boolean; limit?: nu
 
       setLoading(true)
       try {
-        const data = await buildSessions(includePreviews)
+        const data = await buildSessions()
         sessionsCache = { data, fetchedAt: Date.now() }
         if (mountedRef.current) {
           setSessions(limit ? data.slice(0, limit) : data)
@@ -94,7 +87,7 @@ export function useAllSessions(options?: { includePreviews?: boolean; limit?: nu
         if (mountedRef.current) setLoading(false)
       }
     },
-    [includePreviews, limit],
+    [limit],
   )
 
   useEffect(() => {

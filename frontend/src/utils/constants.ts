@@ -22,9 +22,9 @@ export function getMoodOption(value: string): MoodOption {
 
 export const MOOD_STYLES: Record<MoodValue, MoodStyle> = {
   great: {
-    pill: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-    text: 'text-emerald-600',
-    card: 'border-emerald-200 bg-emerald-50/40',
+    pill: 'bg-violet-50 text-violet-700 border-violet-200',
+    text: 'text-violet-600',
+    card: 'border-violet-200 bg-violet-50/40',
   },
   okay: {
     pill: 'bg-sky-50 text-sky-700 border-sky-200',

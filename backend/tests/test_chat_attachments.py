@@ -116,7 +116,7 @@ def test_same_chat_dto_excludes_storage_and_internal_errors() -> None:
 
 def test_chat_attachment_retention_is_configurable_and_clamped(monkeypatch) -> None:
     monkeypatch.delenv("CHAT_ATTACHMENT_RETENTION_DAYS", raising=False)
-    assert get_chat_attachment_retention_days() == 7
+    assert get_chat_attachment_retention_days() == 30
     monkeypatch.setenv("CHAT_ATTACHMENT_RETENTION_DAYS", "0")
     assert get_chat_attachment_retention_days() == 1
     monkeypatch.setenv("CHAT_ATTACHMENT_RETENTION_DAYS", "99")

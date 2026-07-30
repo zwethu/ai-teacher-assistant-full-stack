@@ -1,0 +1,189 @@
+/* Colour tokens (--g-*) live in index.css. */
+
+/* ─── Certificate card (fixed size for clean PNG export) ─── */
+.certificate {
+  width: 640px;
+  box-sizing: border-box;
+  padding: 18px;
+  font-family: 'Nunito', 'Segoe UI', sans-serif;
+  border-radius: 20px;
+}
+/* Medal papers stay in the warm family. "Silver" is a warm grey, not a blue
+   one — a cool grey sheet in an otherwise cream flow reads as a bug. */
+.certificate--gold   { background: var(--g-butter-300); }
+.certificate--silver { background: #f1ebe2; }
+.certificate--bronze { background: var(--g-cream-300); }
+
+.cert-inner {
+  background: var(--g-cream-50);
+  border-radius: 14px;
+  padding: 34px 40px 28px;
+  text-align: center;
+  border: 3px double var(--g-cocoa-300);
+  box-shadow: inset 0 0 0 1px rgba(107, 67, 38, 0.05);
+}
+.cert-kicker {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--g-butter-700);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.cert-title {
+  margin: 10px 0 0;
+  font-size: 2rem;
+  font-weight: 900;
+  color: var(--g-cocoa-900);
+  letter-spacing: 0.5px;
+}
+.cert-rule {
+  width: 90px;
+  height: 3px;
+  margin: 12px auto 18px;
+  border-radius: 3px;
+  background: var(--g-rose-300);
+}
+.cert-awarded { margin: 0; font-size: 0.95rem; color: var(--g-ink-soft); font-weight: 700; }
+.cert-name {
+  margin: 8px 0 6px;
+  font-size: 1.7rem;
+  font-weight: 900;
+  color: var(--g-rose-700);
+}
+.cert-desc { margin: 0 0 14px; font-size: 0.95rem; color: var(--g-ink-soft); font-weight: 700; }
+
+.cert-medal {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  margin: 6px 0 16px;
+}
+.cert-medal-emoji { font-size: 3.4rem; line-height: 1; }
+.cert-medal-title { font-size: 1.3rem; font-weight: 900; color: var(--g-butter-700); }
+.certificate--silver .cert-medal-title { color: var(--g-cocoa-500); }
+.certificate--bronze .cert-medal-title { color: var(--g-coral-700); }
+
+.cert-stats {
+  display: flex;
+  justify-content: center;
+  gap: 48px;
+  margin: 4px 0 22px;
+}
+.cert-stat { display: flex; flex-direction: column; }
+.cert-stat-num { font-size: 1.5rem; font-weight: 900; color: var(--g-cocoa-900); }
+.cert-stat-lbl { font-size: 0.78rem; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; color: var(--g-ink-soft); }
+
+.cert-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-top: 1.5px solid var(--g-cream-300);
+  padding-top: 14px;
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: var(--g-ink-soft);
+}
+
+.cert-verify {
+  margin: 10px 0 0;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: var(--g-cocoa-300);
+  text-align: center;
+}
+.cert-verify-code {
+  font-family: 'Consolas', 'Menlo', monospace;
+  color: var(--g-ink-soft);
+  word-break: break-all;
+}
+
+/* ─── Modal ─── */
+.cert-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  background: rgba(74, 45, 24, 0.55);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: certFade 0.25s ease;
+}
+@keyframes certFade { from { opacity: 0; } to { opacity: 1; } }
+
+.cert-modal {
+  background: #fff;
+  border-radius: 24px;
+  padding: 20px;
+  max-width: 92vw;
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  box-shadow: 0 20px 60px rgba(74, 45, 24, 0.38);
+}
+.cert-scroll {
+  max-width: 100%;
+  max-height: 70vh;
+  overflow: auto;
+}
+.cert-modal-actions { display: flex; gap: 12px; }
+.cert-download-btn {
+  padding: 12px 30px;
+  border: none;
+  border-radius: 40px;
+  background: var(--g-accent);
+  color: white;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 900;
+  font-family: inherit;
+  font-size: 1rem;
+  cursor: pointer;
+  box-shadow: 0 6px 18px var(--g-accent-ring);
+}
+.cert-download-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.cert-close-btn {
+  padding: 12px 24px;
+  border: 2px solid var(--g-cream-300);
+  border-radius: 40px;
+  background: white;
+  color: var(--g-ink-soft);
+  font-weight: 800;
+  font-family: inherit;
+  cursor: pointer;
+}
+.cert-modal-hint { margin: 0; font-size: 0.82rem; font-weight: 700; color: var(--g-ink-soft); text-align: center; display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px; }
+
+/* Button on the result screen that opens the certificate.
+   This is the result screen's ONE primary action, so it gets the solid rose;
+   "Play again" next to it is the secondary (see .restart-btn in CatGame.css).
+   It used to be solid amber beside a solid purple restart — two shouting
+   buttons, no hierarchy. */
+.cert-open-btn {
+  padding: 12px 30px;
+  border: none;
+  border-radius: 40px;
+  background: var(--g-accent);
+  color: white;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-weight: 900;
+  font-family: inherit;
+  font-size: 0.98rem;
+  cursor: pointer;
+  box-shadow: 0 6px 18px var(--g-accent-ring);
+  transition: transform 0.15s, box-shadow 0.2s;
+}
+.cert-open-btn:hover { transform: translateY(-2px); box-shadow: 0 9px 24px var(--g-accent-ring); }

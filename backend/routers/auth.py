@@ -74,7 +74,7 @@ async def init_user(
 @router.get("/google-scopes")
 async def google_scopes() -> RedirectResponse:
     """
-    Start Google OAuth for sign-in and Workspace scopes (Gmail, Calendar, Forms).
+    Start Google OAuth for sign-in and Workspace scopes (Drive, Docs, Forms, Gmail).
     """
     try:
         flow = _build_flow()
@@ -139,6 +139,15 @@ async def google_scopes_callback(
         credentials = flow.credentials
         refresh_token = credentials.refresh_token
         google_id = credentials.id_token
+    except Warning as exc:
+        # oauthlib raises a bare Warning when the granted scope set differs from
+        # the requested one. With include_granted_scopes=true that is routine,
+        # and OAUTHLIB_RELAX_TOKEN_SCOPE (set in utils.google_credentials) stops
+        # it — but log it distinctly so a future scope change is diagnosable
+        # rather than presenting as a silent bounce back to /login.
+        logger.exception("OAuth callback rejected the token scope: %s", exc)
+        state_ref.delete()
+        return RedirectResponse(url=failure_url, status_code=status.HTTP_302_FOUND)
     except Exception as exc:
         logger.exception("OAuth callback error: %s", exc)
         state_ref.delete()
@@ -203,6 +212,15 @@ async def google_scopes_callback(
         store_refresh_token(db, uid, refresh_token)
 
         custom_token = firebase_auth_module.create_custom_token(uid).decode("utf-8")
+    except Warning as exc:
+        # oauthlib raises a bare Warning when the granted scope set differs from
+        # the requested one. With include_granted_scopes=true that is routine,
+        # and OAUTHLIB_RELAX_TOKEN_SCOPE (set in utils.google_credentials) stops
+        # it — but log it distinctly so a future scope change is diagnosable
+        # rather than presenting as a silent bounce back to /login.
+        logger.exception("OAuth callback rejected the token scope: %s", exc)
+        state_ref.delete()
+        return RedirectResponse(url=failure_url, status_code=status.HTTP_302_FOUND)
     except Exception as exc:
         logger.exception("OAuth callback error: %s", exc)
         return RedirectResponse(url=failure_url, status_code=status.HTTP_302_FOUND)

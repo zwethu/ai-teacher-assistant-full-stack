@@ -108,6 +108,78 @@ export async function uploadChatAttachment(
   return res.data
 }
 
+export type ChatExportFormat = 'markdown' | 'pdf' | 'docx'
+
+/** Human label for each format, for menus and error messages. */
+export const EXPORT_FORMAT_LABELS: Record<ChatExportFormat, string> = {
+  pdf: 'PDF',
+  markdown: 'Markdown',
+  docx: 'DOCX',
+}
+
+/** Pull the server's filename out of Content-Disposition, else fall back. */
+function filenameFrom(headerValue: unknown, fallback: string): string {
+  if (typeof headerValue !== 'string') return fallback
+  const match = /filename\*?=(?:UTF-8''|")?([^";]+)/i.exec(headerValue)
+  return match ? decodeURIComponent(match[1].replace(/"$/, '')) : fallback
+}
+
+/** Hand a blob to the browser as a download, then release the object URL. */
+function saveBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  // revoke on the next tick — Safari cancels an in-flight download otherwise
+  setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
+/** Download the whole conversation. */
+export async function exportChat(
+  batchId: string, chatId: string, format: ChatExportFormat,
+): Promise<void> {
+  const res = await api.get(`/batches/${batchId}/chats/${chatId}/export`, {
+    params: { format }, responseType: 'blob',
+  })
+  saveBlob(res.data as Blob, filenameFrom(res.headers?.['content-disposition'], `chat.${format}`))
+}
+
+/** Download a single response. */
+export async function exportMessage(
+  batchId: string, chatId: string, messageId: string, format: ChatExportFormat,
+): Promise<void> {
+  const res = await api.get(
+    `/batches/${batchId}/chats/${chatId}/messages/${messageId}/export`,
+    { params: { format }, responseType: 'blob' },
+  )
+  saveBlob(res.data as Blob, filenameFrom(res.headers?.['content-disposition'], `response.${format}`))
+}
+
+/** Remove one message. Used by retry to drop the superseded response. */
+export async function deleteMessage(
+  batchId: string, chatId: string, messageId: string,
+): Promise<void> {
+  await api.delete(`/batches/${batchId}/chats/${chatId}/messages/${messageId}`)
+}
+
+/**
+ * Stop a run. The server flags it, notices between streamed chunks, and closes
+ * the Agent Engine stream — so generation actually halts rather than finishing
+ * unseen. Anything already streamed is discarded. `cancelled` comes back false
+ * when the run had already finished.
+ */
+export async function cancelChatRun(
+  batchId: string, chatId: string, runId: string,
+): Promise<boolean> {
+  const res = await api.post<{ cancelled?: boolean }>(
+    `/batches/${batchId}/chats/${chatId}/runs/${runId}/cancel`,
+  )
+  return Boolean(res.data?.cancelled)
+}
+
 export async function getChatAttachmentContent(
   batchId: string, chatId: string, attachmentId: string, thumbnail = false,
 ): Promise<Blob> {

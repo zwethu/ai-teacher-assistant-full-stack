@@ -3,15 +3,22 @@ import axios from 'axios'
 import type { Batch } from '../entity/Batch'
 import type { Chat, ChatAttachment, ChatMessage } from '../entity/Chat'
 import {
+  cancelChatRun,
   createChat,
   deleteChatAttachment,
   getChatAttachmentRagStatus,
+  getChatRun,
   listMessages,
   sendMessage,
   uploadChatAttachment,
 } from '../services/chatService'
 import { invokeAgent } from '../services/agentService'
 import { clearGenerationRun, readGenerationRun, writeGenerationRun } from './generationRunStore'
+import { createStallWatchdog } from './streamStallWatchdog'
+import {
+  subscribeChatAttachments,
+  type ChatAttachmentStatusEvent,
+} from '../services/chatAttachmentStream'
 import {
   subscribeAgentRun,
   type AgentRunDelta,
@@ -63,6 +70,9 @@ type InvokeResult = {
 const STREAM_DELAY_MESSAGE =
   'Live updates are delayed. I will fetch the final response when ready.'
 
+/** Backstop cadence for attachment readiness; RTDB carries the fast path. */
+const ATTACHMENT_FALLBACK_POLL_MS = 10_000
+
 function invokeErrorMessage(err: unknown): string {
   if (!axios.isAxiosError(err)) return 'Sorry, something went wrong. Please try again.'
   const detail = err.response?.data?.detail
@@ -80,13 +90,15 @@ export function useGenerationRun(batch: Batch | null, persistKey?: string) {
   // window (before the resolved message carries stage metadata).
   const [activePhase, setActivePhase] = useState<'outline' | 'full' | 'refine' | null>(null)
   const [sending, setSending] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
   const [pendingAttachments, setPendingAttachments] = useState<PendingChatAttachment[]>([])
   const [attachmentsUploading, setAttachmentsUploading] = useState(false)
   const [attachmentErrors, setAttachmentErrors] = useState<string[]>([])
 
   const runUnsubscribesRef = useRef<Record<string, () => void>>({})
   const runDeltaIndexesRef = useRef<Record<string, Set<number>>>({})
-  const fallbackTimerRef = useRef<Record<string, number>>({})
+  // Per-run silence detector for the live RTDB channel; see streamStallWatchdog.
+  const stallWatchdogRef = useRef(createStallWatchdog())
   const pollIntervalRef = useRef<Record<string, number>>({})
   const chatRef = useRef<Chat | null>(null)
   useEffect(() => { chatRef.current = chat }, [chat])
@@ -108,8 +120,7 @@ export function useGenerationRun(batch: Batch | null, persistKey?: string) {
     runUnsubscribesRef.current = {}
     Object.values(pollIntervalRef.current).forEach((t) => window.clearInterval(t))
     pollIntervalRef.current = {}
-    Object.values(fallbackTimerRef.current).forEach((t) => window.clearTimeout(t))
-    fallbackTimerRef.current = {}
+    stallWatchdogRef.current.clear()
     runDeltaIndexesRef.current = {}
     setPendingAttachments([])
     setAttachmentErrors([])
@@ -161,6 +172,18 @@ export function useGenerationRun(batch: Batch | null, persistKey?: string) {
     const transitional = pendingAttachments.filter((a) => a.status === 'processing')
     if (!batchId || !activeChatId || transitional.length === 0) return
     let cancelled = false
+    const apply = (update: ChatAttachmentStatusEvent) => {
+      if (cancelled) return
+      setPendingAttachments((current) =>
+        current.map((item) =>
+          item.attachment_id === update.attachment_id ? { ...item, ...update } : item))
+    }
+
+    // Push: the backend mirrors every transition, and onChildAdded replays the
+    // current state, so readiness normally arrives without a request.
+    const unsubscribe = subscribeChatAttachments(activeChatId, { onStatus: apply })
+
+    // Pull: backstop for RTDB being unconfigured or unreachable, nothing more.
     const refresh = async () => {
       const updates = await Promise.all(
         transitional.map(async (item) => {
@@ -169,22 +192,16 @@ export function useGenerationRun(batch: Batch | null, persistKey?: string) {
         }),
       )
       if (cancelled) return
-      setPendingAttachments((current) =>
-        current.map((item) => {
-          const update = updates.find((v) => v?.attachment_id === item.attachment_id)
-          return update ? { ...item, ...update } : item
-        }),
-      )
+      updates.forEach((update) => { if (update) apply(update) })
     }
-    const timer = window.setInterval(() => void refresh(), 2500)
-    void refresh()
-    return () => { cancelled = true; window.clearInterval(timer) }
+    const timer = window.setInterval(() => void refresh(), ATTACHMENT_FALLBACK_POLL_MS)
+    return () => { cancelled = true; unsubscribe(); window.clearInterval(timer) }
   }, [batchId, chat?.chat_id, pendingAttachments.map((a) => `${a.attachment_id}:${a.status}`).join('|')])
 
   useEffect(() => () => {
     Object.values(runUnsubscribesRef.current).forEach((fn) => fn())
     Object.values(pollIntervalRef.current).forEach((t) => window.clearInterval(t))
-    Object.values(fallbackTimerRef.current).forEach((t) => window.clearTimeout(t))
+    stallWatchdogRef.current.clear()
     pendingAttachments.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -325,10 +342,7 @@ export function useGenerationRun(batch: Batch | null, persistKey?: string) {
   )
 
   const stopTimers = useCallback((runId: string) => {
-    if (fallbackTimerRef.current[runId]) {
-      window.clearTimeout(fallbackTimerRef.current[runId])
-      delete fallbackTimerRef.current[runId]
-    }
+    stallWatchdogRef.current.clear(runId)
     if (pollIntervalRef.current[runId]) {
       window.clearInterval(pollIntervalRef.current[runId])
       delete pollIntervalRef.current[runId]
@@ -371,15 +385,67 @@ export function useGenerationRun(batch: Batch | null, persistKey?: string) {
     setSending(false)
   }, [batchId])
 
+  /**
+   * One tick of the fallback: read the run document's status rather than the whole
+   * conversation, and only fetch messages once it has actually settled. Returns
+   * true when the run is finished.
+   */
+  const pollRunSettledOnce = useCallback(
+    async (chatId: string, runId: string, pendingId: string): Promise<boolean> => {
+      if (!batchId) return false
+      const record = await getChatRun(batchId, chatId, runId)
+      if (record.status !== 'done' && record.status !== 'failed' && record.status !== 'cancelled') {
+        return false
+      }
+      await pollFinalOnce(chatId, runId, pendingId)
+      return true
+    },
+    [batchId, pollFinalOnce],
+  )
+
+  const startPolling = useCallback(
+    (chatId: string, runId: string, pendingId: string) => {
+      if (pollIntervalRef.current[runId]) return
+      pollIntervalRef.current[runId] = window.setInterval(() => {
+        void pollRunSettledOnce(chatId, runId, pendingId)
+          .then((settled) => { if (settled) stopTimers(runId) })
+          .catch(console.error)
+      }, 5000)
+    },
+    [pollRunSettledOnce, stopTimers],
+  )
+
+  /** Record a live-channel signal and push the stall deadline back. */
+  const armStallWatchdog = useCallback(
+    (chatId: string, runId: string, pendingId: string) => {
+      stallWatchdogRef.current.alive(runId, {
+        onStall: () => {
+          updateRunStreamError(runId, STREAM_DELAY_MESSAGE)
+          startPolling(chatId, runId, pendingId)
+        },
+        onRecover: () => {
+          if (pollIntervalRef.current[runId]) {
+            window.clearInterval(pollIntervalRef.current[runId])
+            delete pollIntervalRef.current[runId]
+          }
+          updateRunStreamError(runId, '')
+        },
+      })
+    },
+    [startPolling, updateRunStreamError],
+  )
+
   const subscribeToRun = useCallback(
     (runId: string, chatId: string) => {
       if (runUnsubscribesRef.current[runId]) return
       const pendingId = `pending-${runId}`
       ensureRunState(runId)
+      const alive = () => armStallWatchdog(chatId, runId, pendingId)
       runUnsubscribesRef.current[runId] = subscribeAgentRun(runId, {
         onMessage: (m) => { upsertFinalMessage(m, pendingId, chatId); setSending(false); stopTimers(runId) },
         onStatus: (status) => {
           updateRunStatus(runId, status)
+          if (status === 'running' || status === 'awaiting_attachments') alive()
           if (status === 'done' || status === 'failed') {
             setActivePhase(null)
             if (persistIdRef.current) writeGenerationRun(persistIdRef.current, { activePhase: null })
@@ -391,33 +457,30 @@ export function useGenerationRun(batch: Batch | null, persistKey?: string) {
               m.pending && m.run_id === runId ? { ...m, status: 'failed', pending: false } : m))
             setSending(false)
           }
+          if (status === 'cancelled') {
+            // Arrives on reload or in a second tab; the tab that pressed Stop has
+            // already torn its subscription down. Settle so nothing hangs.
+            stopTimers(runId)
+            setSending(false)
+          }
         },
-        onEvent: (e) => appendRunEvent(runId, e),
-        onStep: (s) => upsertRunStep(runId, s),
-        onDelta: (d) => appendRunDelta(runId, d, chatId, pendingId),
+        onEvent: (e) => { alive(); appendRunEvent(runId, e) },
+        onStep: (s) => { alive(); upsertRunStep(runId, s) },
+        onDelta: (d) => { alive(); appendRunDelta(runId, d, chatId, pendingId) },
         onStreamMeta: (meta) => updateRunStreamMeta(runId, meta),
         onRunError: (msg) => updateRunError(runId, msg),
         onDisconnected: (connected) => updateRunConnection(runId, connected),
         onError: (err) => {
           console.error(err)
           updateRunStreamError(runId, STREAM_DELAY_MESSAGE)
-          if (pollIntervalRef.current[runId]) return
-          pollIntervalRef.current[runId] = window.setInterval(() => {
-            void pollFinalOnce(chatId, runId, pendingId).catch(console.error)
-          }, 5000)
+          startPolling(chatId, runId, pendingId)
         },
       })
-      // 10s live-stall fallback → start polling.
-      fallbackTimerRef.current[runId] = window.setTimeout(() => {
-        updateRunStreamError(runId, STREAM_DELAY_MESSAGE)
-        if (pollIntervalRef.current[runId]) return
-        pollIntervalRef.current[runId] = window.setInterval(() => {
-          void pollFinalOnce(chatId, runId, pendingId).catch(console.error)
-        }, 5000)
-      }, 10000)
+      alive()
     },
     [ensureRunState, upsertFinalMessage, stopTimers, updateRunStatus, appendRunEvent, upsertRunStep,
-     appendRunDelta, updateRunStreamMeta, updateRunError, updateRunConnection, updateRunStreamError, pollFinalOnce],
+     appendRunDelta, updateRunStreamMeta, updateRunError, updateRunConnection, updateRunStreamError,
+     pollFinalOnce, armStallWatchdog, startPolling],
   )
   // Expose the latest subscribeToRun to the rehydrate effect (set during render so
   // it is available before effects run on first mount).
@@ -556,6 +619,48 @@ export function useGenerationRun(batch: Batch | null, persistKey?: string) {
     [batch, sending, startRun],
   )
 
+  /**
+   * Stop the in-flight generation. The backend polls the cancel flag between
+   * streamed chunks and tears the Agent Engine stream down, so this genuinely
+   * ends the work rather than just muting the UI. We keep the placeholder
+   * message so the stage renderer has something to hang "cancelled" off, and
+   * drop the persisted run id so returning to the page does not resubscribe.
+   */
+  const cancelRun = useCallback(async () => {
+    const activeChat = chatRef.current
+    if (!batch || !activeChat || !currentRunId || cancelling) return
+    const runId = currentRunId
+    setCancelling(true)
+    try {
+      await cancelChatRun(batch.id, activeChat.chat_id, runId)
+    } catch {
+      // Settle locally regardless — a stuck "generating" panel is worse than a
+      // run that quietly keeps going.
+    } finally {
+      runUnsubscribesRef.current[runId]?.()
+      delete runUnsubscribesRef.current[runId]
+      stopTimers(runId)
+      setRunStates((prev) => ({
+        ...prev,
+        [runId]: {
+          ...(prev[runId] || { events: [], steps: {} }),
+          status: 'cancelled',
+        } as RunUiState,
+      }))
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.pending && m.run_id === runId ? { ...m, pending: false, status: 'done' } : m,
+        ),
+      )
+      setActivePhase(null)
+      setSending(false)
+      setCancelling(false)
+      if (persistIdRef.current) {
+        writeGenerationRun(persistIdRef.current, { currentRunId: null, activePhase: null })
+      }
+    }
+  }, [batch, currentRunId, cancelling, stopTimers])
+
   // Clear the current run so the page can show its form again ("Generate another").
   // Keeps the workflow chat for reuse but drops the persisted run so it won't rehydrate.
   const reset = useCallback(() => {
@@ -563,8 +668,7 @@ export function useGenerationRun(batch: Batch | null, persistKey?: string) {
     runUnsubscribesRef.current = {}
     Object.values(pollIntervalRef.current).forEach((t) => window.clearInterval(t))
     pollIntervalRef.current = {}
-    Object.values(fallbackTimerRef.current).forEach((t) => window.clearTimeout(t))
-    fallbackTimerRef.current = {}
+    stallWatchdogRef.current.clear()
     runDeltaIndexesRef.current = {}
     setMessages([])
     setRunStates({})
@@ -628,6 +732,8 @@ export function useGenerationRun(batch: Batch | null, persistKey?: string) {
     currentRunId,
     activePhase,
     sending,
+    cancelling,
+    cancelRun,
     pendingAttachments,
     attachmentsUploading,
     attachmentErrors,

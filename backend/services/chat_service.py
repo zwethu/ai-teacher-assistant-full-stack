@@ -18,6 +18,14 @@ MESSAGES_SUBCOLLECTION = "messages"
 RUNS_SUBCOLLECTION = "runs"
 ATTACHMENTS_SUBCOLLECTION = "attachments"
 
+# Length of the denormalised chat subtitle. Matches what the two list views used to
+# slice off the first user message themselves.
+PREVIEW_MAX_CHARS = 120
+
+# Newest-first cap for the messages endpoint. Chats never come close in practice;
+# this only stops a runaway conversation from becoming an unbounded read.
+DEFAULT_MESSAGE_LIMIT = 200
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -56,6 +64,10 @@ def _chat_to_dict(doc_id: str, data: dict[str, Any]) -> dict[str, Any]:
         "batch_id": str(data.get("batch_id") or ""),
         "lecturer_id": str(data.get("lecturer_id") or ""),
         "title": str(data.get("title") or "New Chat"),
+        # Denormalised first-user-message snippet, so listing chats does not have to
+        # read every chat's messages just to render a subtitle. Empty for chats
+        # created before this field existed — callers fall back to the title.
+        "preview": str(data.get("preview") or ""),
         "agent_session_id": str(data.get("agent_session_id") or ""),
         "agent_user_id": str(data.get("agent_user_id") or ""),
         "active_run_id": str(data.get("active_run_id") or ""),
@@ -118,6 +130,7 @@ def create_chat(
             "week": week,
             "hidden": hidden,
             "title": title.strip() or "New Chat",
+            "preview": "",
             "created_at": SERVER_TIMESTAMP,
             "updated_at": SERVER_TIMESTAMP,
         }
@@ -137,6 +150,7 @@ def create_chat(
         "week": week,
         "hidden": hidden,
         "title": title,
+        "preview": "",
     }
 
 
@@ -352,6 +366,7 @@ def _attachment_snapshot(data: dict[str, Any]) -> dict[str, Any]:
         "parse_status": str(data.get("parse_status") or "skipped"),
         "vision_status": str(data.get("vision_status") or "skipped"),
         "thumbnail_available": bool(data.get("thumbnail_gcs_path")),
+        "page_count": int(data.get("page_count") or 0),
         "promotion_allowed": False,
     }
 
@@ -423,7 +438,13 @@ def add_user_message_with_attachments(
             from services.attachment_constants import get_chat_attachment_retention_days
             from datetime import datetime, timedelta, timezone
             txn.update(ref, {"message_id": msg_id, "expires_at": datetime.now(timezone.utc) + timedelta(days=get_chat_attachment_retention_days()), "updated_at": SERVER_TIMESTAMP})
-        txn.update(chat_ref, {"updated_at": SERVER_TIMESTAMP})
+        chat_updates: dict[str, Any] = {"updated_at": SERVER_TIMESTAMP}
+        # Snapshot the opening request as the chat's subtitle. Written once, inside
+        # the same transaction that persists the message, so listing chats never has
+        # to read their messages to render it.
+        if not chat_data.get("preview") and content.strip():
+            chat_updates["preview"] = content.strip()[:PREVIEW_MAX_CHARS]
+        txn.update(chat_ref, chat_updates)
         return snapshots, records
 
     snapshots, records = _commit(transaction)
@@ -486,16 +507,56 @@ def update_assistant_message_content_for_run(
         msg.reference.update(update)
 
 
-def list_messages(batch_id: str, chat_id: str, lecturer_id: str) -> list[dict[str, Any]]:
-    """Return messages for a chat oldest-first, after ownership check."""
+def list_messages(
+    batch_id: str, chat_id: str, lecturer_id: str, limit: int | None = None
+) -> list[dict[str, Any]]:
+    """Return messages for a chat oldest-first, after ownership check.
+
+    ``limit`` keeps the newest N. Left as None by the export path, which needs the
+    whole conversation; the messages endpoint passes a cap so a long chat cannot
+    turn one request into an unbounded read.
+    """
     chat = get_chat(batch_id, chat_id, lecturer_id)
     if chat is None:
         return []
     col = _messages_col(batch_id, chat_id)
-    return [
-        _msg_to_dict(doc.id, doc.to_dict() or {})
-        for doc in col.order_by("created_at").stream()
-    ]
+    if limit is None:
+        docs = col.order_by("created_at").stream()
+        return [_msg_to_dict(doc.id, doc.to_dict() or {}) for doc in docs]
+    # Newest N, then flip back to chronological for the caller.
+    docs = col.order_by("created_at", direction=firestore.Query.DESCENDING).limit(limit).stream()
+    return [_msg_to_dict(doc.id, doc.to_dict() or {}) for doc in docs][::-1]
+
+
+def get_message(
+    batch_id: str, chat_id: str, lecturer_id: str, message_id: str
+) -> dict[str, Any] | None:
+    """Return one message, after the same ownership check as list_messages."""
+    if get_chat(batch_id, chat_id, lecturer_id) is None:
+        return None
+    snap = _messages_col(batch_id, chat_id).document(message_id).get()
+    if not snap.exists:
+        return None
+    return _msg_to_dict(snap.id, snap.to_dict() or {})
+
+
+def delete_message(batch_id: str, chat_id: str, lecturer_id: str, message_id: str) -> bool:
+    """Delete a single message.
+
+    Used by retry: the superseded assistant response is removed so the
+    conversation does not accumulate abandoned answers, and so the retry
+    survives a reload rather than reappearing from Firestore.
+
+    Returns False when the chat is not the lecturer's or the message is gone —
+    the caller turns that into a 404.
+    """
+    if get_chat(batch_id, chat_id, lecturer_id) is None:
+        return False
+    doc_ref = _messages_col(batch_id, chat_id).document(message_id)
+    if not doc_ref.get().exists:
+        return False
+    doc_ref.delete()
+    return True
 
 
 def update_chat_title(batch_id: str, chat_id: str, lecturer_id: str, title: str) -> bool:

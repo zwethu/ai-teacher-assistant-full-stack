@@ -4,6 +4,7 @@ import logging
 import uuid
 import os
 from datetime import datetime, timedelta, timezone
+from itertools import islice
 from typing import Any
 
 from google.cloud.firestore import SERVER_TIMESTAMP
@@ -313,13 +314,43 @@ def run_check_indexing_task(file_id: str, batch_id: str, lecturer_id: str, attem
 
 
 def recover_batch_files(limit: int = 20) -> int:
-    """Safety-net sweep: re-enqueue stuck files onto the task chain (no threads)."""
-    db = get_firestore(); docs = []
-    for status_value in ("pending", "indexing"):
-        docs.extend(list(db.collection_group(FILES_SUBCOLLECTION).where("index_status", "==", status_value).limit(limit).stream()))
-    docs.extend(list(db.collection_group(FILES_SUBCOLLECTION).where("overlay_status", "==", "retiring").limit(limit).stream()))
+    """Safety-net sweep: re-enqueue stuck files onto the task chain (no threads).
+
+    Not purely recovery — two of the three queries are load-bearing. Files whose
+    check-indexing chain exhausted _CHECK_INDEXING_MAX_ATTEMPTS are handed back here
+    by design, and the ``overlay_status == "retiring"`` query is the only driver of
+    overlay retirement.
+    """
+    db = get_firestore()
+
+    def _stuck_docs():
+        """Yield candidates lazily across the three queries. Only what is actually
+        consumed gets read, so filling the budget from the first query means the
+        later ones are never streamed — the old version collected 3 x limit docs
+        and then threw away all but `limit` of them."""
+        for field, value in (
+            ("index_status", "pending"),
+            ("index_status", "indexing"),
+            ("overlay_status", "retiring"),
+        ):
+            yield from (
+                db.collection_group(FILES_SUBCOLLECTION)
+                .where(field, "==", value)
+                .limit(limit)
+                .stream()
+            )
+
+    # Files cluster into a handful of batches, so read each batch doc once per sweep
+    # rather than once per file.
+    batch_docs: dict[str, dict[str, Any]] = {}
+
+    def _batch(batch_id: str) -> dict[str, Any]:
+        if batch_id not in batch_docs:
+            batch_docs[batch_id] = db.collection(BATCHES_COLLECTION).document(batch_id).get().to_dict() or {}
+        return batch_docs[batch_id]
+
     processed = 0
-    for doc in docs[:limit]:
+    for doc in islice(_stuck_docs(), limit):
         data = doc.to_dict() or {}
         batch_id = str(data.get("batch_id") or ""); file_id = doc.id
         lecturer_id = str(data.get("lecturer_id") or "")
@@ -335,7 +366,7 @@ def recover_batch_files(limit: int = 20) -> int:
             else:
                 if str(data.get("overlay_status") or "missing") == "missing":
                     build_pending_overlay(file_id, batch_id, lecturer_id, str(data.get("file_name") or ""), str(data.get("file_title") or ""), str(data.get("content_type") or ""), str(data.get("gcs_path") or ""), download_bytes(str(data.get("gcs_path") or "")))
-                batch = db.collection(BATCHES_COLLECTION).document(batch_id).get().to_dict() or {}
+                batch = _batch(batch_id)
                 enqueue_index_batch_file(file_id, batch_id, str(data.get("gcs_path") or ""), lecturer_id, str(data.get("file_title") or ""), str(batch.get("course_name") or ""), str(batch.get("batch_name") or ""))
             processed += 1
         except Exception as exc:

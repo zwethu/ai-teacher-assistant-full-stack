@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Check,
-  Loader2,
   MessageCircle,
   MoreHorizontal,
   Pencil,
@@ -12,10 +11,11 @@ import {
 import { invalidateSessionsCache, useAllSessions, type SessionItem } from '../hooks/useAllSessions'
 import { deleteChat, updateChatTitle } from '../services/chatService'
 import { formatDateTime } from '../utils/formatDate'
+import { Spinner } from '../design-system'
 
 export default function ChatHistory() {
   const navigate = useNavigate()
-  const { sessions, loading, refresh } = useAllSessions({ includePreviews: true })
+  const { sessions, loading, refresh } = useAllSessions()
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
@@ -99,7 +99,7 @@ export default function ChatHistory() {
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
         {loading ? (
           <div className="flex flex-col items-center justify-center py-20 gap-3">
-            <Loader2 className="w-8 h-8 text-emerald-600 animate-spin" />
+            <Spinner size={32} />
             <p className="text-sm text-slate-500">Loading sessions…</p>
           </div>
         ) : sessions.length === 0 ? (
@@ -122,7 +122,7 @@ export default function ChatHistory() {
                 <ul className="divide-y divide-slate-50">
                   {group.chats.map((chat) => (
                     <li key={chat.chat_id} className="group relative">
-                      <div className="w-full px-6 py-4 hover:bg-emerald-50/60 transition-colors">
+                      <div className="w-full px-6 py-4 hover:bg-violet-50/60 transition-colors">
                         <div className="flex items-start justify-between gap-4">
                           <div
                             className="min-w-0 flex-1 cursor-pointer"
@@ -142,7 +142,7 @@ export default function ChatHistory() {
                                   if (e.key === 'Enter') void commitRename(chat)
                                   if (e.key === 'Escape') cancelRename()
                                 }}
-                                className="w-full bg-transparent text-sm font-medium text-slate-900 outline-none border-b border-emerald-400"
+                                className="w-full bg-transparent text-sm font-medium text-slate-900 outline-none border-b border-violet-400"
                                 onClick={(e) => e.stopPropagation()}
                               />
                             ) : (

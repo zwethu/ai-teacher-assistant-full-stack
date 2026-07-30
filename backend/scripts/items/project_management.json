@@ -1,0 +1,36 @@
+[
+  { "id": "1",  "term": "Project",                        "definition": "A temporary effort to create a unique product or result" },
+  { "id": "2",  "term": "Project Management",             "definition": "Using skills and tools to meet objectives within constraints" },
+  { "id": "3",  "term": "Project Manager",                "definition": "The person who plans, executes and closes a project" },
+  { "id": "4",  "term": "Methodology",                    "definition": "A system of practices and rules that guides execution" },
+  { "id": "5",  "term": "Stakeholders",                   "definition": "Anyone with a vested interest in the project's success" },
+  { "id": "6",  "term": "Deliverables",                   "definition": "The outputs produced during a project" },
+
+  { "id": "7",  "term": "Project Charter",                "definition": "The document that defines a project's key details" },
+  { "id": "8",  "term": "Business Case",                  "definition": "The reason for initiating a project" },
+  { "id": "9",  "term": "SMART Goals",                    "definition": "Specific, measurable, attainable, relevant, time-bound" },
+  { "id": "10", "term": "Scope",                          "definition": "The boundaries of what a project includes or excludes" },
+  { "id": "11", "term": "Constraint",                     "definition": "A limiting factor on scope, schedule, cost or resources" },
+  { "id": "12", "term": "Kickoff Meeting",                "definition": "The opening meeting that aligns the team on objectives" },
+
+  { "id": "13", "term": "Work Breakdown Structure (WBS)", "definition": "Breaking total scope into smaller, manageable components" },
+  { "id": "14", "term": "Milestone",                      "definition": "A point in the schedule marking a major deliverable" },
+  { "id": "15", "term": "Gantt Chart",                    "definition": "A bar chart showing tasks, owners and due dates" },
+  { "id": "16", "term": "Critical Path Method (CPM)",     "definition": "The longest chain of dependent tasks, setting the shortest duration" },
+  { "id": "17", "term": "Lead",                           "definition": "Time a task may start BEFORE the previous one finishes" },
+  { "id": "18", "term": "Lag",                            "definition": "Time a task must wait AFTER the previous one finishes" },
+
+  { "id": "19", "term": "Budget Baseline",                "definition": "The approved budget used to measure cost performance" },
+  { "id": "20", "term": "Contingency Reserves",           "definition": "Funds set aside for unforeseen project risks" },
+  { "id": "21", "term": "Risk",                           "definition": "A potential issue that may or may not happen" },
+  { "id": "22", "term": "Positive Risk",                  "definition": "An opportunity that could help meet project objectives" },
+  { "id": "23", "term": "Risk Register",                  "definition": "A document tracking risks and their mitigation plans" },
+  { "id": "24", "term": "Issue",                          "definition": "A current problem needing immediate resolution" },
+
+  { "id": "25", "term": "Change Request",                 "definition": "A formal proposal to alter scope or deliverables" },
+  { "id": "26", "term": "Root Cause Analysis (RCA)",      "definition": "Identifying the fundamental reason for a problem" },
+  { "id": "27", "term": "Resource Leveling",              "definition": "Adjusting timelines to prevent resource over-allocation" },
+  { "id": "28", "term": "Timeboxing",                     "definition": "Fixing a time limit on a task to improve focus" },
+  { "id": "29", "term": "Project Status Report",          "definition": "A summary of progress, challenges and next steps" },
+  { "id": "30", "term": "Post-Mortem Meeting",            "definition": "A review after completion of successes and failures" }
+]

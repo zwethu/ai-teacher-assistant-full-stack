@@ -1,6 +1,7 @@
 import { useState, type RefObject } from 'react'
 import type { Chat } from '../../../entity/Chat'
-import { Check, Loader2, MessageSquarePlus, Pencil, Trash2, X } from 'lucide-react'
+import { Check, MessageSquarePlus, Pencil, Trash2, X } from 'lucide-react'
+import { Spinner, Button } from '../../../design-system'
 
 type Props = {
   sidebarOpen: boolean
@@ -44,20 +45,16 @@ export function ChatSidebar({
       } flex flex-col backdrop-blur-xl bg-white/20`}
     >
       <div className="p-3 border-b border-white/40 flex-shrink-0">
-        <button
-          type="button"
-          onClick={onNewChat}
-          className="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-sm"
-        >
+        <Button type="button" onClick={onNewChat} block>
           <MessageSquarePlus className="w-4 h-4" />
           New Chat
-        </button>
+        </Button>
       </div>
 
       <div className="flex-1 overflow-y-auto py-1">
         {chatsLoading ? (
           <div className="flex justify-center py-8">
-            <Loader2 className="w-5 h-5 text-emerald-600 animate-spin" />
+            <Spinner size={20} />
           </div>
         ) : chats.length === 0 ? (
           <p className="text-xs text-slate-400 text-center py-8 px-3">No chats yet. Start a new one.</p>
@@ -85,7 +82,7 @@ export function ChatSidebar({
                     if (e.key === 'Enter') void onCommitRename()
                     if (e.key === 'Escape') onCancelRename()
                   }}
-                  className="flex-1 min-w-0 bg-transparent text-sm outline-none border-b border-emerald-400"
+                  className="flex-1 min-w-0 bg-transparent text-sm outline-none border-b border-violet-400"
                   onClick={(e) => e.stopPropagation()}
                 />
               ) : (

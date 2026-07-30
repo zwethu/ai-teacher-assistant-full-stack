@@ -21,9 +21,26 @@ GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/gmail.compose",
     "https://www.googleapis.com/auth/gmail.send",
 
-    # Calendar: read events + create/update schedules
-    "https://www.googleapis.com/auth/calendar.events",
+    # No calendar.events: scheduling is not implemented. calendar_service.py is
+    # a placeholder nothing imports, so requesting the scope asked lecturers to
+    # grant calendar access the app never used. Re-add it with the feature.
 ]
+
+# The authorization request uses include_granted_scopes=true (incremental
+# authorization), so Google returns every scope the lecturer has ever granted
+# this client — not just the ones we asked for this time. oauthlib treats any
+# difference between requested and returned scopes as an error and raises out
+# of flow.fetch_token(), which the callback catches and turns into a redirect
+# back to /login, i.e. sign-in silently fails.
+#
+# That is exactly what happens to anyone who granted calendar.events before it
+# was dropped from GOOGLE_SCOPES: their grant still carries it, ours no longer
+# asks for it, and the mismatch breaks the exchange. Relaxing the check is the
+# documented way to use incremental authorization — the scope set legitimately
+# differs by design, and the scopes we actually rely on are verified when each
+# API client is built (see google_workspace/credentials.py).
+os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
+
 
 def _allow_local_http_oauth(redirect_uri: str) -> None:
     if redirect_uri.startswith("http://127.0.0.1") or redirect_uri.startswith(

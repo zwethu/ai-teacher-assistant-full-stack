@@ -1,15 +1,36 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import type { ChangeEvent, ClipboardEvent, KeyboardEvent } from 'react'
 import type { ChatMessage } from '../../../entity/Chat'
-import { BookOpen, Check, FileQuestion, FileText, FlaskConical, Gamepad2, Globe, GraduationCap, History, Image as ImageIcon, Loader2, Mail, Paperclip, Plus, Send, X } from 'lucide-react'
+import { CornerUpLeft, Globe, Send, Square, X } from 'lucide-react'
 import { MessageRow, ThinkingIndicator } from './MessageRow'
 import { type ConnectorsState } from './ConnectorToggles'
 import type { RunUiState } from '../runTypes'
 import type { PendingChatAttachment } from '../hooks/useChatPage'
-import type { ChatAttachmentListItem, ChatAttachmentSnapshot } from '../../../entity/Chat'
+import type { ChatAttachmentListItem } from '../../../entity/Chat'
 import type { UpdatePendingEmailResult } from '../../../services/chatService'
+import { Spinner, IconButton } from '../../../design-system'
+import type { PreviewableAttachment } from './AttachmentPreview'
+import { AttachmentCard, AttachmentViewer, attachmentStatusLabel } from './AttachmentPreview'
+import type { GenerateMode } from './ComposerSurface'
+import {
+  COMPOSER_TEXTAREA_CLASS,
+  ComposerAddMenu,
+  ComposerCollapse,
+  ComposerControls,
+  ComposerHint,
+  ComposerModeChip,
+  ComposerSpacer,
+  ComposerSurface,
+  ComposerTint,
+  WebSearchToggle,
+  modeSpec,
+  useComposerPresence,
+  useExitDelay,
+} from './ComposerSurface'
 
-export type GenerateMode = 'lesson_plan' | 'lab' | 'assessment' | 'course_blueprint' | 'email' | 'game'
+// Defined with the mode table it drives; re-exported here so the many existing
+// importers of `GenerateMode` from this module keep working.
+export type { GenerateMode } from './ComposerSurface'
 
 type Props = {
   input: string
@@ -21,6 +42,9 @@ type Props = {
   onInputKeyDown: (e: KeyboardEvent<HTMLTextAreaElement>) => void
   onTextareaInput: () => void
   onSend: () => void
+  /** Stop the streaming run. Absent when there is nothing to stop. */
+  onStop?: () => void
+  stopping?: boolean
   connectors: ConnectorsState
   onConnectorsChange: (key: keyof ConnectorsState, value: boolean) => void
   activeGenerateMode: GenerateMode | null
@@ -34,9 +58,20 @@ type Props = {
   onRemoveAttachment: (attachmentId: string) => void
   onRemoveReferenced: (attachmentId: string) => void
   onPaste: (e: ClipboardEvent<HTMLTextAreaElement>) => void
+  /** Passage quoted from an earlier response, and how to drop it. */
+  quotedReply?: string
+  onClearQuotedReply?: () => void
   batchId?: string
   chatId?: string
   onOpenFilesPanel?: () => void
+}
+
+/** One attachment tile in the composer strip, whatever it was attached by. */
+type ComposerTile = {
+  key: string
+  attachment: PreviewableAttachment
+  status: string
+  remove: () => void
 }
 
 export function ChatInput({
@@ -49,6 +84,8 @@ export function ChatInput({
   onInputKeyDown,
   onTextareaInput,
   onSend,
+  onStop,
+  stopping = false,
   connectors,
   onConnectorsChange,
   activeGenerateMode,
@@ -62,11 +99,14 @@ export function ChatInput({
   onRemoveAttachment,
   onRemoveReferenced,
   onPaste,
+  quotedReply = '',
+  onClearQuotedReply,
   batchId,
   chatId,
   onOpenFilesPanel,
 }: Props) {
   const [menuOpen, setMenuOpen] = useState(false)
+  const [previewAttachment, setPreviewAttachment] = useState<PreviewableAttachment | null>(null)
   const attachmentInputRef = useRef<HTMLInputElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
 
@@ -95,153 +135,146 @@ export function ChatInput({
     onOpenFilesPanel?.()
   }
 
-  function toggleWebSearch() {
-    onConnectorsChange('web_search', !connectors.web_search)
-  }
-
   const canUsePreviousAttachments = Boolean(batchId && chatId && onOpenFilesPanel)
   const attachDisabled = disabled || sending || attachmentsUploading || pendingAttachments.length >= 5
 
-  const modeLabel = activeGenerateMode === 'lab'
-    ? 'Lab Preview'
-    : activeGenerateMode === 'assessment'
-      ? 'Assessment Preview'
-      : activeGenerateMode === 'course_blueprint'
-        ? 'Course Plan'
-      : activeGenerateMode === 'email'
-        ? 'Email'
-      : activeGenerateMode === 'game'
-        ? 'Study Game'
-      : 'Lesson Plan Preview'
-  const placeholder =
-    activeGenerateMode === 'lesson_plan'
-      ? 'Describe the lesson plan preview you want, e.g. Week 1 intro to Power BI...'
-      : activeGenerateMode === 'lab'
-        ? 'Describe the lab preview you want, e.g. Week 3 Firebase guestbook lab...'
-        : activeGenerateMode === 'assessment'
-          ? 'Describe the assessment preview you want, e.g. Week 3 mixed quiz, 10 questions...'
-        : activeGenerateMode === 'course_blueprint'
-          ? 'Describe the course plan you want, e.g. a 12-week plan focused on applied data skills...'
-        : activeGenerateMode === 'email'
-          ? 'Describe the email you want, e.g. remind students about the Friday quiz deadline...'
-        : activeGenerateMode === 'game'
-          ? 'Attach a PDF, then describe the game, e.g. a matching game from these lecture notes...'
-        : 'Message your teaching assistant...'
-
-  const attachmentStatus = (attachment: PendingChatAttachment) => {
-    if (attachment.status === 'too_large') return 'too large — add to Course Space'
-    if (attachment.status === 'processing') return 'processing…'
-    if (attachment.status === 'failed') return 'processing failed'
-    if (attachment.attachment_kind === 'image') {
-      return `chat-only · ${attachment.vision_status === 'ready' ? 'vision ready' : 'ready'}`
-    }
-    return 'ready'
-  }
+  const placeholder = modeSpec(activeGenerateMode)?.placeholder ?? 'Message your teaching assistant...'
 
   const hasBlockingAttachment = pendingAttachments.some(
     (attachment) => attachment.status === 'too_large' || attachment.status === 'failed',
   )
 
+  // Re-referenced earlier files and newly attached ones are one strip: from
+  // the lecturer's side they are the same act, and they animate in and out as
+  // one row rather than as two lists that happen to sit next to each other.
+  const tiles: ComposerTile[] = [
+    ...referencedAttachments.map((attachment) => ({
+      key: `ref-${attachment.attachment_id}`,
+      attachment,
+      status: 'earlier attachment',
+      remove: () => onRemoveReferenced(attachment.attachment_id),
+    })),
+    ...pendingAttachments.map((attachment) => ({
+      key: attachment.attachment_id,
+      attachment,
+      status: attachmentStatusLabel(attachment),
+      remove: () => onRemoveAttachment(attachment.attachment_id),
+    })),
+  ]
+  // Departed tiles stay one exit animation longer than the props say, so
+  // removing one — or sending, which clears the lot — plays the arrival
+  // backwards instead of blinking out.
+  const tileEntries = useComposerPresence(tiles, (tile) => tile.key)
+  // Keyed on the entries, not the props, so removing the last tile reads as two
+  // beats — the tile leaves, then the box closes behind it. Keying on `tiles`
+  // collapses the strip while the tile is still fading, which squashes it.
+  const hasTiles = tileEntries.length > 0
+  const webSearchStripMounted = useExitDelay(connectors.web_search)
+  const quoteMounted = useExitDelay(Boolean(quotedReply))
+  // The warnings sit above the composer and appear and vanish on exactly the
+  // same gestures, so they get the same easing — otherwise attaching a file
+  // still jumps the layout, just one line higher up.
+  const processingNotice = pendingAttachments.some((attachment) => attachment.status === 'processing')
+  const noticesMounted = useExitDelay(processingNotice || hasBlockingAttachment || attachmentErrors.length > 0)
+
   return (
+    /* No wash across the footer. A full-width `from-white/90` gradient plus
+       `backdrop-blur-sm` sat behind the composer and flattened it: `.maia-glass`
+       is white/55 over blur(24px), so laying it on an already-white, already-
+       blurred band left nothing for the glass to refract and it read as a plain
+       white slab with a hard edge across the transcript. Transparent here means
+       the composer is the only glass, and the conversation blurs through it. */
     <footer
-      className={`relative z-10 px-4 pb-5 pt-2 bg-gradient-to-t from-white/60 via-white/30 to-transparent backdrop-blur-sm flex-shrink-0 transition-opacity ${
+      className={`pointer-events-none relative z-10 px-4 pb-5 pt-6 flex-shrink-0 transition-opacity ${
         dimmed ? 'opacity-40 pointer-events-none' : ''
       }`}
     >
-      <div className="max-w-3xl mx-auto">
-        {(activeGenerateMode || connectors.web_search) && (
-          <div className="mb-2 flex flex-wrap items-center gap-2">
-            {activeGenerateMode && (
-              <span className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50/90 px-3 py-1.5 text-sm font-medium text-emerald-800 shadow-sm">
-                {activeGenerateMode === 'lab' ? (
-                  <FlaskConical className="h-4 w-4" />
-                ) : activeGenerateMode === 'assessment' ? (
-                  <FileQuestion className="h-4 w-4" />
-                ) : activeGenerateMode === 'course_blueprint' ? (
-                  <GraduationCap className="h-4 w-4" />
-                ) : activeGenerateMode === 'email' ? (
-                  <Mail className="h-4 w-4" />
-                ) : activeGenerateMode === 'game' ? (
-                  <Gamepad2 className="h-4 w-4" />
-                ) : (
-                  <BookOpen className="h-4 w-4" />
-                )}
-                <span>{modeLabel}</span>
-                <button
-                  type="button"
-                  onClick={onClearGenerateMode}
-                  className="inline-flex h-5 w-5 items-center justify-center rounded-full text-emerald-700 hover:bg-emerald-100"
-                  aria-label={`Clear ${modeLabel}`}
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </span>
-            )}
-            {connectors.web_search && (
-              <span className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50/90 px-3 py-1.5 text-sm font-medium text-sky-800 shadow-sm">
-                <Globe className="h-4 w-4" />
-                <span>Web search on</span>
+      <div className={`${dimmed ? 'pointer-events-none' : 'pointer-events-auto'} relative max-w-3xl mx-auto`}>
+        <ComposerCollapse
+          open={processingNotice || hasBlockingAttachment || attachmentErrors.length > 0}
+          region="notices"
+          className="pb-1"
+        >
+          {noticesMounted && (
+            <>
+              {attachmentErrors.map((error) => <p key={error} className="text-xs text-red-600">{error}</p>)}
+              {processingNotice && (
+                <p className="text-xs text-slate-500">Some attachments are still processing — you can send now, and the assistant may note a file isn't ready yet.</p>
+              )}
+              {hasBlockingAttachment && (
+                <p className="text-xs text-amber-600">Remove the flagged attachment to send. Large files belong in Course Space, where they’re indexed for retrieval.</p>
+              )}
+            </>
+          )}
+        </ComposerCollapse>
+        <ComposerTint active={connectors.web_search}>
+          {/* The strip's own height is what the tint shell grows around, so it
+              eases open with it rather than appearing inside a box that has
+              already finished moving. */}
+          <ComposerCollapse open={connectors.web_search} region="web-search" className="px-3.5 py-1.5">
+            {webSearchStripMounted && (
+              <div className="flex items-center gap-2 text-xs font-medium text-violet-800">
+                <Globe className="h-3.5 w-3.5 flex-shrink-0" />
+                <span className="min-w-0 flex-1 truncate">
+                  Web search is on — MILA will look things up for this message.
+                </span>
                 <button
                   type="button"
                   onClick={() => onConnectorsChange('web_search', false)}
-                  className="inline-flex h-5 w-5 items-center justify-center rounded-full text-sky-700 hover:bg-sky-100"
+                  className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-violet-700 hover:bg-violet-100"
                   aria-label="Turn off web search"
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
-              </span>
+              </div>
             )}
-          </div>
-        )}
-        {pendingAttachments.length > 0 && (
-          <div className="mb-2 flex flex-wrap gap-2">
-            {pendingAttachments.map((attachment) => (
-              <div key={attachment.attachment_id} className="flex max-w-xs items-center gap-2 rounded-xl border border-slate-200 bg-white/90 p-2 shadow-sm">
-                {attachment.attachment_kind === 'image' && attachment.previewUrl ? (
-                  <img src={attachment.previewUrl} alt="" className="h-10 w-10 rounded-lg object-cover" />
-                ) : attachment.attachment_kind === 'image' ? (
-                  <ImageIcon className="h-5 w-5 text-sky-600" />
-                ) : (
-                  <FileText className="h-5 w-5 text-emerald-600" />
-                )}
-                <div className="min-w-0">
-                  <p className="truncate text-xs font-medium text-slate-700">{attachment.file_name}</p>
-                  <p className="text-[11px] text-slate-400" title={attachment.attachment_kind === 'image' && attachment.vision_status !== 'ready' ? 'Image analysis is unavailable; the assistant will not guess its contents.' : undefined}>
-                    {(attachment.size_bytes / 1024 / 1024).toFixed(1)} MB
-                    {' · '}{attachmentStatus(attachment)}
-                  </p>
+          </ComposerCollapse>
+        <ComposerSurface>
+          {/* Attachments live inside the composer, so the box grows to hold
+              them instead of them floating above it — and the growth is the
+              strip's own, eased, rather than the composer jumping a tile's
+              worth of height in one frame. The padding sits on the collapse's
+              clipper because that is what clips: the tiles' remove buttons
+              hang outside their tile, and this is the room they need. */}
+          {/* Sits above the tiles and the textarea, inside the box, so the
+              composer grows to hold it exactly as it does for an attachment. */}
+          <ComposerCollapse open={Boolean(quotedReply)} region="quote" className="px-1.5 pt-2">
+            {quoteMounted && (
+              <div className="flex items-start gap-2.5 rounded-xl border border-white/80 bg-white/65 px-2.5 py-2 shadow-[0_5px_14px_rgba(63,47,107,0.08)]">
+                <span className="mt-0.5 inline-flex h-5 w-5 flex-none items-center justify-center rounded-md bg-violet-100 text-violet-700">
+                  <CornerUpLeft className="h-3 w-3" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-violet-700">Replying to selection</p>
+                  <p className="mt-0.5 text-[13px] leading-5 text-slate-700 line-clamp-2">{quotedReply}</p>
                 </div>
-                <button type="button" onClick={() => onRemoveAttachment(attachment.attachment_id)} className="rounded p-1 text-slate-400 hover:bg-slate-100" aria-label={`Remove ${attachment.file_name}`}>
+                <button
+                  type="button"
+                  onClick={onClearQuotedReply}
+                  className="mt-0.5 inline-flex h-6 w-6 flex-none items-center justify-center rounded-full text-violet-700 transition-colors hover:bg-violet-100 hover:text-violet-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
+                  aria-label="Remove quoted text"
+                >
                   <X className="h-3.5 w-3.5" />
                 </button>
               </div>
-            ))}
-          </div>
-        )}
-        {referencedAttachments.length > 0 && (
-          <div className="mb-2 flex flex-wrap gap-2">
-            {referencedAttachments.map((attachment) => (
-              <div key={attachment.attachment_id} className="flex max-w-xs items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50/80 p-2 shadow-sm">
-                {attachment.attachment_kind === 'image' ? <ImageIcon className="h-5 w-5 flex-shrink-0 text-sky-600" /> : <FileText className="h-5 w-5 flex-shrink-0 text-emerald-600" />}
-                <div className="min-w-0">
-                  <p className="truncate text-xs font-medium text-slate-700">{attachment.file_title || attachment.file_name}</p>
-                  <p className="text-[11px] text-slate-400">Earlier attachment</p>
+            )}
+          </ComposerCollapse>
+          <ComposerCollapse open={hasTiles} region="attachments" className="px-1.5 pb-1 pt-2">
+            <div className="flex flex-wrap gap-2">
+              {tileEntries.map(({ key, item, leaving }) => (
+                <div key={key} className={leaving ? 'mila-tile-out' : 'mila-tile-in'}>
+                  <AttachmentCard
+                    batchId={batchId}
+                    chatId={chatId}
+                    attachment={item.attachment}
+                    status={item.status}
+                    onOpen={() => setPreviewAttachment(item.attachment)}
+                    onRemove={item.remove}
+                  />
                 </div>
-                <button type="button" onClick={() => onRemoveReferenced(attachment.attachment_id)} className="rounded p-1 text-slate-400 hover:bg-slate-100" aria-label={`Remove ${attachment.file_title || attachment.file_name}`}>
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-        {attachmentErrors.map((error) => <p key={error} className="mb-1 text-xs text-red-600">{error}</p>)}
-        {pendingAttachments.some((attachment) => attachment.status === 'processing') && (
-          <p className="mb-1 text-xs text-slate-500">Some attachments are still processing — you can send now, and the assistant may note a file isn't ready yet.</p>
-        )}
-        {hasBlockingAttachment && (
-          <p className="mb-1 text-xs text-amber-600">Remove the flagged attachment to send. Large files belong in Course Space, where they’re indexed for retrieval.</p>
-        )}
-        <div className="flex items-end gap-2 p-2 rounded-[28px] bg-white/55 border border-white/60 shadow-[0_8px_32px_rgba(15,23,42,0.08)]">
+              ))}
+            </div>
+          </ComposerCollapse>
           <input
             ref={attachmentInputRef}
             type="file"
@@ -251,120 +284,6 @@ export function ChatInput({
             disabled={disabled || sending || attachmentsUploading}
             className="sr-only"
           />
-          <div className="relative" ref={menuRef}>
-            <button
-              type="button"
-              onClick={() => setMenuOpen((value) => !value)}
-              disabled={disabled || sending}
-              className="mb-0.5 ml-1 inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-slate-500 hover:bg-white/80 disabled:cursor-not-allowed disabled:opacity-40"
-              aria-label="Add files, generate, or toggle web search"
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
-            >
-              {attachmentsUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-5 w-5" />}
-            </button>
-            {menuOpen && (
-              <div
-                role="menu"
-                className="absolute bottom-full left-0 z-30 mb-2 w-60 overflow-hidden rounded-2xl border border-white/60 bg-white/95 p-1 shadow-xl backdrop-blur-xl"
-              >
-                <button
-                  role="menuitem"
-                  type="button"
-                  onClick={openFilePicker}
-                  disabled={attachDisabled}
-                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm text-slate-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  <Paperclip className="h-4 w-4 text-slate-500" />
-                  Add files or photos
-                </button>
-                {canUsePreviousAttachments && (
-                  <button
-                    role="menuitem"
-                    type="button"
-                    onClick={openPreviousAttachments}
-                    className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm text-slate-700 hover:bg-emerald-50"
-                  >
-                    <History className="h-4 w-4 text-slate-500" />
-                    Previous attachments
-                  </button>
-                )}
-                <div className="my-1 border-t border-slate-100" />
-                <button
-                  role="menuitem"
-                  type="button"
-                  onClick={() => selectGenerateMode('course_blueprint')}
-                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm text-slate-700 hover:bg-emerald-50"
-                >
-                  <GraduationCap className="h-4 w-4 text-emerald-600" />
-                  Course Plan
-                </button>
-                <button
-                  role="menuitem"
-                  type="button"
-                  onClick={() => selectGenerateMode('lesson_plan')}
-                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm text-slate-700 hover:bg-emerald-50"
-                >
-                  <BookOpen className="h-4 w-4 text-emerald-600" />
-                  Lesson Plan Preview
-                </button>
-                <button
-                  role="menuitem"
-                  type="button"
-                  onClick={() => selectGenerateMode('lab')}
-                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm text-slate-700 hover:bg-emerald-50"
-                >
-                  <FlaskConical className="h-4 w-4 text-emerald-600" />
-                  Lab Preview
-                </button>
-                <button
-                  role="menuitem"
-                  type="button"
-                  onClick={() => selectGenerateMode('assessment')}
-                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm text-slate-700 hover:bg-emerald-50"
-                >
-                  <FileQuestion className="h-4 w-4 text-emerald-600" />
-                  Assessment Preview
-                </button>
-                <button
-                  role="menuitem"
-                  type="button"
-                  onClick={() => selectGenerateMode('game')}
-                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm text-slate-700 hover:bg-emerald-50"
-                >
-                  <Gamepad2 className="h-4 w-4 text-emerald-600" />
-                  Study Game
-                </button>
-                <div className="my-1 border-t border-slate-100" />
-                <button
-                  role="menuitem"
-                  type="button"
-                  onClick={() => selectGenerateMode('email')}
-                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm text-slate-700 hover:bg-emerald-50"
-                >
-                  <Mail className="h-4 w-4 text-emerald-600" />
-                  Send Email
-                </button>
-                {activeGenerateMode !== 'email' && (
-                  <>
-                    <div className="my-1 border-t border-slate-100" />
-                    <button
-                      role="menuitemcheckbox"
-                      aria-checked={connectors.web_search}
-                      type="button"
-                      onClick={toggleWebSearch}
-                      disabled={disabled || sending}
-                      className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm text-slate-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      <Globe className={`h-4 w-4 ${connectors.web_search ? 'text-sky-600' : 'text-slate-500'}`} />
-                      <span className="flex-1">Web search</span>
-                      {connectors.web_search && <Check className="h-4 w-4 text-sky-600" />}
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
           <textarea
             ref={textareaRef}
             rows={1}
@@ -375,21 +294,82 @@ export function ChatInput({
             onPaste={onPaste}
             placeholder={placeholder}
             disabled={disabled || sending}
-            className="flex-1 resize-none bg-transparent px-4 py-3 text-[15px] text-slate-800 placeholder:text-slate-400 focus:outline-none disabled:cursor-not-allowed max-h-40 overflow-y-auto leading-6"
+            className={COMPOSER_TEXTAREA_CLASS}
           />
-          <button
-            type="button"
-            onClick={onSend}
-            disabled={(!input.trim() && pendingAttachments.length === 0 && referencedAttachments.length === 0) || disabled || sending || attachmentsUploading || hasBlockingAttachment}
-            className="flex-shrink-0 inline-flex items-center justify-center w-10 h-10 mb-0.5 mr-1 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-600/25 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-            aria-label="Send message"
-          >
-            <Send className="w-4 h-4" />
-          </button>
-        </div>
-        <p className="mt-2.5 text-center text-xs text-slate-400">
-          Enter to send · Shift+Enter for new line
-        </p>
+
+          {/* Control row — mirrors the reference: add, toggles, then send. */}
+          <ComposerControls>
+          <ComposerAddMenu
+            menuRef={menuRef}
+            open={menuOpen}
+            onOpenChange={setMenuOpen}
+            onAttach={openFilePicker}
+            attachDisabled={attachDisabled}
+            uploading={attachmentsUploading}
+            disabled={disabled || sending}
+            onOpenPreviousAttachments={canUsePreviousAttachments ? openPreviousAttachments : undefined}
+            onSelectMode={selectGenerateMode}
+          />
+            {/* A real left-right switch — the design system's Switch, whose
+                .prompt.md names "Web Search" as its example connector toggle.
+                The outer <label htmlFor> lets the icon and text toggle it too;
+                an input may have more than one label. */}
+            <WebSearchToggle
+              id="web-search-toggle"
+              checked={connectors.web_search}
+              disabled={disabled || sending}
+              onChange={(value) => onConnectorsChange('web_search', value)}
+            />
+
+            {/* Unguarded: the chip owns its own presence so it can animate out
+                when the mode is cleared or the run consumes it. */}
+            <ComposerModeChip mode={activeGenerateMode} onClear={onClearGenerateMode} />
+
+            <ComposerSpacer />
+
+            {/* While a run streams, the same slot becomes Stop — one control,
+                so the primary action is always where the user last looked. */}
+            {sending && onStop ? (
+              <IconButton
+                variant="solid"
+                size="lg"
+                label="Stop generating"
+                onClick={onStop}
+                disabled={stopping}
+              >
+                {stopping ? <Spinner size={16} tone="inverse" /> : <Square className="h-3.5 w-3.5 fill-current" />}
+              </IconButton>
+            ) : (
+              <IconButton
+                variant="solid"
+                size="lg"
+                label="Send message"
+                onClick={onSend}
+                disabled={
+                  (!input.trim() &&
+                    pendingAttachments.length === 0 &&
+                    referencedAttachments.length === 0) ||
+                  disabled ||
+                  sending ||
+                  attachmentsUploading ||
+                  hasBlockingAttachment
+                }
+              >
+                <Send className="h-4 w-4" />
+              </IconButton>
+            )}
+          </ComposerControls>
+        </ComposerSurface>
+        </ComposerTint>
+        <ComposerHint>Enter to send · Shift+Enter for new line</ComposerHint>
+        {previewAttachment && (
+          <AttachmentViewer
+            batchId={batchId}
+            chatId={chatId}
+            attachment={previewAttachment}
+            onClose={() => setPreviewAttachment(null)}
+          />
+        )}
       </div>
     </footer>
   )
@@ -397,32 +377,38 @@ export function ChatInput({
 
 type MessagesPanelProps = {
   batchId?: string
-  courseName?: string
   messages: ChatMessage[]
   messagesLoading: boolean
   showWelcome: boolean
   sending: boolean
   runStates: Record<string, RunUiState>
   messagesEndRef: RefObject<HTMLDivElement | null>
+  /** Height of the floating composer, reserved as padding under the transcript. */
+  bottomInset?: number
   welcomeContent: React.ReactNode
   onApproveOutline: (message: ChatMessage) => void
-  onAskAboutAttachment: (attachment: ChatAttachmentSnapshot) => void
   onPendingEmailEdited: (runId: string, result: UpdatePendingEmailResult) => void
+  onRetryMessage?: (message: ChatMessage) => void
+  /** Quote a selected passage of a response into the composer. */
+  onQuoteReply?: (excerpt: string) => void
+  retryingMessageId?: string | null
 }
 
 export function ChatMessagesPanel({
   batchId,
-  courseName,
   messages,
   messagesLoading,
   showWelcome,
   sending,
   runStates,
   messagesEndRef,
+  bottomInset,
   welcomeContent,
   onApproveOutline,
-  onAskAboutAttachment,
   onPendingEmailEdited,
+  onRetryMessage,
+  onQuoteReply,
+  retryingMessageId,
 }: MessagesPanelProps) {
   const safeMessages = messages.filter(Boolean)
   const completedOutlineRunIds = new Set(
@@ -453,11 +439,11 @@ export function ChatMessagesPanel({
   )
 
   return (
-    <main className="flex-1 overflow-y-auto">
+    <main className="flex-1 overflow-y-auto" style={{ paddingBottom: bottomInset }}>
       <div className="max-w-3xl mx-auto px-4 py-8 min-h-full flex flex-col">
         {messagesLoading ? (
           <div className="flex-1 flex items-center justify-center">
-            <Loader2 className="w-6 h-6 text-emerald-600 animate-spin" />
+            <Spinner size={24} />
           </div>
         ) : showWelcome ? (
           welcomeContent
@@ -473,15 +459,20 @@ export function ChatMessagesPanel({
                 approvalDisabled={sending}
                 approvalCompleted={Boolean(msg.run_id && completedOutlineRunIds.has(msg.run_id))}
                 approvalSuperseded={Boolean(msg.run_id && supersededOutlineRunIds.has(msg.run_id))}
-                courseName={courseName || ''}
-                onAskAboutAttachment={onAskAboutAttachment}
                 onPendingEmailEdited={onPendingEmailEdited}
+                onRetry={onRetryMessage}
+                onQuoteReply={onQuoteReply}
+                retrying={retryingMessageId === msg.message_id}
               />
             ))}
             {sending && !safeMessages.some((msg) => msg.pending) && <ThinkingIndicator />}
           </div>
         )}
-        <div ref={messagesEndRef} />
+        {/* scroll-margin keeps `scrollIntoView({ block: 'end' })` from parking
+            the marker under the floating composer: it stops the same distance
+            up that the padding reserves, so auto-scroll and the re-pin below
+            settle on the identical resting position. */}
+        <div ref={messagesEndRef} style={{ scrollMarginBottom: bottomInset }} />
       </div>
     </main>
   )

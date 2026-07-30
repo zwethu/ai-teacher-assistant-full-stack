@@ -22,7 +22,14 @@ dependencies = [
     "python-multipart",
     "pypdf",
     "python-docx",
+    # chat/response export: Markdown -> HTML -> PDF. Pure Python on purpose —
+    # the API image is python:3.12-slim with no apt layer, so WeasyPrint's
+    # cairo/pango system libraries are not available.
+    "markdown",
+    "xhtml2pdf",
     "python-pptx",
+    # first-page PDF thumbnails; manylinux wheels, so no apt layer needed
+    "pypdfium2",
     "pillow",
     "pillow-heif",
     "google-genai",

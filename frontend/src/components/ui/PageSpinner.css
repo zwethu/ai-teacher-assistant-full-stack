@@ -1,0 +1,117 @@
+/* Loading screen. Uses the shared game palette tokens (--g-*) from index.css. */
+
+.loader-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background:
+    var(--game-pattern) 0 0 / var(--game-pattern-size) repeat,
+    var(--g-bg);
+  font-family: 'Nunito', 'Segoe UI', sans-serif;
+}
+
+.loader-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  max-width: 340px;
+  padding: 26px 28px 24px;
+  border-radius: 30px;
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1.5px solid rgba(255, 255, 255, 0.7);
+  box-shadow: var(--g-shadow-lg);
+  text-align: center;
+  animation: loaderIn 0.4s ease;
+}
+
+.loader-lottie {
+  width: 160px;
+  height: 160px;
+  margin-bottom: 2px;
+}
+.loader-lottie > * { width: 100% !important; height: 100% !important; }
+
+.loader-label {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 900;
+  color: var(--g-ink);
+  letter-spacing: 0.2px;
+}
+
+/* Indeterminate bar: a real duration would be a lie — nothing here reports
+   progress. It travels to signal "still working", not "this much done". */
+.loader-bar {
+  position: relative;
+  width: 100%;
+  height: 8px;
+  margin-top: 10px;
+  border-radius: 6px;
+  background: var(--g-cream-200);
+  overflow: hidden;
+}
+.loader-bar::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 40%;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--g-rose-300), var(--g-rose-500), var(--g-rose-300));
+  animation: loaderSlide 1.4s ease-in-out infinite;
+}
+
+/* Three paws padding along in sequence — the "we're moving" cue. */
+.loader-paws {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 12px;
+  color: var(--g-peach-400);
+}
+.loader-paw {
+  animation: pawStep 1.2s ease-in-out infinite;
+  line-height: 0;
+}
+.loader-paw:nth-child(2) { animation-delay: 0.15s; }
+.loader-paw:nth-child(3) { animation-delay: 0.3s; }
+
+.loader-tip {
+  margin: 10px 0 0;
+  min-height: 2.4em;
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.4;
+  color: var(--g-ink-soft);
+}
+.loader-tip-text {
+  display: inline-block;
+  animation: loaderIn 0.45s ease;
+}
+
+@keyframes loaderIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes loaderSlide {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+@keyframes pawStep {
+  0%, 100% { opacity: 0.3; transform: translateY(0) scale(0.9); }
+  40%      { opacity: 1;   transform: translateY(-5px) scale(1.1); }
+}
+
+/* Motion here is decorative; the label alone carries the meaning. */
+@media (prefers-reduced-motion: reduce) {
+  .loader-card,
+  .loader-tip-text { animation: none; }
+  .loader-bar::after { animation: none; width: 100%; opacity: 0.5; }
+  .loader-paw { animation: none; opacity: 0.8; }
+}

@@ -10,7 +10,7 @@ from services.attachment_constants import (
 
 
 def test_default_ttls():
-    assert get_chat_attachment_retention_days() == 7
+    assert get_chat_attachment_retention_days() == 30
     assert get_unsent_attachment_grace_hours() == 24
 
 
@@ -129,3 +129,49 @@ def test_list_chat_attachment_object_uris_parses_and_skips_derived():
         uris = gcs.list_chat_attachment_object_uris()
     ids = sorted(entry[1][2] for entry in uris)
     assert ids == ["a1", "a3"]  # a1 primary kept once, thumbnail skipped, a2 extracted_text skipped
+
+
+# --- "Previous attachments" lists only what was actually sent ----------------
+#
+# The record is written on attach, not on send, so without a sent-ness filter a
+# file showed up under "Previous attachments" while it was still sitting in the
+# composer — and stayed there after the lecturer removed it.
+
+def _panel_db(monkeypatch, docs):
+    from services import chat_attachment_service as svc
+    db = MagicMock()
+    (db.collection.return_value.document.return_value.collection.return_value
+       .document.return_value.collection.return_value.order_by.return_value
+       .limit.return_value.stream.return_value) = docs
+    monkeypatch.setattr(svc, "get_firestore", lambda: db)
+    monkeypatch.setattr(svc, "_owned_visible_chat", lambda *a, **kw: True)
+    return svc
+
+
+def _attachment_doc(doc_id, message_id):
+    doc = MagicMock(); doc.id = doc_id
+    doc.to_dict.return_value = {
+        "lecturer_id": "lect-1", "scope": "chat", "message_id": message_id,
+        "file_name": f"{doc_id}.pdf", "attachment_kind": "document",
+        "content_type": "application/pdf", "status": "ready",
+    }
+    return doc
+
+
+def test_panel_hides_attachments_that_were_never_sent(monkeypatch):
+    svc = _panel_db(monkeypatch, [
+        _attachment_doc("sent-1", "msg-1"),
+        _attachment_doc("still-in-composer", None),
+    ])
+
+    listed = svc.list_sent_chat_attachments("b1", "c1", "lect-1")
+
+    assert [item["attachment_id"] for item in listed] == ["sent-1"]
+
+
+def test_panel_is_empty_when_nothing_has_been_sent(monkeypatch):
+    # The exact case: attach a file, change your mind, remove it. Whether or not
+    # the delete lands, it must never have appeared here.
+    svc = _panel_db(monkeypatch, [_attachment_doc("a1", None), _attachment_doc("a2", None)])
+
+    assert svc.list_sent_chat_attachments("b1", "c1", "lect-1") == []

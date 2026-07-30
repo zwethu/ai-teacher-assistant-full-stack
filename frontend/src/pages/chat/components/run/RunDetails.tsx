@@ -1,4 +1,4 @@
-import { ChevronDown, Loader2 } from 'lucide-react'
+import { ChevronDown } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { RunUiState } from '../../runTypes'
 import { normalizeRunRows } from './normalizeRunRows'
@@ -19,7 +19,7 @@ export function RunDetails({ run, isFinal }: Props) {
   const [open, setOpen] = useState(status === 'running')
 
   useEffect(() => {
-    if (isFinal || status === 'done' || status === 'failed') {
+    if (isFinal || status === 'done' || status === 'failed' || status === 'cancelled') {
       setOpen(false)
     } else if (status === 'running') {
       setOpen(true)
@@ -31,6 +31,8 @@ export function RunDetails({ run, isFinal }: Props) {
   const headerLabel =
     status === 'done'
       ? `Completed ${stepCount} steps`
+      : status === 'cancelled'
+        ? 'Request cancelled'
       : status === 'failed'
         ? `Failed after ${stepCount} steps`
         : stepCount > 0
@@ -47,21 +49,26 @@ export function RunDetails({ run, isFinal }: Props) {
   if (!hasContent) return null
 
   return (
-    <div className="space-y-2 pl-3 border-l-2 border-slate-200/70">
+    <div className="space-y-2">
+      {/* No spinner: while the run is active the label itself animates, which
+          keeps the row to a single moving element (MILA motion is "quiet"). */}
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center gap-2 text-left text-xs font-semibold text-slate-700"
+        aria-expanded={open}
+        className="group -mx-1.5 inline-flex items-center gap-2 rounded-md px-1.5 py-1 text-left text-xs font-semibold text-slate-700 transition-colors hover:bg-violet-50/70 hover:text-violet-800"
       >
+        <span className={status === 'running' ? 'mila-live-text' : undefined}>
+          {headerLabel}
+        </span>
+        {/* Hidden until hover. It still occupies its box, so revealing it
+            causes no layout shift; the row's violet tint is the other half of
+            the hover cue. Also revealed on keyboard focus. */}
         <ChevronDown
-          className={`h-3.5 w-3.5 flex-shrink-0 text-slate-500 transition-transform duration-200 ${
+          className={`h-3.5 w-3.5 flex-shrink-0 text-violet-600 opacity-0 transition-all duration-200 group-hover:opacity-100 group-focus-visible:opacity-100 ${
             open ? 'rotate-0' : '-rotate-90'
           }`}
         />
-        {status === 'running' && stepCount === 0 && (
-          <Loader2 className="h-3.5 w-3.5 flex-shrink-0 animate-spin text-slate-500" />
-        )}
-        <span>{headerLabel}</span>
       </button>
 
       <div

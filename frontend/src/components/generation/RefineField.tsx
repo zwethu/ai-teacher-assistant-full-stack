@@ -1,6 +1,7 @@
 import { useState, type KeyboardEvent } from 'react'
-import { Loader2, Send, X } from 'lucide-react'
+import { Send, X } from 'lucide-react'
 import { ACCENT, type GenAccent } from './generationTheme'
+import { Spinner } from '../../design-system'
 
 /**
  * Controlled full-width "ask for changes" box for the workflow. The trigger lives
@@ -74,7 +75,7 @@ export function RefineField({
           disabled={disabled || !text.trim()}
           className={`inline-flex items-center gap-1.5 rounded-md px-3.5 py-1.5 text-sm font-medium text-white shadow-sm disabled:opacity-50 ${theme.solid}`}
         >
-          {disabled ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          {disabled ? <Spinner tone="inverse" size={16} /> : <Send className="h-4 w-4" />}
           Send
         </button>
       </div>

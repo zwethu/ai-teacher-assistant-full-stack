@@ -29,8 +29,10 @@ Frontend reads:
 from __future__ import annotations
 
 import asyncio
+from contextlib import aclosing
 import json
 import logging
+import time
 import os
 import re
 import uuid
@@ -48,6 +50,7 @@ from services.agent_platform_sessions import get_agent_session_state
 from services.agent_artifact_context import build_agent_artifact_manifest
 from services.artifact_sync_service import preflight_sync_artifacts_for_agent_run
 from services.agent_sessions import (
+    is_agent_run_cancelled,
     claim_run_dispatch,
     create_agent_run_record,
     ensure_chat_agent_session,
@@ -98,6 +101,10 @@ from utils.rtdb_client import (
 )
 
 logger = logging.getLogger(__name__)
+
+# How often the streaming loop checks whether the lecturer pressed Stop.
+# Responsive enough to feel immediate, cheap enough to not matter.
+CANCEL_POLL_SECONDS = 1.5
 
 
 def _normalize_connectors(connectors: dict | None) -> dict[str, bool]:
@@ -253,15 +260,25 @@ async def start_chat_run(
     ]
     run_status = "running"
     if pending_ids:
-        # Deferred run: hold until /tasks/process-attachment reports all ready, or
-        # the watchdog times out at PROCESSING_TIMEOUT. UI shows "Processing your file(s)…".
-        deadline = datetime.now(timezone.utc) + timedelta(minutes=_processing_timeout_minutes())
+        # Deferred run: hold until /tasks/process-attachment reports all ready.
+        # UI shows "Processing your file(s)…".
+        timeout_minutes = _processing_timeout_minutes()
+        deadline = datetime.now(timezone.utc) + timedelta(minutes=timeout_minutes)
         mark_agent_run_awaiting_attachments(
             batch_id=batch_id, chat_id=chat_id, run_id=run_id,
             attachment_ids=pending_ids, deadline=deadline,
         )
         set_run_status(run_id, "awaiting_attachments")
         run_status = "awaiting_attachments"
+        # The deadline is known exactly here, so schedule the timeout check for this
+        # one run instead of sweeping every run's status once a minute forever. The
+        # handler no-ops if the attachments settled first, and claim_run_dispatch
+        # makes a race with the settle path safe either way.
+        enqueue(
+            QUEUE_RUNS, "/tasks/attachment-deadline",
+            {"batch_id": batch_id, "chat_id": chat_id, "run_id": run_id},
+            delay_seconds=timeout_minutes * 60,
+        )
     else:
         dispatch_agent_run(batch_id, chat_id, run_id, background_tasks=background_tasks)
 
@@ -350,27 +367,49 @@ def _refresh_and_dispatch(batch_id: str, chat_id: str, run_id: str, *, backgroun
     dispatch_agent_run(batch_id, chat_id, run_id, background_tasks=background_tasks)
 
 
+def release_run_past_deadline(batch_id: str, chat_id: str, run_id: str) -> bool:
+    """Time out one deferred run: fail whatever is still processing and dispatch it
+    degraded, rather than leaving the lecturer's message stuck forever.
+
+    Idempotent, and safe to arrive late — a run that settled normally, was cancelled,
+    or already ran is no longer ``awaiting_attachments`` and this is a no-op.
+    """
+    run = read_run_doc(batch_id=batch_id, chat_id=chat_id, run_id=run_id) or {}
+    if run.get("status") != "awaiting_attachments":
+        return False
+    deadline = _as_datetime(run.get("awaiting_deadline"))
+    if deadline and deadline > datetime.now(timezone.utc):
+        return False  # re-armed or delivered early; the later task still covers it
+    for attachment_id in (run.get("awaiting_attachment_ids") or []):
+        fail_stuck_attachment(batch_id, chat_id, str(attachment_id))
+    _refresh_and_dispatch(batch_id, chat_id, run_id)
+    return True
+
+
+def _as_datetime(value: Any) -> datetime | None:
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    return value if isinstance(value, datetime) else None
+
+
 def run_attachment_watchdog(limit: int = 50) -> int:
-    """Safety net (Cloud Scheduler): dispatch deferred runs past their deadline,
-    marking any still-processing attachment failed so the run proceeds degraded."""
-    now = datetime.now(timezone.utc)
+    """Backstop sweep for deferred runs whose per-run deadline task never arrived.
+
+    Each deferred run schedules its own timeout via /tasks/attachment-deadline, so
+    this is no longer the primary path — it only covers a dropped task, and local
+    dev, where delayed dispatch is a threading.Timer that dies with the process.
+    """
     dispatched = 0
     for run in list_runs_awaiting_attachments(limit=limit):
-        deadline = run.get("awaiting_deadline")
-        if isinstance(deadline, str):
-            try:
-                deadline = datetime.fromisoformat(deadline.replace("Z", "+00:00"))
-            except ValueError:
-                deadline = None
-        if not deadline or deadline > now:
-            continue
-        batch_id = str(run.get("batch_id") or "")
-        chat_id = str(run.get("chat_id") or "")
-        run_id = str(run.get("run_id") or "")
-        for attachment_id in (run.get("awaiting_attachment_ids") or []):
-            fail_stuck_attachment(batch_id, chat_id, str(attachment_id))
-        _refresh_and_dispatch(batch_id, chat_id, run_id)
-        dispatched += 1
+        if release_run_past_deadline(
+            str(run.get("batch_id") or ""),
+            str(run.get("chat_id") or ""),
+            str(run.get("run_id") or ""),
+        ):
+            dispatched += 1
     return dispatched
 
 
@@ -621,75 +660,6 @@ def safe_run_error_message(exc: Exception) -> str:
     if "rtdb" in text or "realtime database" in text:
         return "Live updates were unavailable while the agent was running."
     return "Unexpected backend error."
-
-
-def course_blueprint_suggestion_metadata(
-    suggestion: Any,
-    *,
-    run_id: str,
-    workflow_type: str,
-    final_text: str,
-    message_metadata: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Validate a current-run consultant UI hint and return bounded metadata."""
-    metadata = message_metadata or {}
-    normalized_workflow = str(workflow_type or "").strip().lower()
-    consulting_workflows = {"", "consulting", "course_consultant", "course_consultant.read"}
-    if normalized_workflow not in consulting_workflows:
-        return {}
-    if not str(final_text or "").strip() or not isinstance(suggestion, dict):
-        return {}
-    if suggestion.get("suggested") is not True:
-        return {}
-    if str(suggestion.get("confidence") or "").strip().lower() != "high":
-        return {}
-    if str(suggestion.get("run_id") or "").strip() != run_id:
-        return {}
-    if str(suggestion.get("source_agent") or "") != "course_consultant_agent":
-        return {}
-    blocked = (
-        metadata.get("outline_approvable") is True
-        or metadata.get("artifact_preview_card") is True
-        or metadata.get("pending_exportable") is True
-        or metadata.get("exportable") is True
-        or metadata.get("export_result") is True
-        or bool(metadata.get("doc_url") or metadata.get("form_url"))
-    )
-    if blocked:
-        return {}
-    blueprint = suggestion.get("blueprint")
-    if not isinstance(blueprint, dict):
-        return {}
-    try:
-        validated_blueprint = CourseBlueprintContent.model_validate(blueprint)
-    except Exception:
-        logger.warning(
-            "Rejected invalid Course Blueprint recommendation run_id=%s", run_id
-        )
-        return {}
-    if validated_blueprint.plan_scope is None:
-        return {}
-    recommendation = validated_blueprint.model_dump(mode="json")
-    encoded = json.dumps(
-        recommendation, ensure_ascii=False, separators=(",", ":")
-    ).encode("utf-8")
-    if len(encoded) > 200_000:
-        logger.warning(
-            "Rejected oversized Course Blueprint recommendation run_id=%s bytes=%d",
-            run_id,
-            len(encoded),
-        )
-        return {}
-    return {
-        "course_blueprint_save_suggested": True,
-        "course_blueprint_suggestion_confidence": "high",
-        "course_blueprint_suggestion_title": validated_blueprint.title,
-        "course_blueprint_suggestion_reason": str(
-            suggestion.get("reason") or ""
-        ).strip()[:500],
-        "course_blueprint_suggestion_run_id": run_id,
-        "course_blueprint_recommendation": recommendation,
-    }
 
 
 def extract_lesson_plan_full_from_state(state: dict[str, Any]) -> dict[str, Any] | None:
@@ -1647,33 +1617,90 @@ async def _run_agent_background(
             chat_id=chat_id,
         )
 
+    # Stop is a real interrupt, not just a discard: the agent response is an
+    # async stream, so breaking out of this loop closes the generator and drops
+    # the upstream connection, which stops generation rather than letting it run
+    # to completion. The flag is polled on a timer instead of per chunk — a
+    # Firestore read per token would cost more than the tokens saved — and off
+    # the event loop so the read never stalls streaming.
+    cancel_poll_deadline = time.monotonic() + CANCEL_POLL_SECONDS
+    cancelled_mid_stream = False
+
     try:
-        async for chunk in stream_agent_response(
-            user_message=user_message,
-            session_id=agent_session_id,
-            lecturer_id=lecturer_id,
-            session_state=session_state,
-        ):
-            if not chunk:
-                continue
-            final_text_parts.append(chunk)
-            write_stream_delta(
+        # aclosing() so breaking out of the loop deterministically finalises the
+        # generator and tears the upstream connection down there and then,
+        # rather than leaving it to garbage collection.
+        async with aclosing(
+            stream_agent_response(
+                user_message=user_message,
+                session_id=agent_session_id,
+                lecturer_id=lecturer_id,
+                session_state=session_state,
+            )
+        ) as agent_stream:
+            # Ripping the stream out from under the SDK can surface as an error
+            # from aclose()/the iterator. When the lecturer asked for the stop,
+            # that is expected teardown noise, not a failed run.
+            async for chunk in agent_stream:
+                if time.monotonic() >= cancel_poll_deadline:
+                    cancel_poll_deadline = time.monotonic() + CANCEL_POLL_SECONDS
+                    if await asyncio.to_thread(
+                        is_agent_run_cancelled, batch_id=batch_id, chat_id=chat_id, run_id=run_id
+                    ):
+                        cancelled_mid_stream = True
+                        break
+                if not chunk:
+                    continue
+                final_text_parts.append(chunk)
+                write_stream_delta(
+                    run_id,
+                    chunk_index,
+                    chunk,
+                    source="agent_engine",
+                    mode="native",
+                    upstream_event_kind="final_text",
+                )
+                chunk_index += 1
+                streamed_length += len(chunk)
+                write_stream_meta(
+                    run_id,
+                    done=False,
+                    chunk_count=chunk_index,
+                    final_length=streamed_length,
+                    response_started=True,
+                )
+
+        if cancelled_mid_stream:
+            logger.info(
+                "run_id=%s cancelled mid-stream after %d chunks — closing the stream",
                 run_id,
                 chunk_index,
-                chunk,
-                source="agent_engine",
-                mode="native",
-                upstream_event_kind="final_text",
             )
-            chunk_index += 1
-            streamed_length += len(chunk)
-            write_stream_meta(
-                run_id,
-                done=False,
-                chunk_count=chunk_index,
-                final_length=streamed_length,
-                response_started=True,
+            emit_backend_event(
+                "run.cancelled",
+                status="cancelled",
+                title="Request cancelled",
+                kind="message",
+                detail={"chunks_streamed": chunk_index},
             )
+            finalize_open_run_steps(run_id, "cancelled")
+            set_run_status(run_id, "cancelled")
+            return
+
+        # Stop can also land where the mid-stream poll never fired — the stream
+        # ended (or yielded nothing) first. Check before the empty-text guard
+        # below, or a stop with no output raises and is reported as a failure.
+        if is_agent_run_cancelled(batch_id=batch_id, chat_id=chat_id, run_id=run_id):
+            logger.info("run_id=%s cancelled by the lecturer — discarding the answer", run_id)
+            emit_backend_event(
+                "run.cancelled",
+                status="cancelled",
+                title="Request cancelled",
+                kind="message",
+            )
+            finalize_open_run_steps(run_id, "cancelled")
+            set_run_status(run_id, "cancelled")
+            return
 
         final_text = "".join(final_text_parts)
         write_stream_meta(
@@ -1898,31 +1925,6 @@ async def _run_agent_background(
         if metadata.get("artifact_preview_card") or metadata.get("workflow_stage") == "outline":
             _attach_assistant_intro(metadata, final_text, assistant_message_text)
 
-        # Consultant agents may leave a session-only UI hint. It is intentionally
-        # read after generation and accepted only for this exact run; stale hints
-        # from the long-lived chat session are ignored.
-        if str(session_state.get("workflow_type") or "").strip().lower() in {
-            "", "consulting", "course_consultant", "course_consultant.read",
-        }:
-            try:
-                session_state_after = await load_session_state_after()
-                if session_state_after:
-                    metadata.update(
-                        course_blueprint_suggestion_metadata(
-                            session_state_after.get("course_blueprint_save_suggestion"),
-                            run_id=run_id,
-                            workflow_type=str(session_state.get("workflow_type") or ""),
-                            final_text=assistant_message_text,
-                            message_metadata=metadata,
-                        )
-                    )
-            except Exception as suggestion_exc:
-                logger.warning(
-                    "Course Blueprint UI hint read failed run_id=%s: %s",
-                    run_id,
-                    suggestion_exc,
-                )
-
         try:
             session_state_after = await load_session_state_after()
             metadata.update(
@@ -1950,7 +1952,12 @@ async def _run_agent_background(
                 run_id=run_id,
                 metadata=metadata,
             )
-            write_final_message(run_id, assistant_message_text, metadata=metadata)
+            write_final_message(
+                run_id,
+                assistant_message_text,
+                metadata=metadata,
+                message_id=str(final_msg.get("message_id") or ""),
+            )
             emit_backend_event(
                 "final_message.persisted",
                 status="done",
@@ -1991,6 +1998,25 @@ async def _run_agent_background(
         logger.info("gateway background done run_id=%s chars=%d", run_id, len(final_text))
 
     except Exception as exc:
+        # A stop the lecturer asked for must never surface as a failure. Tearing
+        # the Agent Engine stream down mid-flight can raise from the SDK, and
+        # the post-stream path has its own guards (e.g. "no assistant text")
+        # that a cancellation trivially trips. Settle as cancelled instead.
+        if cancelled_mid_stream:
+            logger.info("run_id=%s cancelled; ignoring teardown error: %s", run_id, exc)
+            try:
+                emit_backend_event(
+                    "run.cancelled",
+                    status="cancelled",
+                    title="Request cancelled",
+                    kind="message",
+                    detail={"chunks_streamed": chunk_index},
+                )
+                finalize_open_run_steps(run_id, "cancelled")
+                set_run_status(run_id, "cancelled")
+            except Exception as cancel_exc:
+                logger.warning("Cancel finalisation failed run_id=%s: %s", run_id, cancel_exc)
+            return
         logger.error("gateway background failed run_id=%s: %s", run_id, exc)
         try:
             write_stream_meta(
@@ -2023,14 +2049,17 @@ async def _run_agent_background(
             )
         except Exception as firestore_exc:
             logger.warning("Firestore mark failed failed run_id=%s: %s", run_id, firestore_exc)
+        failure_msg: dict[str, Any] = {}
         try:
-            add_message(
+            failure_msg = add_message(
                 batch_id, chat_id, "assistant", final_error, lecturer_id, run_id=run_id,
             )
         except Exception as message_exc:
             logger.warning("Firestore failure message write failed run_id=%s: %s", run_id, message_exc)
         write_run_error(run_id, safe_error)
-        write_final_message(run_id, final_error)
+        write_final_message(
+            run_id, final_error, message_id=str(failure_msg.get("message_id") or "")
+        )
         finalize_open_run_steps(run_id, "failed")
         set_run_status(run_id, "failed")
         try:

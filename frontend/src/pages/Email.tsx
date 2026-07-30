@@ -14,7 +14,6 @@ import {
   Check,
   ChevronRight,
   ExternalLink,
-  Loader2,
   Mail,
   Plus,
   Send,
@@ -45,6 +44,7 @@ import { sendEmailNow } from '../services/emailService'
 import { listBatches, listBatchStudents } from '../services/batchService'
 import { increaseStress } from '../services/wellnessService'
 import { formatDateTime, timeAgo } from '../utils/formatDate'
+import { Spinner, Button } from '../design-system'
 
 const NOTES_PREVIEW_LEN = 120
 
@@ -72,7 +72,7 @@ function truncateText(text: string, max = NOTES_PREVIEW_LEN) {
 
 function statusBadgeClass(status: string) {
   if (status === 'sent') {
-    return 'bg-emerald-50 text-emerald-700 border-emerald-200'
+    return 'bg-violet-50 text-violet-700 border-violet-200'
   }
   return 'bg-amber-50 text-amber-800 border-amber-200'
 }
@@ -477,7 +477,7 @@ export default function Email() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
         <div>
           <h1 className="text-2xl font-bold text-slate-800 tracking-tight flex items-center gap-2">
-            <Mail className="w-6 h-6 text-emerald-600" />
+            <Mail className="w-6 h-6 text-violet-600" />
             Emails
           </h1>
           <p className="text-sm text-slate-500 mt-1">
@@ -491,19 +491,15 @@ export default function Email() {
             <button
               type="button"
               onClick={openScheduleModal}
-              className="inline-flex items-center justify-center px-4 py-2 border border-emerald-200 text-sm font-medium rounded-md text-emerald-700 bg-emerald-50 hover:bg-emerald-100 shadow-sm transition-colors"
+              className="inline-flex items-center justify-center px-4 py-2 border border-violet-200 text-sm font-medium rounded-md text-violet-700 bg-violet-50 hover:bg-violet-100 shadow-sm transition-colors"
             >
               <CalendarClock className="w-4 h-4 mr-2" />
               Schedule Email
             </button>
-            <button
-              type="button"
-              onClick={openSendModal}
-              className="inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500"
-            >
+            <Button type="button" onClick={openSendModal} className="focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-violet-500">
               <Send className="w-4 h-4 mr-2" />
               Send Now
-            </button>
+            </Button>
           </div>
         )}
       </div>
@@ -512,8 +508,8 @@ export default function Email() {
         <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
           <div className="px-6 py-10">
             <div className="text-center mb-8">
-              <div className="h-14 w-14 mx-auto bg-emerald-50 rounded-2xl flex items-center justify-center mb-4">
-                <Users className="w-7 h-7 text-emerald-600" />
+              <div className="h-14 w-14 mx-auto bg-violet-50 rounded-2xl flex items-center justify-center mb-4">
+                <Users className="w-7 h-7 text-violet-600" />
               </div>
               <h2 className="text-lg font-semibold text-slate-800">
                 Which batch are you emailing?
@@ -526,7 +522,7 @@ export default function Email() {
 
             {batchesLoading ? (
               <div className="flex flex-col items-center justify-center py-10 gap-3">
-                <Loader2 className="w-7 h-7 text-emerald-600 animate-spin" />
+                <Spinner size={28} />
                 <p className="text-sm text-slate-500">Loading your batches…</p>
               </div>
             ) : batches.length === 0 ? (
@@ -538,7 +534,7 @@ export default function Email() {
                 <button
                   type="button"
                   onClick={() => navigate('/batches')}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm"
+                  className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium rounded-md text-white bg-violet-600 hover:bg-violet-700 shadow-sm"
                 >
                   <ExternalLink className="w-4 h-4" />
                   Go to Batches
@@ -551,10 +547,10 @@ export default function Email() {
                     key={batch.id}
                     type="button"
                     onClick={() => handleSelectBatch(batch)}
-                    className="w-full flex items-center gap-3 p-4 rounded-xl border border-slate-100 hover:border-emerald-200 hover:bg-emerald-50/40 transition-all text-left"
+                    className="w-full flex items-center gap-3 p-4 rounded-xl border border-slate-100 hover:border-violet-200 hover:bg-violet-50/40 transition-all text-left"
                   >
                     <div className="h-10 w-10 rounded-lg bg-slate-50 flex items-center justify-center flex-shrink-0">
-                      <Users className="w-5 h-5 text-emerald-600" />
+                      <Users className="w-5 h-5 text-violet-600" />
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-semibold text-slate-800 truncate">
@@ -575,10 +571,10 @@ export default function Email() {
         </div>
       ) : (
         <>
-          <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-emerald-100 bg-emerald-50/60 px-4 py-3">
+          <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-violet-100 bg-violet-50/60 px-4 py-3">
             <div className="flex items-center gap-3 min-w-0">
-              <div className="h-9 w-9 rounded-lg bg-white border border-emerald-100 flex items-center justify-center flex-shrink-0">
-                <Users className="w-4.5 h-4.5 text-emerald-600" />
+              <div className="h-9 w-9 rounded-lg bg-white border border-violet-100 flex items-center justify-center flex-shrink-0">
+                <Users className="w-4.5 h-4.5 text-violet-600" />
               </div>
               <div className="min-w-0">
                 <p className="text-xs text-slate-500">Emailing batch</p>
@@ -595,7 +591,7 @@ export default function Email() {
             <button
               type="button"
               onClick={handleChangeBatch}
-              className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md border border-emerald-200 text-emerald-700 bg-white hover:bg-emerald-50 shrink-0 self-start sm:self-auto"
+              className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md border border-violet-200 text-violet-700 bg-white hover:bg-violet-50 shrink-0 self-start sm:self-auto"
             >
               Change batch
             </button>
@@ -609,20 +605,16 @@ export default function Email() {
                   Connect your Google account to send emails
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={handleConnectGoogle}
-                className="inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm shrink-0"
-              >
+              <Button type="button" onClick={handleConnectGoogle} className="shrink-0">
                 Connect Google
-              </button>
+              </Button>
             </div>
           )}
 
           <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
             {listLoading ? (
               <div className="flex flex-col items-center justify-center py-20 gap-3">
-                <Loader2 className="w-8 h-8 text-emerald-600 animate-spin" />
+                <Spinner size={32} />
                 <p className="text-sm text-slate-500">Loading emails…</p>
               </div>
             ) : emails.length === 0 ? (
@@ -637,18 +629,14 @@ export default function Email() {
                   Deliver instantly with Gmail or schedule a message for later.
                 </p>
                 <div className="flex flex-wrap gap-2 justify-center">
-                  <button
-                    type="button"
-                    onClick={openSendModal}
-                    className="inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm"
-                  >
+                  <Button type="button" onClick={openSendModal}>
                     <Send className="w-4 h-4 mr-2" />
                     Send Now
-                  </button>
+                  </Button>
                   <button
                     type="button"
                     onClick={openScheduleModal}
-                    className="inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-md border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100"
+                    className="inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-md border border-violet-200 text-violet-700 bg-violet-50 hover:bg-violet-100"
                   >
                     <CalendarClock className="w-4 h-4 mr-2" />
                     Schedule Email
@@ -663,7 +651,7 @@ export default function Email() {
                   return (
                     <article
                       key={item.id}
-                      className="rounded-xl border border-slate-100 bg-white p-5 shadow-sm hover:shadow-md hover:border-emerald-200/80 transition-all"
+                      className="rounded-xl border border-slate-100 bg-white p-5 shadow-sm hover:shadow-md hover:border-violet-200/80 transition-all"
                     >
                       <div className="flex items-start justify-between gap-2 mb-3">
                         <div className="min-w-0 flex-1">
@@ -753,7 +741,7 @@ export default function Email() {
             <div
               className={`px-6 py-4 border-b flex items-center justify-between ${
                 modalMode === 'send'
-                  ? 'bg-emerald-50 border-emerald-100'
+                  ? 'bg-violet-50 border-violet-100'
                   : 'bg-slate-50 border-slate-200'
               }`}
             >
@@ -781,17 +769,17 @@ export default function Email() {
                 <label className="block text-sm font-semibold text-slate-700 mb-1.5">
                   Recipients
                 </label>
-                <div className="flex flex-wrap gap-1.5 rounded-md border border-slate-300 px-2 py-2 focus-within:border-emerald-500 focus-within:ring-1 focus-within:ring-emerald-500">
+                <div className="flex flex-wrap gap-1.5 rounded-md border border-slate-300 px-2 py-2 focus-within:border-violet-500 focus-within:ring-1 focus-within:ring-violet-500">
                   {recipients.map((r) => (
                     <span
                       key={r}
-                      className="inline-flex items-center gap-1 rounded-full bg-emerald-50 border border-emerald-200 pl-2.5 pr-1 py-0.5 text-xs font-medium text-emerald-700"
+                      className="inline-flex items-center gap-1 rounded-full bg-violet-50 border border-violet-200 pl-2.5 pr-1 py-0.5 text-xs font-medium text-violet-700"
                     >
                       {r}
                       <button
                         type="button"
                         onClick={() => removeRecipient(r)}
-                        className="p-0.5 rounded-full hover:bg-emerald-100 text-emerald-500 hover:text-emerald-700"
+                        className="p-0.5 rounded-full hover:bg-violet-100 text-violet-500 hover:text-violet-700"
                         aria-label={`Remove ${r}`}
                       >
                         <X className="w-3 h-3" />
@@ -821,7 +809,7 @@ export default function Email() {
 
                 {studentsLoading ? (
                   <p className="text-xs text-slate-400 mt-2 flex items-center gap-1.5">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <Spinner size={14} />
                     Loading batch students…
                   </p>
                 ) : students.length > 0 ? (
@@ -833,7 +821,7 @@ export default function Email() {
                       <button
                         type="button"
                         onClick={addAllStudents}
-                        className="text-xs font-semibold text-emerald-700 hover:text-emerald-800"
+                        className="text-xs font-semibold text-violet-700 hover:text-violet-800"
                       >
                         Add all
                       </button>
@@ -888,7 +876,7 @@ export default function Email() {
                     setForm((f) => ({ ...f, subject: e.target.value }))
                   }
                   placeholder="e.g. Assignment reminder"
-                  className="block w-full rounded-md border border-slate-300 shadow-sm py-2.5 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500"
+                  className="block w-full rounded-md border border-slate-300 shadow-sm py-2.5 px-3 text-sm focus:border-violet-500 focus:ring-violet-500"
                 />
               </div>
 
@@ -904,7 +892,7 @@ export default function Email() {
                     setForm((f) => ({ ...f, body: e.target.value }))
                   }
                   placeholder="Write your message…"
-                  className="block w-full rounded-md border border-slate-300 shadow-sm py-2.5 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500 resize-y"
+                  className="block w-full rounded-md border border-slate-300 shadow-sm py-2.5 px-3 text-sm focus:border-violet-500 focus:ring-violet-500 resize-y"
                 />
               </div>
 
@@ -921,7 +909,7 @@ export default function Email() {
                     onChange={(e) =>
                       setForm((f) => ({ ...f, sendAt: e.target.value }))
                     }
-                    className="block w-full rounded-md border border-slate-300 shadow-sm py-2.5 px-3 text-sm focus:border-emerald-500 focus:ring-emerald-500"
+                    className="block w-full rounded-md border border-slate-300 shadow-sm py-2.5 px-3 text-sm focus:border-violet-500 focus:ring-violet-500"
                   />
                   <p className="text-xs text-slate-500 mt-1">
                     Uses your local timezone. Must be in the future.
@@ -930,9 +918,9 @@ export default function Email() {
               )}
 
               {saving && modalMode === 'send' && (
-                <div className="flex items-center gap-3 rounded-lg bg-emerald-50 border border-emerald-100 px-4 py-3">
-                  <Loader2 className="w-5 h-5 text-emerald-600 animate-spin flex-shrink-0" />
-                  <p className="text-sm text-emerald-800">Sending email…</p>
+                <div className="flex items-center gap-3 rounded-lg bg-violet-50 border border-violet-100 px-4 py-3">
+                  <Spinner size={20} className="flex-shrink-0" />
+                  <p className="text-sm text-violet-800">Sending email…</p>
                 </div>
               )}
 
@@ -949,14 +937,10 @@ export default function Email() {
                 >
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm disabled:opacity-70 min-w-[120px]"
-                >
+                <Button type="submit" disabled={saving} className="min-w-[120px]">
                   {saving ? (
                     <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <Spinner tone="inverse" size={16} />
                       {modalMode === 'send' ? 'Sending…' : 'Saving…'}
                     </>
                   ) : modalMode === 'send' ? (
@@ -970,7 +954,7 @@ export default function Email() {
                       Schedule
                     </>
                   )}
-                </button>
+                </Button>
               </div>
             </form>
           </div>

@@ -1,0 +1,78 @@
+/* MILA surface effects — the academic canvas plus the liquid-glass language:
+   high blur + saturation, specular top highlight, translucent white hairline,
+   ambient purple blobs. Apply as utility classes. */
+
+/* Dotted lavender academic canvas (signature) */
+.maia-academic-bg {
+  background-color: var(--academic-bg);
+  background-image: radial-gradient(var(--academic-dot) 2px, transparent 2px);
+  background-size: 32px 32px;
+}
+
+/* App gradient wash — soft lavender */
+.maia-app-bg {
+  background: linear-gradient(135deg, #ece3f9 0%, #f8f4fe 42%, #d9ccf1 100%);
+}
+
+/* Liquid glass — panels, sidebars, cards-on-canvas */
+.maia-glass {
+  background: var(--surface-glass);
+  backdrop-filter: blur(24px) saturate(1.6);
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  border: 1px solid var(--border-glass);
+  box-shadow: var(--shadow-glass);
+}
+
+/* Stronger, more opaque glass — modals, login card */
+.maia-glass-strong {
+  background: var(--surface-glass-strong);
+  backdrop-filter: blur(28px) saturate(1.7);
+  -webkit-backdrop-filter: blur(28px) saturate(1.7);
+  border: 1px solid var(--border-glass);
+  box-shadow: var(--shadow-glass-lg);
+}
+
+/* Thin frosted header strip */
+.maia-glass-header {
+  background: var(--surface-glass-header);
+  backdrop-filter: blur(24px) saturate(1.5);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  border-bottom: 1px solid var(--border-glass);
+}
+
+/* Tinted violet glass — active/selected liquid surfaces */
+.maia-glass-tint {
+  background: var(--surface-glass-tint);
+  backdrop-filter: blur(20px) saturate(1.6);
+  -webkit-backdrop-filter: blur(20px) saturate(1.6);
+  border: 1px solid rgba(187, 164, 226, 0.55);
+  box-shadow: var(--shadow-glass);
+}
+
+/* Liquid pill — composer bars, floating toolbars, segmented controls */
+.maia-liquid-pill {
+  border-radius: var(--radius-full);
+  background: var(--surface-glass);
+  backdrop-filter: blur(24px) saturate(1.6);
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  border: 1px solid var(--border-glass);
+  box-shadow: var(--shadow-glass);
+}
+
+/* Ambient colored blobs behind content */
+.maia-blob {
+  position: absolute;
+  border-radius: var(--radius-full);
+  filter: blur(64px);
+  pointer-events: none;
+}
+.maia-blob--azure  { background: rgba(157, 128, 203, 0.35); }
+.maia-blob--cyan   { background: rgba(252, 192, 24, 0.18); }
+.maia-blob--indigo { background: rgba(95, 72, 156, 0.22); }
+
+:root {
+  --blur-glass: 24px;
+  --transition-base: 200ms cubic-bezier(0.4, 0, 0.2, 1); /* @kind other */
+  --transition-fast: 120ms cubic-bezier(0.4, 0, 0.2, 1); /* @kind other */
+  --lift-hover: -2px;
+}

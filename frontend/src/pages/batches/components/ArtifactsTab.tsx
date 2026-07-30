@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Copy, ExternalLink, FileText, Filter, Trash2 } from 'lucide-react'
+import { Copy, ExternalLink, FileText, RefreshCw, Trash2 } from 'lucide-react'
 import type { Artifact, ArtifactSummary } from '../../../services/artifactService'
 import { formatDateTime } from '../../../utils/formatDate'
 
@@ -104,7 +104,7 @@ export function ArtifactsTab({ artifacts, summary, loading, onRefresh, onDelete 
             href={summary.drive_root_folder_url}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+            className="inline-flex items-center gap-1.5 rounded-md bg-violet-600 px-3 py-2 text-sm font-medium text-white hover:bg-violet-700"
           >
             <ExternalLink className="w-4 h-4" />
             Open Drive Folder
@@ -115,32 +115,40 @@ export function ArtifactsTab({ artifacts, summary, loading, onRefresh, onDelete 
           onClick={onRefresh}
           className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
         >
-          <Filter className="w-4 h-4" />
+          <RefreshCw className="w-4 h-4" />
           Refresh
         </button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-        <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="rounded-md border border-slate-200 px-3 py-2 text-sm">
+        <select
+          value={typeFilter}
+          onChange={(e) => setTypeFilter(e.target.value)}
+          className="rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm font-medium text-slate-800 shadow-sm focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+        >
           {TYPE_OPTIONS.map((option) => (
             <option key={option.label} value={option.value}>{option.label}</option>
           ))}
         </select>
-        <select value={weekFilter} onChange={(e) => setWeekFilter(e.target.value)} className="rounded-md border border-slate-200 px-3 py-2 text-sm">
+        <select
+          value={weekFilter}
+          onChange={(e) => setWeekFilter(e.target.value)}
+          className="rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm font-medium text-slate-800 shadow-sm focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+        >
           <option value="">All weeks</option>
           {weeks.map((week) => (
             <option key={week} value={week}>Week {week}</option>
           ))}
         </select>
-        <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
-          <input type="checkbox" checked={currentOnly} onChange={(e) => setCurrentOnly(e.target.checked)} />
+        <label className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm font-medium text-slate-800 shadow-sm">
+          <input type="checkbox" checked={currentOnly} onChange={(e) => setCurrentOnly(e.target.checked)} className="accent-violet-600" />
           Current only
         </label>
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search title"
-          className="rounded-md border border-slate-200 px-3 py-2 text-sm"
+          className="rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 shadow-sm focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
         />
       </div>
 
@@ -165,7 +173,7 @@ export function ArtifactsTab({ artifacts, summary, loading, onRefresh, onDelete 
                       </span>
                       {artifact.week && <span className="text-xs text-slate-500">Week {artifact.week}</span>}
                       <span className="text-xs text-slate-500">v{String(artifact.version || 1).padStart(2, '0')}</span>
-                      {artifact.is_current && <span className="rounded bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">Current</span>}
+                      {artifact.is_current && <span className="rounded bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700">Current</span>}
                       {artifact.status && !artifact.is_current && <span className="rounded bg-slate-50 px-2 py-0.5 text-xs text-slate-500">{artifact.status}</span>}
                     </div>
                     <div className="mt-1 truncate text-sm font-semibold text-slate-900" title={artifact.drive_file_name || artifact.title}>
@@ -176,8 +184,8 @@ export function ArtifactsTab({ artifacts, summary, loading, onRefresh, onDelete 
                     )}
                   </div>
                   <div className="flex flex-wrap items-center gap-2 xl:justify-end">
-                    {url && <a href={url} target="_blank" rel="noreferrer" className="text-sm font-medium text-emerald-700 hover:underline">Open</a>}
-                    {studentUrl && <a href={studentUrl} target="_blank" rel="noreferrer" className="text-sm font-medium text-emerald-700 hover:underline">Student</a>}
+                    {url && <a href={url} target="_blank" rel="noreferrer" className="text-sm font-medium text-violet-700 hover:underline">Open</a>}
+                    {studentUrl && <a href={studentUrl} target="_blank" rel="noreferrer" className="text-sm font-medium text-violet-700 hover:underline">Student</a>}
                     {url && <button type="button" onClick={() => copyLink(url)} className="p-1.5 text-slate-500 hover:text-slate-800" title="Copy link"><Copy className="w-4 h-4" /></button>}
                     <button type="button" onClick={() => setVersionsKey(versionsKeyForRow)} className="text-sm text-slate-600 hover:text-slate-900">Versions</button>
                     <button type="button" onClick={() => onDelete(artifact)} className="p-1.5 text-slate-400 hover:text-red-600" title="Delete"><Trash2 className="w-4 h-4" /></button>

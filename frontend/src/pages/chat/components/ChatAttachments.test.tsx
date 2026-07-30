@@ -11,7 +11,8 @@ import type { PendingChatAttachment } from '../hooks/useChatPage'
 const listChatAttachments = vi.fn()
 vi.mock('../../../services/chatService', () => ({
   listChatAttachments: (...args: unknown[]) => listChatAttachments(...args),
-  getChatAttachmentContent: vi.fn(),
+  // resolves like the real service: previews probe availability by loading
+  getChatAttachmentContent: vi.fn(() => Promise.resolve(new Blob())),
 }))
 
 afterEach(() => cleanup())
@@ -80,10 +81,15 @@ describe('chat attachment composer', () => {
     expect(props.onSelectGenerateMode).toHaveBeenCalledWith('course_blueprint')
   })
 
-  it('shows chat-only images, allows attachment-only send, and removes a chip', () => {
+  it('shows a pending attachment as a preview-only tile and removes it', () => {
     const props = renderInput()
-    expect(screen.getByText('board.png')).toBeTruthy()
-    expect(screen.getByText(/chat-only/)).toBeTruthy()
+    // Preview only: the name and readiness moved into the tooltip so the image
+    // itself gets the space. Neither is printed on the tile.
+    expect(screen.queryByText('board.png')).toBeNull()
+    expect(screen.queryByText(/chat-only/)).toBeNull()
+    const tile = screen.getByRole('button', { name: 'Preview board.png' })
+    expect(tile.getAttribute('title')).toContain('board.png')
+    expect(tile.getAttribute('title')).toContain('chat-only')
     expect((screen.getByRole('button', { name: 'Send message' }) as HTMLButtonElement).disabled).toBe(false)
     fireEvent.click(screen.getByRole('button', { name: 'Remove board.png' }))
     expect(props.onRemoveAttachment).toHaveBeenCalledWith('image-1')
@@ -107,33 +113,41 @@ describe('chat attachment composer', () => {
     fireEvent.click(screen.getByRole('button', { name: /Add files, generate/ }))
     fireEvent.click(screen.getByRole('menuitem', { name: /Previous attachments/ }))
     expect(onOpenFilesPanel).toHaveBeenCalledTimes(1)
-    expect(screen.queryByText(/available in this chat for 7 days/)).toBeNull()
+    expect(screen.queryByText(/available in this chat for 30 days/)).toBeNull()
     expect(listChatAttachments).not.toHaveBeenCalled()
   })
 
   it('shows native processing state without storage paths', () => {
     renderInput({ pendingAttachments: [{ ...imageAttachment, attachment_kind: 'document', file_name: 'long.pdf', status: 'processing', vision_status: 'skipped' }] })
-    expect(screen.getByText(/processing…/)).toBeTruthy()
+    // The tile carries it as a tooltip; the composer still says it in words.
+    expect(screen.getByRole('button', { name: 'Preview long.pdf' }).getAttribute('title'))
+      .toContain('processing…')
     expect(screen.getByText(/still processing/)).toBeTruthy()
     expect(screen.queryByText(/gs:\/\//)).toBeNull()
   })
 
   it('flags an oversize file and blocks sending it', () => {
     renderInput({ pendingAttachments: [{ ...imageAttachment, attachment_kind: 'document', file_name: 'huge.pdf', status: 'too_large', vision_status: 'skipped' }] })
-    expect(screen.getByText(/too large — add to Course Space/)).toBeTruthy()
+    // A rejected file must stay identifiable without a caption: red ring on the
+    // tile, reason in the tooltip, and the composer-level instruction below it.
+    const tile = screen.getByRole('button', { name: 'Preview huge.pdf' })
+    expect(tile.getAttribute('title')).toContain('too large — add to Course Space')
+    expect(tile.className).toContain('border-red-300')
     expect(screen.getByText(/Remove the flagged attachment/)).toBeTruthy()
     expect((screen.getByRole('button', { name: 'Send message' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it('keeps historical image View and Ask actions separate without promotion', () => {
-    const onAsk = vi.fn()
-    render(<MessageRow batchId="batch-1" onAskAboutAttachment={onAsk} msg={{
+  it('shows a sent attachment as a bare preview, with no filename or extra actions', () => {
+    render(<MessageRow batchId="batch-1" msg={{
       message_id: 'message-1', chat_id: 'chat-1', role: 'user', content: 'Screenshot',
       created_at: null, attachments: [imageAttachment],
     }} />)
-    expect(screen.getByRole('button', { name: 'View' })).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Ask about image' }))
-    expect(onAsk).toHaveBeenCalledWith(imageAttachment)
+    // The thumbnail is the whole control: tapping it opens the viewer.
+    expect(screen.getByRole('button', { name: /Preview / })).toBeTruthy()
+    // Everything that used to sit beside it is gone.
+    expect(screen.queryByRole('button', { name: 'View' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Ask about/ })).toBeNull()
     expect(screen.queryByRole('button', { name: /promot/i })).toBeNull()
+    expect(screen.queryByText(imageAttachment.file_name)).toBeNull()
   })
 })

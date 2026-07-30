@@ -8,6 +8,10 @@ import Assessments from './pages/Assessments'
 import LessonPlans from './pages/LessonPlans'
 import Batches from './pages/batches'
 import Email from './pages/Email'
+import CatGamePage from './pages/CatGamePage'
+import CatThemePickerPage from './pages/CatThemePickerPage'
+import CatPreviewPage from './pages/CatPreviewPage'
+import PlayEntryPage from './pages/PlayEntryPage'
 import Games from './pages/Games'
 import ChatHistory from './pages/ChatHistory'
 
@@ -15,9 +19,19 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
+        {/* ─── Public auth routes ─── */}
         <Route path="/login" element={<Login />} />
         <Route path="/auth/callback" element={<AuthCallback />} />
 
+        {/* ─── Student game routes (standalone, no layout, no teacher auth) ─── */}
+        <Route path="/play/:assessmentId" element={<PlayEntryPage />} />
+        <Route path="/play/:assessmentId/game" element={<CatGamePage />} />
+
+        {/* ─── Dev/preview routes ─── */}
+        <Route path="/cat-themes" element={<CatThemePickerPage />} />
+        <Route path="/play-preview" element={<CatPreviewPage />} />
+
+        {/* ─── Teacher app (protected + layout) ─── */}
         <Route element={<ProtectedRoute />}>
           <Route element={<AppLayout />}>
             <Route path="/chat" element={<Chat />} />
@@ -28,11 +42,14 @@ export default function App() {
             <Route path="/lesson-plans" element={<LessonPlans />} />
             <Route path="/email" element={<Email />} />
             <Route path="/games" element={<Games />} />
+            <Route path="/cat-game" element={<CatGamePage />} />
           </Route>
         </Route>
 
-        <Route path="/" element={<Navigate to="/assessments" replace />} />
-        <Route path="*" element={<Navigate to="/assessments" replace />} />
+        {/* Chat is the product's front door — every workflow starts from the
+            composer — so it is where an unrouted visit lands. */}
+        <Route path="/" element={<Navigate to="/chat" replace />} />
+        <Route path="*" element={<Navigate to="/chat" replace />} />
       </Routes>
     </BrowserRouter>
   )

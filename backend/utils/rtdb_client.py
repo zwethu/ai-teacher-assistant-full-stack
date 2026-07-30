@@ -232,12 +232,19 @@ def write_final_message(
     content: str,
     role: str = "assistant",
     metadata: dict | None = None,
+    message_id: str | None = None,
 ) -> None:
-    """Push the final assistant message into agentRuns/{run_id}/messages."""
+    """Push the final assistant message into agentRuns/{run_id}/messages.
+
+    `message_id` MUST be the Firestore message id. The client reads this node and
+    keeps the id it finds, then uses it to delete (retry) or export that message —
+    so a locally minted id here produces a message the API cannot address, and
+    those calls 404. The fallback exists only for callers with nothing persisted.
+    """
     if not _ensure_init():
         return
     try:
-        msg_id = uuid.uuid4().hex[:16]
+        msg_id = message_id or uuid.uuid4().hex[:16]
         message = {
             "message_id": msg_id,
             "role": role,
@@ -366,6 +373,53 @@ def write_run_error(run_id: str, message: str) -> None:
         logger.warning("RTDB write_run_error failed run_id=%s: %s", run_id, exc)
 
 
+# ---------------------------------------------------------------------------
+# Chat attachment status
+# ---------------------------------------------------------------------------
+#
+# Attachment processing is asynchronous, and the composer has to know when a file
+# becomes usable. That readiness used to be discovered by polling an HTTP endpoint
+# every 2.5s per in-flight file, each request costing a Firestore read. Mirroring
+# the status here instead lets the browser subscribe, exactly as it already does
+# for agentRuns.
+#
+# Ownership is written into the node so the security rule can read it back — the
+# same shape as agentRuns/{run_id}/meta/lecturer_id, which is the only model
+# database.rules.json supports.
+
+def write_attachment_status(
+    chat_id: str, attachment_id: str, lecturer_id: str, payload: dict[str, Any]
+) -> None:
+    """Mirror one attachment's status. Best-effort: the HTTP endpoint remains the
+    source of truth, so a failure here degrades to polling rather than breaking."""
+    if not _ensure_init():
+        return
+    try:
+        _ref(f"chatAttachments/{chat_id}/meta/lecturer_id").set(lecturer_id)
+        _ref(f"chatAttachments/{chat_id}/items/{attachment_id}").set(
+            {**payload, "attachment_id": attachment_id, "updated_at": int(time.time())}
+        )
+        logger.debug(
+            "RTDB: attachment %s status=%s", attachment_id, payload.get("status")
+        )
+    except Exception as exc:
+        logger.warning(
+            "RTDB write_attachment_status failed attachment_id=%s: %s", attachment_id, exc
+        )
+
+
+def delete_attachment_status(chat_id: str, attachment_id: str) -> None:
+    """Drop a mirrored attachment (deleted before send, or expired)."""
+    if not _ensure_init():
+        return
+    try:
+        _ref(f"chatAttachments/{chat_id}/items/{attachment_id}").delete()
+    except Exception as exc:
+        logger.warning(
+            "RTDB delete_attachment_status failed attachment_id=%s: %s", attachment_id, exc
+        )
+
+
 def delete_chat_rtdb_state(chat_id: str, run_ids: list[str] | None = None) -> None:
     """Best-effort cleanup for chat/run state mirrored in RTDB."""
     if not _ensure_init():
@@ -374,6 +428,11 @@ def delete_chat_rtdb_state(chat_id: str, run_ids: list[str] | None = None) -> No
         _ref(f"chats/{chat_id}/activeRunId").delete()
     except Exception as exc:
         logger.warning("RTDB activeRunId cleanup failed chat_id=%s: %s", chat_id, exc)
+
+    try:
+        _ref(f"chatAttachments/{chat_id}").delete()
+    except Exception as exc:
+        logger.warning("RTDB attachment cleanup failed chat_id=%s: %s", chat_id, exc)
 
     for run_id in run_ids or []:
         try:

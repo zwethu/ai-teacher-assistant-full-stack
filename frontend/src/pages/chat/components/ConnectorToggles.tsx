@@ -19,7 +19,7 @@ export function ConnectorToggles({ connectors, onChange, disabled }: Props) {
           checked={connectors.web_search}
           onChange={(e) => onChange('web_search', e.target.checked)}
           disabled={disabled}
-          className="rounded border-slate-300 accent-emerald-600 focus:ring-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+          className="rounded border-slate-300 accent-violet-600 focus:ring-violet-600 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
         />
         <Globe className="w-4 h-4 opacity-70 group-hover:opacity-100" />
         <span className="font-medium">Web Search</span>

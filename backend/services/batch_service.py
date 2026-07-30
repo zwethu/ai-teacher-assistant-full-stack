@@ -3,6 +3,7 @@ import logging
 import os
 from typing import Any
 
+from google.cloud import firestore
 from google.cloud.firestore import SERVER_TIMESTAMP
 from google.cloud.firestore_v1 import Increment
 
@@ -129,9 +130,12 @@ def add_student_to_batch(
     if student_ref.get().exists:
         return student_id
 
-    @db.transaction()
-    def _txn(transaction):
-        transaction.set(
+    batch_ref = db.collection(BATCHES_COLLECTION).document(batch_id)
+    transaction = db.transaction()
+
+    @firestore.transactional
+    def _txn(txn):
+        txn.set(
             student_ref,
             {
                 "batch_id": batch_id,
@@ -144,12 +148,12 @@ def add_student_to_batch(
                 "updated_at": SERVER_TIMESTAMP,
             },
         )
-        transaction.update(
-            db.collection(BATCHES_COLLECTION).document(batch_id),
+        txn.update(
+            batch_ref,
             {"student_count": Increment(1), "updated_at": SERVER_TIMESTAMP},
         )
 
-    _txn()
+    _txn(transaction)
     return student_id
 
 
@@ -165,19 +169,21 @@ def remove_student_from_batch(
         .collection(STUDENTS_SUBCOLLECTION)
         .document(student_id)
     )
+    batch_ref = db.collection(BATCHES_COLLECTION).document(batch_id)
+    transaction = db.transaction()
 
-    @db.transaction()
-    def _txn(transaction):
-        transaction.delete(student_ref)
-        transaction.update(
-            db.collection(BATCHES_COLLECTION).document(batch_id),
+    @firestore.transactional
+    def _txn(txn):
+        txn.delete(student_ref)
+        txn.update(
+            batch_ref,
             {
                 "student_count": Increment(-1),
                 "updated_at": SERVER_TIMESTAMP,
             },
         )
 
-    _txn()
+    _txn(transaction)
 
 
 def list_students(batch_id: str, lecturer_id: str) -> list[dict[str, Any]]:

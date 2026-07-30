@@ -61,7 +61,7 @@ from services.chat_attachment_service import (
     get_attachment_bytes,
     get_chat_attachment,
     delete_attachment_record,
-    list_chat_attachments_for_agent,
+    list_sent_chat_attachments,
 )
 from services.cloud_tasks import QUEUE_ATTACHMENTS, enqueue
 from services.google_workspace.credentials import (
@@ -240,7 +240,7 @@ async def list_chat_attachments_endpoint(
 ) -> list[dict]:
     if get_chat(batch_id, chat_id, current_user["uid"]) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
-    return list_chat_attachments_for_agent(batch_id, chat_id, current_user["uid"], limit)
+    return list_sent_chat_attachments(batch_id, chat_id, current_user["uid"], limit)
 
 
 @router.get("/{chat_id}/attachments/{attachment_id}/rag-status", response_model=dict)

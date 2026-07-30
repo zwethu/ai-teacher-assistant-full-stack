@@ -52,6 +52,8 @@ export default function Chat() {
         retryingMessageId={state.retryingMessageId}
         cancelActiveRun={state.cancelActiveRun}
         cancelling={state.cancelling}
+        quotedReply={state.quotedReply}
+        setQuotedReply={state.setQuotedReply}
       />
     </ChatErrorBoundary>
   )

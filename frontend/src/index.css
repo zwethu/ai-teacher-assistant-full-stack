@@ -433,7 +433,22 @@
   .mila-composer-tint[data-active='true'] {
     border-color: color-mix(in srgb, var(--color-violet-200) 70%, transparent);
     background-color: color-mix(in srgb, var(--color-violet-50) 60%, transparent);
+    /* The web-search disclosure is a true frosted layer, not a pale wash:
+       transcript text crossing behind it loses legibility while the controls
+       themselves keep their crisp, high-contrast plane. */
+    backdrop-filter: blur(20px) saturate(1.35);
+    -webkit-backdrop-filter: blur(20px) saturate(1.35);
     padding: 4px;
+  }
+
+  /* The conversation stays unobstructed: only this compact surface is glass.
+     Its low, diffuse shadow gives the composer a clear floating plane without
+     creating a footer-wide veil over the transcript. */
+  .mila-composer-surface {
+    box-shadow:
+      0 14px 34px rgba(63, 47, 107, 0.15),
+      inset 0 1px 0 rgba(255, 255, 255, 0.82),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.3);
   }
 
   /* Height easing that survives content changes, not just open↔closed.

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import type { ChangeEvent, ClipboardEvent, KeyboardEvent } from 'react'
 import type { ChatMessage } from '../../../entity/Chat'
-import { Globe, Send, Square, X } from 'lucide-react'
+import { CornerUpLeft, Globe, Send, Square, X } from 'lucide-react'
 import { MessageRow, ThinkingIndicator } from './MessageRow'
 import { type ConnectorsState } from './ConnectorToggles'
 import type { RunUiState } from '../runTypes'
@@ -57,6 +57,9 @@ type Props = {
   onRemoveAttachment: (attachmentId: string) => void
   onRemoveReferenced: (attachmentId: string) => void
   onPaste: (e: ClipboardEvent<HTMLTextAreaElement>) => void
+  /** Passage quoted from an earlier response, and how to drop it. */
+  quotedReply?: string
+  onClearQuotedReply?: () => void
   batchId?: string
   chatId?: string
   onOpenFilesPanel?: () => void
@@ -95,6 +98,8 @@ export function ChatInput({
   onRemoveAttachment,
   onRemoveReferenced,
   onPaste,
+  quotedReply = '',
+  onClearQuotedReply,
   batchId,
   chatId,
   onOpenFilesPanel,
@@ -164,6 +169,7 @@ export function ChatInput({
   // collapses the strip while the tile is still fading, which squashes it.
   const hasTiles = tileEntries.length > 0
   const webSearchStripMounted = useExitDelay(connectors.web_search)
+  const quoteMounted = useExitDelay(Boolean(quotedReply))
   // The warnings sit above the composer and appear and vanish on exactly the
   // same gestures, so they get the same easing — otherwise attaching a file
   // still jumps the layout, just one line higher up.
@@ -171,12 +177,18 @@ export function ChatInput({
   const noticesMounted = useExitDelay(processingNotice || hasBlockingAttachment || attachmentErrors.length > 0)
 
   return (
+    /* No wash across the footer. A full-width `from-white/90` gradient plus
+       `backdrop-blur-sm` sat behind the composer and flattened it: `.maia-glass`
+       is white/55 over blur(24px), so laying it on an already-white, already-
+       blurred band left nothing for the glass to refract and it read as a plain
+       white slab with a hard edge across the transcript. Transparent here means
+       the composer is the only glass, and the conversation blurs through it. */
     <footer
-      className={`relative z-10 px-4 pb-5 pt-6 bg-gradient-to-t from-white/90 via-white/65 to-transparent backdrop-blur-sm flex-shrink-0 transition-opacity ${
+      className={`pointer-events-none relative z-10 px-4 pb-5 pt-6 flex-shrink-0 transition-opacity ${
         dimmed ? 'opacity-40 pointer-events-none' : ''
       }`}
     >
-      <div className="max-w-3xl mx-auto">
+      <div className={`${dimmed ? 'pointer-events-none' : 'pointer-events-auto'} relative max-w-3xl mx-auto`}>
         <ComposerCollapse
           open={processingNotice || hasBlockingAttachment || attachmentErrors.length > 0}
           region="notices"
@@ -223,6 +235,29 @@ export function ChatInput({
               worth of height in one frame. The padding sits on the collapse's
               clipper because that is what clips: the tiles' remove buttons
               hang outside their tile, and this is the room they need. */}
+          {/* Sits above the tiles and the textarea, inside the box, so the
+              composer grows to hold it exactly as it does for an attachment. */}
+          <ComposerCollapse open={Boolean(quotedReply)} region="quote" className="px-1.5 pt-2">
+            {quoteMounted && (
+              <div className="flex items-start gap-2.5 rounded-xl border border-white/80 bg-white/65 px-2.5 py-2 shadow-[0_5px_14px_rgba(63,47,107,0.08)]">
+                <span className="mt-0.5 inline-flex h-5 w-5 flex-none items-center justify-center rounded-md bg-violet-100 text-violet-700">
+                  <CornerUpLeft className="h-3 w-3" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-violet-700">Replying to selection</p>
+                  <p className="mt-0.5 text-[13px] leading-5 text-slate-700 line-clamp-2">{quotedReply}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={onClearQuotedReply}
+                  className="mt-0.5 inline-flex h-6 w-6 flex-none items-center justify-center rounded-full text-violet-700 transition-colors hover:bg-violet-100 hover:text-violet-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
+                  aria-label="Remove quoted text"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
+          </ComposerCollapse>
           <ComposerCollapse open={hasTiles} region="attachments" className="px-1.5 pb-1 pt-2">
             <div className="flex flex-wrap gap-2">
               {tileEntries.map(({ key, item, leaving }) => (
@@ -352,6 +387,8 @@ type MessagesPanelProps = {
   welcomeContent: React.ReactNode
   onApproveOutline: (message: ChatMessage) => void
   onRetryMessage?: (message: ChatMessage) => void
+  /** Quote a selected passage of a response into the composer. */
+  onQuoteReply?: (excerpt: string) => void
   retryingMessageId?: string | null
 }
 
@@ -367,6 +404,7 @@ export function ChatMessagesPanel({
   welcomeContent,
   onApproveOutline,
   onRetryMessage,
+  onQuoteReply,
   retryingMessageId,
 }: MessagesPanelProps) {
   const safeMessages = messages.filter(Boolean)
@@ -419,6 +457,7 @@ export function ChatMessagesPanel({
                 approvalCompleted={Boolean(msg.run_id && completedOutlineRunIds.has(msg.run_id))}
                 approvalSuperseded={Boolean(msg.run_id && supersededOutlineRunIds.has(msg.run_id))}
                 onRetry={onRetryMessage}
+                onQuoteReply={onQuoteReply}
                 retrying={retryingMessageId === msg.message_id}
               />
             ))}

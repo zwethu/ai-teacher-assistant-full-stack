@@ -45,6 +45,7 @@ import {
   type ChatAttachmentStatusEvent,
 } from '../../../services/chatAttachmentStream'
 import { createStallWatchdog } from '../../../hooks/streamStallWatchdog'
+import { formatQuoteMention } from '../components/MessageRow'
 import { emitChatCreated } from '../../../utils/chatEvents'
 import type { RunUiState } from '../runTypes'
 import type { GenerateMode } from '../components/ChatConversation'
@@ -156,6 +157,41 @@ export function localOnlyMessages(previous: ChatMessage[], fetched: ChatMessage[
   )
 }
 
+/**
+ * Assemble what actually gets sent.
+ *
+ * Message `content` is the only channel the agent reads — `agent_gateway`
+ * stashes this exact string and replays it to Agent Engine, and message
+ * metadata is never forwarded. So a quoted passage and any re-referenced
+ * attachments have to travel inside it, and the renderer strips them back out
+ * for display (see parseUserMessageContent).
+ *
+ * The quote leads: it is the thing the rest of the message is about.
+ *
+ * Exported so the composition can be tested without standing up the whole hook
+ * — this is the step where a quote would silently fail to reach the agent.
+ */
+export function composeOutgoingMessage({
+  typed,
+  quote,
+  references,
+  hasAttachments,
+}: {
+  typed: string
+  quote: string
+  references: { attachment_id: string; file_title?: string; file_name?: string }[]
+  hasAttachments: boolean
+}): { body: string; content: string } {
+  const refMentions = references
+    .map((item) => `Please use the earlier attachment ${item.file_title || item.file_name}. Attachment ID: ${item.attachment_id}`)
+    .join('\n')
+  const quoteMention = quote ? formatQuoteMention(quote) : ''
+  // A quote or an attachment alone still needs something to act on; the stock
+  // line is what makes "send with only a file attached" a valid request.
+  const body = typed || (hasAttachments ? 'Please review the attached file(s).' : '')
+  return { body, content: [quoteMention, body, refMentions].filter(Boolean).join('\n\n') }
+}
+
 export function runHasAssistantMessage(messages: ChatMessage[], runId: string): boolean {
   const pendingId = `pending-${runId}`
   return messages.some(
@@ -225,6 +261,8 @@ export function useChatPage() {
   // (the backend rejects an already-sent attachment); they are conveyed to the agent as an
   // id mention appended to the message at send time and surfaced here only as composer chips.
   const [referencedAttachments, setReferencedAttachments] = useState<ChatAttachmentListItem[]>([])
+  // A passage the lecturer selected from an earlier response, pending send.
+  const [quotedReply, setQuotedReply] = useState('')
   const [attachmentsUploading, setAttachmentsUploading] = useState(false)
   const [attachmentErrors, setAttachmentErrors] = useState<string[]>([])
   const [currentRunId, setCurrentRunId] = useState<string | null>(null)
@@ -690,17 +728,14 @@ export function useChatPage() {
 
   async function handleSend(text?: string, overrides?: { attachmentIds?: string[] }) {
     const typedContent = (text ?? input).trim()
-    const refMentions = referencedAttachments
-      .map((item) => `Please use the earlier attachment ${item.file_title || item.file_name}. Attachment ID: ${item.attachment_id}`)
-      .join('\n')
     const carriedAttachmentIds = overrides?.attachmentIds ?? []
-    const base =
-      typedContent ||
-      (pendingAttachments.length || carriedAttachmentIds.length
-        ? 'Please review the attached file(s).'
-        : '')
-    const content = [base, refMentions].filter(Boolean).join('\n\n')
-    if (!content || !selectedBatch || sending || attachmentsUploading) return
+    const { body: base, content } = composeOutgoingMessage({
+      typed: typedContent,
+      quote: quotedReply,
+      references: referencedAttachments,
+      hasAttachments: pendingAttachments.length > 0 || carriedAttachmentIds.length > 0,
+    })
+    if (!base || !selectedBatch || sending || attachmentsUploading) return
 
     let chat = activeChat
     if (!chat) {
@@ -715,6 +750,7 @@ export function useChatPage() {
       : attachmentsForMessage.map((item) => item.attachment_id)
 
     const referencedForMessage = [...referencedAttachments]
+    const quotedReplyForMessage = quotedReply
 
     // Empty the composer NOW, not when the run starts. `startRunInChat` awaits
     // the POST that creates the message, so clearing afterwards left the text
@@ -725,6 +761,7 @@ export function useChatPage() {
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
     setPendingAttachments([])
     setReferencedAttachments([])
+    setQuotedReply('')
     setAttachmentErrors([])
     const generateMode = activeGenerateMode
     const started = await startRunInChat({
@@ -766,6 +803,7 @@ export function useChatPage() {
       setInput(typedContent)
       setPendingAttachments(attachmentsForMessage)
       setReferencedAttachments(referencedForMessage)
+      setQuotedReply(quotedReplyForMessage)
     }
   }
 
@@ -1648,6 +1686,8 @@ export function useChatPage() {
     sending,
     pendingAttachments,
     referencedAttachments,
+    quotedReply,
+    setQuotedReply,
     attachmentsUploading,
     attachmentErrors,
     handleAttachmentFiles,

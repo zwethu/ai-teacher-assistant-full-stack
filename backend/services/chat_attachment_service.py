@@ -654,13 +654,27 @@ def list_live_attachment_docs(batch_id: str, chat_id: str, lecturer_id: str, lim
     return results
 
 
-def list_chat_attachments_for_agent(batch_id: str, chat_id: str, lecturer_id: str, limit: int = 50) -> list[dict[str, Any]]:
+def list_sent_chat_attachments(batch_id: str, chat_id: str, lecturer_id: str, limit: int = 50) -> list[dict[str, Any]]:
+    """Attachments the lecturer has actually sent in this chat — the "Previous
+    attachments" panel.
+
+    Only records carrying a ``message_id`` qualify. An upload creates its
+    Firestore record immediately, on attach rather than on send, so without this
+    filter a file appeared under "Previous attachments" the moment it was picked
+    — while it was still sitting unsent in the composer — and stayed there if the
+    lecturer changed their mind and removed it.
+
+    Filtering on sent-ness rather than relying on the removal path deleting the
+    record is what makes that correct in every case, including the ones no
+    delete can cover: a closed tab, a lost connection, a failed delete.
+    """
     if not _owned_visible_chat(batch_id, chat_id, lecturer_id): return []
     safe_limit = max(1, min(int(limit), 50)); results: list[dict[str, Any]] = []
     docs = _chat_ref(batch_id, chat_id).collection(ATTACHMENTS_SUBCOLLECTION).order_by("created_at", direction="DESCENDING").limit(100).stream()
     for doc in docs:
         data = doc.to_dict() or {}
         if data.get("lecturer_id") != lecturer_id or data.get("scope") != "chat" or _is_expired(data): continue
+        if not data.get("message_id"): continue  # uploaded, not yet sent
         results.append(_agent_safe_attachment(doc.id, data, include_context=False))
         if len(results) >= safe_limit: break
     return results

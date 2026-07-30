@@ -6,6 +6,7 @@ import {
   Check,
   CircleSlash,
   Copy,
+  CornerUpLeft,
   Download,
   ExternalLink,
   FileQuestion,
@@ -73,18 +74,179 @@ import { EXPORT_FORMATS, EXPORT_FORMAT_ICONS } from './exportFormatIcons'
 // how they appear in the composer — so the user never sees the raw "Attachment ID:" text.
 const REFERENCED_ATTACHMENT_RE = /^Please use the earlier attachment (.+)\. Attachment ID: (\S+)$/
 
+/**
+ * Quote-reply travels the same way a re-referenced attachment does: as a line
+ * inside the message the lecturer sends.
+ *
+ * That is not a shortcut around the backend — it is the only channel the agent
+ * reads. `agent_gateway.start_chat_run` stashes the message `content` verbatim
+ * and hands that string to Agent Engine; message `metadata` never reaches it.
+ * So for the agent to know what is being replied to, the quote has to be in the
+ * text. Stripping it back out here is what keeps the raw marker off screen.
+ *
+ * Whitespace is collapsed on the way out so the marker stays one line and this
+ * regex can stay anchored.
+ */
+const REPLY_QUOTE_RE = /^In reply to this part of your earlier response: "(.+)"$/
+
+/** Excerpts ride along in every later turn's context, so they are capped. */
+export const MAX_QUOTE_CHARS = 600
+
+/** Build the marker line the agent reads and the parser below strips. */
+export function formatQuoteMention(excerpt: string): string {
+  const flat = excerpt.replace(/\s+/g, ' ').trim()
+  const capped = flat.length > MAX_QUOTE_CHARS ? `${flat.slice(0, MAX_QUOTE_CHARS).trimEnd()}…` : flat
+  return `In reply to this part of your earlier response: "${capped}"`
+}
+
+/**
+ * Copy-to-clipboard for the lecturer's own message.
+ *
+ * Mirrors the affordance already on assistant responses — same icons, same
+ * 1800ms revert to the copy glyph, same emerald tick — because they do the same
+ * thing and two different copy buttons in one transcript would be noise.
+ *
+ * Hidden until the row is hovered or the button is focused: a request is
+ * usually read, not copied, and a control on every turn competes with the
+ * conversation. `focus-visible` is what keeps it reachable by keyboard.
+ */
+function CopyRequestButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    if (!copied) return undefined
+    const timer = window.setTimeout(() => setCopied(false), 1800)
+    return () => window.clearTimeout(timer)
+  }, [copied])
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+    } catch {
+      // Clipboard access can be denied outright; a silent no-op beats an error
+      // banner over the lecturer's own message.
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => void handleCopy()}
+      className="inline-flex h-8 w-8 flex-none items-center justify-center rounded-full text-slate-400 opacity-0 transition-[opacity,color,background-color] duration-150 hover:bg-white/80 hover:text-violet-700 focus-visible:opacity-100 group-hover:opacity-100"
+      aria-label={copied ? 'Copied to clipboard' : 'Copy your message'}
+    >
+      {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+    </button>
+  )
+}
+
 export function parseUserMessageContent(content: string): {
   body: string
   references: { title: string; id: string }[]
+  quote: string
 } {
   const references: { title: string; id: string }[] = []
   const bodyLines: string[] = []
+  let quote = ''
   for (const line of content.split('\n')) {
     const match = line.match(REFERENCED_ATTACHMENT_RE)
+    const quoted = line.match(REPLY_QUOTE_RE)
     if (match) references.push({ title: match[1], id: match[2] })
+    else if (quoted) quote = quoted[1]
     else bodyLines.push(line)
   }
-  return { body: bodyLines.join('\n').trim(), references }
+  return { body: bodyLines.join('\n').trim(), references, quote }
+}
+
+/**
+ * The "Reply" affordance over a selection inside an assistant response.
+ *
+ * Deliberately a sibling of the message body, owning its own state and drawing
+ * the button through a portal. Two bugs came from doing it the obvious way:
+ *
+ *   - With the button *inside* the body, the body's own `mouseup` fired when
+ *     you clicked the button. That recomputed a selection the click had just
+ *     collapsed, unmounted the button, and the `click` never dispatched — so
+ *     tapping Reply did nothing at all.
+ *   - With the state on MessageRow, setting it re-rendered ReactMarkdown, and
+ *     rebuilding those nodes dropped the browser's selection. The highlight
+ *     vanished the instant the button appeared.
+ *
+ * Keeping the state here means the message body never re-renders, so the
+ * highlight survives; `preventDefault` on mousedown is what stops the browser
+ * collapsing the selection as the button is pressed.
+ */
+function QuoteReplyOverlay({
+  sourceRef,
+  onQuote,
+}: {
+  sourceRef: React.RefObject<HTMLDivElement | null>
+  onQuote: (excerpt: string) => void
+}) {
+  const [anchor, setAnchor] = useState<{ text: string; top: number; left: number } | null>(null)
+  const buttonRef = useRef<HTMLButtonElement | null>(null)
+
+  useEffect(() => {
+    const node = sourceRef.current
+    if (!node) return undefined
+
+    function readSelection() {
+      const active = window.getSelection()
+      if (!node || !active || active.isCollapsed || active.rangeCount === 0) return setAnchor(null)
+      const range = active.getRangeAt(0)
+      // Both ends inside this message: a drag running on into the next
+      // response would otherwise quote two turns as though they were one.
+      if (!node.contains(range.startContainer) || !node.contains(range.endContainer)) {
+        return setAnchor(null)
+      }
+      const text = active.toString().trim()
+      if (!text) return setAnchor(null)
+      // Viewport coordinates, because the button is portalled to <body>.
+      // Optional-called: a collapsed or detached range can report nothing, and
+      // jsdom does not implement it at all.
+      const rect = range.getBoundingClientRect?.()
+      setAnchor({ text, top: (rect?.top ?? 0) - 42, left: rect?.left ?? 0 })
+    }
+
+    function dismiss(event: MouseEvent) {
+      if (!(event.target instanceof Node)) return setAnchor(null)
+      if (node?.contains(event.target)) return
+      // The button is portalled to <body>, so it is "outside" the message and
+      // this handler would unmount it on mousedown — before the click it was
+      // pressed for ever dispatched. Pressing Reply must not dismiss Reply.
+      if (buttonRef.current?.contains(event.target)) return
+      setAnchor(null)
+    }
+
+    node.addEventListener('mouseup', readSelection)
+    document.addEventListener('mousedown', dismiss)
+    return () => {
+      node.removeEventListener('mouseup', readSelection)
+      document.removeEventListener('mousedown', dismiss)
+    }
+  }, [sourceRef])
+
+  if (!anchor) return null
+
+  return createPortal(
+    <button
+      ref={buttonRef}
+      type="button"
+      style={{ position: 'fixed', top: anchor.top, left: anchor.left }}
+      // Without this the press collapses the selection before the click lands.
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={() => {
+        onQuote(anchor.text)
+        setAnchor(null)
+      }}
+      className="z-[400] inline-flex items-center gap-1.5 rounded-full border border-violet-200 bg-white px-3 py-1.5 text-xs font-semibold text-violet-700 shadow-lg hover:bg-violet-50"
+    >
+      <CornerUpLeft className="h-3.5 w-3.5" />
+      Reply
+    </button>,
+    document.body,
+  )
 }
 
 /**
@@ -103,6 +265,7 @@ export const MessageRow = memo(function MessageRow({
   approvalCompleted = false,
   approvalSuperseded = false,
   onRetry,
+  onQuoteReply,
   retrying = false,
 }: {
   msg?: ChatMessage | null
@@ -110,6 +273,8 @@ export const MessageRow = memo(function MessageRow({
   batchId?: string
   /** Discard this response and re-run the request that produced it. */
   onRetry?: (message: ChatMessage) => void
+  /** Quote a selected passage of this response into the composer. */
+  onQuoteReply?: (excerpt: string) => void
   retrying?: boolean
   onApproveOutline?: (message: ChatMessage) => void
   approvalDisabled?: boolean
@@ -119,6 +284,7 @@ export const MessageRow = memo(function MessageRow({
   if (!msg) return null
 
   const isUser = msg.role === 'user'
+  const quoteSourceRef = useRef<HTMLDivElement | null>(null)
   const isFinal = !msg.pending && msg.status !== 'pending'
   const isPending = Boolean(msg.pending || msg.status === 'pending')
   const isFailed = msg.status === 'failed' || run?.status === 'failed'
@@ -138,12 +304,44 @@ export const MessageRow = memo(function MessageRow({
     <div className="flex">
       <div className={`flex-1 min-w-0 pt-1 ${isUser ? 'flex justify-end' : ''}`}>
         {isUser ? (() => {
-          const { body, references } = parseUserMessageContent(msg.content)
+          const { body, references, quote } = parseUserMessageContent(msg.content)
           return (
           <div className="max-w-full">
+            {/* What the lecturer was replying to, shown above their own words
+                the way a quoted reply reads in any messaging app. */}
+            {quote && (
+              /* "You are replying to this." Three things carry that, and the
+                 previous version had none of them:
+                   - the same corner-up-left glyph the Reply button used, so the
+                     gesture and its result share one mark;
+                   - a narrower measure than the bubble, right-aligned to the
+                     same edge, so it reads as subordinate and attached rather
+                     than as a message of its own;
+                   - the assistant's own neutral, not the lecturer's violet, so
+                     it is legible as *quoted from the other side*.
+                 Clamped to two lines: it is a pointer, not the content. */
+              <div className="flex justify-end">
+                <div className="flex max-w-[75%] items-start gap-2.5 rounded-2xl rounded-br-md border border-white/75 bg-white/65 px-2.5 py-2 shadow-[0_4px_12px_rgba(63,47,107,0.07)] backdrop-blur-sm">
+                  <span className="mt-0.5 inline-flex h-5 w-5 flex-none items-center justify-center rounded-md bg-violet-100 text-violet-700">
+                    <CornerUpLeft className="h-3 w-3" />
+                  </span>
+                  <span className="min-w-0 text-left">
+                    <span className="block text-[10px] font-semibold uppercase tracking-[0.08em] text-violet-700">Replying to</span>
+                    <span className="mt-0.5 block text-xs leading-5 text-slate-700 line-clamp-2">{quote}</span>
+                  </span>
+                </div>
+              </div>
+            )}
             {body && (
-              <div className="inline-block max-w-full text-[15px] leading-7 whitespace-pre-wrap px-4 py-2.5 rounded-3xl rounded-br-md bg-violet-500/15 border border-violet-300/30 text-slate-800">
-                {body}
+              /* The copy control sits outside the bubble, to its left, so it
+                 never reflows the text or eats into the bubble's padding. The
+                 row is the hover group; `min-w-0` lets the bubble still shrink
+                 to the column now that it shares a flex line. */
+              <div className="group mt-1 flex items-center justify-end gap-1">
+                <CopyRequestButton text={body} />
+                <div className="min-w-0 max-w-[75%] text-[15px] leading-7 whitespace-pre-wrap px-4 py-2.5 rounded-3xl rounded-br-md bg-violet-500/15 border border-violet-300/30 text-violet-900">
+                  {body}
+                </div>
               </div>
             )}
             {/* Re-referenced files render exactly like freshly attached ones:
@@ -164,7 +362,14 @@ export const MessageRow = memo(function MessageRow({
           </div>
           )
         })() : (
-          <div className="max-w-full text-[15px] leading-7 text-slate-700">
+          <div
+            ref={quoteSourceRef}
+            data-quote-source=""
+            className="max-w-full text-[15px] leading-7 text-slate-700"
+          >
+            {onQuoteReply && (
+              <QuoteReplyOverlay sourceRef={quoteSourceRef} onQuote={onQuoteReply} />
+            )}
             {!isAwaitingAttachments && <RunDetails run={run} isFinal={isFinal} />}
             {run && !isAwaitingAttachments && (
               <div className="mt-2">
@@ -625,7 +830,7 @@ function MessageActionBar({
                       type="button"
                       disabled={exporting !== null}
                       onClick={() => void handleExport(format)}
-                      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-slate-600 hover:bg-violet-50 hover:text-slate-900 disabled:opacity-50"
+                      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-slate-600 hover:bg-violet-50 hover:text-violet-900 disabled:opacity-50"
                     >
                       {exporting === format ? (
                         <Spinner size={14} />
@@ -797,7 +1002,7 @@ export function CitationSourceModal({ source, citedText, onClose }: { source: We
   useModalLifecycle(onClose)
   const supportText = source.supports || citedText
   const visibleDomain = source.display_domain || source.domain
-  return createPortal(<div className="fixed inset-0 z-[360] flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={`Source ${source.index}`} onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><div className="w-full max-w-md rounded-2xl border border-white/60 bg-white/80 p-5 shadow-2xl backdrop-blur-xl"><div className="flex items-start justify-between gap-3"><div><div className="text-xs font-semibold uppercase tracking-wide text-violet-700">Source [{source.index}]</div><h2 className="mt-1 text-lg font-semibold text-slate-900">{source.title}</h2>{visibleDomain && <p className="mt-1 flex items-center gap-1.5 text-sm text-slate-500"><SourceFavicon domain={visibleDomain} url={source.url} className="h-4 w-4 flex-shrink-0 rounded-sm" />{visibleDomain}</p>}</div><button type="button" onClick={onClose} className="rounded-full p-2 text-slate-500 hover:bg-slate-100" aria-label="Close source popup"><X className="h-4 w-4" /></button></div>{supportText && <p className="mt-4 text-sm leading-6 text-slate-600">{supportText}</p>}{source.link_type === 'google_grounding_redirect' && <p className="mt-3 text-xs text-slate-400">Google grounded link</p>}<a href={source.url} target="_blank" rel="noreferrer" className="mt-5 inline-flex items-center gap-2 rounded-lg bg-violet-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-violet-700"><ExternalLink className="h-4 w-4" />Open source</a></div></div>, document.body)
+  return createPortal(<div className="fixed inset-0 z-[360] flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={`Source ${source.index}`} onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><div className="w-full max-w-md rounded-2xl border border-white/60 bg-white/80 p-5 shadow-2xl backdrop-blur-xl"><div className="flex items-start justify-between gap-3"><div><div className="text-xs font-semibold uppercase tracking-wide text-violet-700">Source [{source.index}]</div><h2 className="mt-1 text-lg font-semibold text-slate-900">{source.title}</h2>{visibleDomain && <p className="mt-1 flex items-center gap-1.5 text-sm text-slate-600"><SourceFavicon domain={visibleDomain} url={source.url} className="h-4 w-4 flex-shrink-0 rounded-sm" />{visibleDomain}</p>}</div><button type="button" onClick={onClose} className="rounded-full p-2 text-slate-500 hover:bg-slate-100" aria-label="Close source popup"><X className="h-4 w-4" /></button></div>{supportText && <p className="mt-4 text-sm leading-6 text-slate-600">{supportText}</p>}{source.link_type === 'google_grounding_redirect' && <p className="mt-3 text-xs text-slate-600">Google grounded link</p>}<a href={source.url} target="_blank" rel="noreferrer" className="mt-5 inline-flex items-center gap-2 rounded-lg bg-violet-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-violet-700"><ExternalLink className="h-4 w-4" />Open source</a></div></div>, document.body)
 }
 
 export function SourcesModal({ queries, sources, citations, markdownSources, onClose }: { queries: string[]; sources: WebSourceMetadata[]; citations: ReturnType<typeof normalizeWebCitations>; markdownSources: string; onClose: () => void }) {
@@ -888,7 +1093,7 @@ export function MarkdownBlock({ content, webSources = [], onCitationSelect }: { 
             <table className="min-w-full border-collapse divide-y divide-slate-200 text-sm" {...props} />
           </div>
         ),
-        th: ({ ...props }) => <th className="bg-violet-50 px-3 py-2.5 text-left font-semibold text-violet-950" {...props} />,
+        th: ({ ...props }) => <th className="bg-violet-50 px-3 py-2.5 text-left font-semibold text-violet-900" {...props} />,
         td: ({ ...props }) => <td className="border-t border-slate-100 px-3 py-2.5 align-top leading-6" {...props} />,
         code: ({ className, children, ...props }) => {
           if (!String(children).trim()) return null
@@ -907,7 +1112,7 @@ export function MarkdownBlock({ content, webSources = [], onCitationSelect }: { 
           <pre className="my-4 max-w-full overflow-x-auto whitespace-pre rounded-xl border border-slate-800 bg-slate-950 px-4 py-4 font-mono text-slate-100 shadow-sm" {...props} />
         ),
         blockquote: ({ ...props }) => (
-          <blockquote className="my-4 rounded-r-lg border-l-4 border-violet-400 bg-violet-50/80 px-4 py-2 text-violet-950" {...props} />
+          <blockquote className="my-4 border-l-2 border-violet-300 bg-violet-50/60 px-4 py-2 text-violet-900" {...props} />
         ),
       }}
     >

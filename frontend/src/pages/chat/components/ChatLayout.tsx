@@ -55,6 +55,8 @@ type Props = Pick<
   | 'retryingMessageId'
   | 'cancelActiveRun'
   | 'cancelling'
+  | 'quotedReply'
+  | 'setQuotedReply'
 >
 
 export function ChatLayout(props: Props) {
@@ -103,6 +105,8 @@ export function ChatLayout(props: Props) {
     retryingMessageId,
     cancelActiveRun,
     cancelling,
+    quotedReply,
+    setQuotedReply,
   } = props
 
   const navigate = useNavigate()
@@ -163,6 +167,14 @@ export function ChatLayout(props: Props) {
   const handleRetryMessage = useCallback(
     (message: Parameters<typeof retryAssistantMessage>[0]) => void retryAssistantMessage(message),
     [retryAssistantMessage],
+  )
+
+  const handleQuoteReply = useCallback(
+    (excerpt: string) => {
+      setQuotedReply(excerpt)
+      requestAnimationFrame(() => textareaRef.current?.focus())
+    },
+    [setQuotedReply, textareaRef],
   )
 
   const handleReferenceFromPanel = useCallback(
@@ -266,6 +278,7 @@ export function ChatLayout(props: Props) {
             sending={sending}
             onApproveOutline={handleApproveOutline}
               onRetryMessage={handleRetryMessage}
+            onQuoteReply={handleQuoteReply}
               retryingMessageId={retryingMessageId}
             messagesEndRef={messagesEndRef}
             welcomeContent={
@@ -279,7 +292,7 @@ export function ChatLayout(props: Props) {
 
         <div
           ref={composerRef}
-          className="absolute inset-x-0 bottom-0 z-20 flex flex-col bg-transparent"
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col bg-transparent"
         >
           <ChatInput
             input={input}
@@ -306,6 +319,8 @@ export function ChatLayout(props: Props) {
             onRemoveAttachment={removePendingAttachment}
             onRemoveReferenced={removeReferencedAttachment}
             onPaste={handleComposerPaste}
+            quotedReply={quotedReply}
+            onClearQuotedReply={() => setQuotedReply('')}
             batchId={selectedBatch?.id}
             chatId={activeChat?.chat_id}
             onOpenFilesPanel={() => openSidePanel('files')}

@@ -1,0 +1,9 @@
+{
+  "detector": {
+    "ignoreRules": [
+      "ai-color-palette"
+    ],
+    "ignoreFiles": [],
+    "ignoreValues": []
+  }
+}

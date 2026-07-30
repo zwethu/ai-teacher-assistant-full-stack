@@ -13,3 +13,6 @@ __pycache__/
 
 # Node
 node_modules/
+
+# TypeScript incremental build cache — regenerated on every compile.
+frontend/tsconfig.tsbuildinfo

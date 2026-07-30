@@ -200,20 +200,29 @@ interface ProfileBlockProps {
   onSignOut: () => void
 }
 
-function ProfileAvatar({ photoURL }: { photoURL?: string | null }) {
-  if (photoURL) {
-    return (
-      <img
-        src={photoURL}
-        alt=""
-        className="w-9 h-9 rounded-full object-cover border-2 border-white shadow-sm"
-      />
-    )
-  }
+function ProfileAvatarFallback() {
   return (
     <span className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-gradient-to-tr from-violet-500 to-violet-700 text-white shadow-md shadow-violet-300/70">
       <User className="w-5 h-5" />
     </span>
+  )
+}
+
+function ProfileAvatar({ photoURL }: { photoURL?: string | null }) {
+  const [failed, setFailed] = useState(false)
+
+  if (!photoURL || failed) {
+    return <ProfileAvatarFallback />
+  }
+
+  return (
+    <img
+      src={photoURL}
+      alt=""
+      referrerPolicy="no-referrer"
+      className="w-9 h-9 rounded-full object-cover border-2 border-white shadow-sm"
+      onError={() => setFailed(true)}
+    />
   )
 }
 

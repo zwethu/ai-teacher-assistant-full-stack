@@ -29,8 +29,8 @@ export default function AppLayout() {
             </button>
           </header>
 
-          <main className="relative flex-1 flex flex-col min-h-0 overflow-y-auto focus:outline-none p-4 md:p-8">
-            <div className="max-w-7xl mx-auto w-full flex-1 flex flex-col min-h-0">
+          <main className="relative flex-1 flex flex-col min-h-0 overflow-hidden focus:outline-none px-4 pt-4 pb-4 md:px-8 md:pt-6 md:pb-6">
+            <div className="max-w-7xl mx-auto w-full flex-1 flex flex-col min-h-0 overflow-y-auto">
               <Outlet />
             </div>
           </main>

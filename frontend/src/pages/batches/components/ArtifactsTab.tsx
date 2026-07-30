@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Copy, ExternalLink, FileText, Filter, Trash2 } from 'lucide-react'
+import { Copy, ExternalLink, FileText, RefreshCw, Trash2 } from 'lucide-react'
 import type { Artifact, ArtifactSummary } from '../../../services/artifactService'
 import { formatDateTime } from '../../../utils/formatDate'
 
@@ -115,32 +115,40 @@ export function ArtifactsTab({ artifacts, summary, loading, onRefresh, onDelete 
           onClick={onRefresh}
           className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
         >
-          <Filter className="w-4 h-4" />
+          <RefreshCw className="w-4 h-4" />
           Refresh
         </button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-        <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="rounded-md border border-slate-200 px-3 py-2 text-sm">
+        <select
+          value={typeFilter}
+          onChange={(e) => setTypeFilter(e.target.value)}
+          className="rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm font-medium text-slate-800 shadow-sm focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+        >
           {TYPE_OPTIONS.map((option) => (
             <option key={option.label} value={option.value}>{option.label}</option>
           ))}
         </select>
-        <select value={weekFilter} onChange={(e) => setWeekFilter(e.target.value)} className="rounded-md border border-slate-200 px-3 py-2 text-sm">
+        <select
+          value={weekFilter}
+          onChange={(e) => setWeekFilter(e.target.value)}
+          className="rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm font-medium text-slate-800 shadow-sm focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+        >
           <option value="">All weeks</option>
           {weeks.map((week) => (
             <option key={week} value={week}>Week {week}</option>
           ))}
         </select>
-        <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
-          <input type="checkbox" checked={currentOnly} onChange={(e) => setCurrentOnly(e.target.checked)} />
+        <label className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm font-medium text-slate-800 shadow-sm">
+          <input type="checkbox" checked={currentOnly} onChange={(e) => setCurrentOnly(e.target.checked)} className="accent-violet-600" />
           Current only
         </label>
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search title"
-          className="rounded-md border border-slate-200 px-3 py-2 text-sm"
+          className="rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 shadow-sm focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
         />
       </div>
 

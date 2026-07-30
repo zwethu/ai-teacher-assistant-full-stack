@@ -234,7 +234,7 @@ export function ChatLayout(props: Props) {
             ) : !batchesLoading && batches.length === 0 ? (
               <NoBatchesView onGoToBatches={() => navigate('/batches')} />
             ) : (
-              <div className="max-w-3xl mx-auto px-4 py-8 min-h-full flex flex-col items-center justify-center text-center">
+              <div className="chat-hero-enter max-w-3xl mx-auto px-4 py-8 min-h-full flex flex-col items-center justify-center text-center">
                 <div className="w-14 h-14 rounded-2xl bg-white/50 border border-white/60 shadow-lg flex items-center justify-center mb-6">
                   <Sparkles className="w-7 h-7 text-violet-600" />
                 </div>
@@ -257,7 +257,7 @@ export function ChatLayout(props: Props) {
           </main>
         ) : !activeChat ? (
           <main className="flex-1 overflow-y-auto" style={{ paddingBottom: composerHeight }}>
-            <div className="max-w-3xl mx-auto px-4 py-8 min-h-full flex flex-col items-center justify-center text-center">
+            <div className="chat-hero-enter max-w-3xl mx-auto px-4 py-8 min-h-full flex flex-col items-center justify-center text-center">
               <div className="w-12 h-12 rounded-2xl bg-white/50 border border-white/60 shadow-lg flex items-center justify-center mb-4">
                 <Sparkles className="w-6 h-6 text-violet-600" />
               </div>
@@ -292,7 +292,7 @@ export function ChatLayout(props: Props) {
 
         <div
           ref={composerRef}
-          className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col bg-transparent"
+          className="chat-composer-enter pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col bg-transparent"
         >
           <ChatInput
             input={input}

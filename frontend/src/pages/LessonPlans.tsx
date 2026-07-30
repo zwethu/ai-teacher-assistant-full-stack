@@ -138,7 +138,7 @@ export default function LessonPlans() {
   const missing = missingRequiredInputs(form, Boolean(selectedBatch))
 
   return (
-    <div>
+    <div className="pb-12">
       <Toast toast={toast} onDismiss={() => setToast(null)} />
 
       <div className="mb-6">
@@ -160,7 +160,7 @@ export default function LessonPlans() {
               <Plus className="h-4 w-4" /> Generate another
             </button>
           </div>
-          <div className="rounded-xl border border-slate-200 bg-white shadow-sm min-h-[24rem] max-h-[80vh] overflow-y-auto">
+          <div className="rounded-xl border border-slate-200 bg-white shadow-sm min-h-[24rem]">
             <GenerationRunView batch={selectedBatch} run={run} accent="primary" />
           </div>
         </div>

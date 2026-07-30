@@ -74,12 +74,14 @@ export function BatchDetailView({
   handleDeleteArtifact,
   refreshArtifacts,
 }: Props) {
+  const fillHeight = detailTab === 'materials'
+
   return (
-    <div>
+    <div className={fillHeight ? 'flex h-full min-h-0 flex-col overflow-hidden' : 'pb-8'}>
       <Toast toast={toast} onDismiss={() => setToast(null)} />
 
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-        <div>
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 mb-3 shrink-0">
+        <div className="min-w-0">
           <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-2xl font-bold text-slate-800 tracking-tight">
               {selectedBatch.batch_name}
@@ -98,7 +100,7 @@ export function BatchDetailView({
             {selectedBatch.createdAt && <> · Created {formatDate(selectedBatch.createdAt)}</>}
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-shrink-0">
           <button type="button" onClick={() => setSelectedBatch(null)} className={BTN_SECONDARY}>
             <ArrowLeft className="w-4 h-4 mr-1" />
             Back
@@ -106,7 +108,7 @@ export function BatchDetailView({
           <button
             type="button"
             onClick={() => handleDeleteBatch(selectedBatch)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-md border border-red-200 text-red-700 bg-white hover:bg-red-50 transition-colors"
+            className="inline-flex items-center gap-1.5 min-h-[44px] px-3 py-2 text-sm font-medium rounded-md border border-red-200 text-red-700 bg-white hover:bg-red-50 transition-colors"
           >
             <Trash2 className="w-4 h-4" />
             Delete Batch
@@ -114,16 +116,16 @@ export function BatchDetailView({
         </div>
       </div>
 
-      <div className="flex gap-1 mb-6 border-b border-slate-200">
+      <div className="flex gap-1 mb-3 border-b border-slate-200 overflow-x-auto shrink-0">
         <button
           type="button"
           onClick={() => setDetailTab('planning')}
-          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${detailTab === 'planning' ? 'border-violet-600 text-violet-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${detailTab === 'planning' ? 'border-violet-600 text-violet-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
         ><BookOpenCheck className="w-4 h-4" />Planning</button>
         <button
           type="button"
           onClick={() => setDetailTab('students')}
-          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
             detailTab === 'students'
               ? 'border-violet-600 text-violet-700'
               : 'border-transparent text-slate-500 hover:text-slate-700'
@@ -135,7 +137,7 @@ export function BatchDetailView({
         <button
           type="button"
           onClick={() => setDetailTab('materials')}
-          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
             detailTab === 'materials'
               ? 'border-violet-600 text-violet-700'
               : 'border-transparent text-slate-500 hover:text-slate-700'
@@ -152,7 +154,7 @@ export function BatchDetailView({
         <button
           type="button"
           onClick={() => setDetailTab('artifacts')}
-          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
             detailTab === 'artifacts'
               ? 'border-violet-600 text-violet-700'
               : 'border-transparent text-slate-500 hover:text-slate-700'
@@ -168,45 +170,47 @@ export function BatchDetailView({
         </button>
       </div>
 
-      {detailTab === 'students' && (
-        <StudentsTab
-          students={students}
-          studentsLoading={studentsLoading}
-          studentForm={studentForm}
-          setStudentForm={setStudentForm}
-          addingStudent={addingStudent}
-          csvUploading={csvUploading}
-          onAddStudent={handleAddStudent}
-          onRemoveStudent={handleRemoveStudent}
-          onCsvUpload={handleCsvUpload}
-        />
-      )}
+      <div className={fillHeight ? 'flex min-h-0 flex-1 flex-col' : undefined}>
+        {detailTab === 'students' && (
+          <StudentsTab
+            students={students}
+            studentsLoading={studentsLoading}
+            studentForm={studentForm}
+            setStudentForm={setStudentForm}
+            addingStudent={addingStudent}
+            csvUploading={csvUploading}
+            onAddStudent={handleAddStudent}
+            onRemoveStudent={handleRemoveStudent}
+            onCsvUpload={handleCsvUpload}
+          />
+        )}
 
-      {detailTab === 'materials' && (
-        <MaterialsTab
-          batchId={selectedBatch.id}
-          files={files}
-          filesLoading={filesLoading}
-          fileUploading={fileUploading}
-          fileInputRef={fileInputRef}
-          onFileUpload={handleFileUpload}
-          onDeleteFile={handleDeleteFile}
-          onRefreshFiles={handleRefreshFiles}
-          onOpenPlanning={() => setDetailTab('planning')}
-        />
-      )}
+        {detailTab === 'materials' && (
+          <MaterialsTab
+            batchId={selectedBatch.id}
+            files={files}
+            filesLoading={filesLoading}
+            fileUploading={fileUploading}
+            fileInputRef={fileInputRef}
+            onFileUpload={handleFileUpload}
+            onDeleteFile={handleDeleteFile}
+            onRefreshFiles={handleRefreshFiles}
+            onOpenPlanning={() => setDetailTab('planning')}
+          />
+        )}
 
-      {detailTab === 'planning' && <PlanningTab batchId={selectedBatch.id} />}
+        {detailTab === 'planning' && <PlanningTab batchId={selectedBatch.id} />}
 
-      {detailTab === 'artifacts' && (
-        <ArtifactsTab
-          artifacts={artifacts}
-          summary={artifactSummary}
-          loading={artifactsLoading}
-          onRefresh={refreshArtifacts}
-          onDelete={handleDeleteArtifact}
-        />
-      )}
+        {detailTab === 'artifacts' && (
+          <ArtifactsTab
+            artifacts={artifacts}
+            summary={artifactSummary}
+            loading={artifactsLoading}
+            onRefresh={refreshArtifacts}
+            onDelete={handleDeleteArtifact}
+          />
+        )}
+      </div>
     </div>
   )
 }

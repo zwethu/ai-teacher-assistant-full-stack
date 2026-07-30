@@ -102,9 +102,9 @@ export function PlanningTab({ batchId }: { batchId: string }) {
   return <div className="space-y-6">
     {error && <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
     {generating && batch && <GeneratePlanPanel batch={batch} run={run} onClose={() => { setGenerating(false); void refresh() }} />}
-    {!generating && (!current ? <div className="rounded-2xl border border-dashed border-slate-300 bg-white/60 px-6 py-14 text-center"><h2 className="font-semibold text-slate-800">No active Course Plan</h2><p className="mt-2 text-sm text-slate-500">Generate a plan with AI, or save one from an assistant message’s action menu in Chat.</p><button onClick={() => setGenerating(true)} disabled={!batch} className="mt-4 inline-flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-60"><Sparkles className="h-4 w-4"/>Generate with AI</button></div> :
+    {!generating && (!current ? <div className="rounded-2xl border border-dashed border-slate-300 bg-white/60 px-6 py-14 text-center"><h2 className="font-semibold text-slate-800">No active Course Plan</h2><p className="mt-2 text-sm text-slate-500">Generate a plan with AI, or save one from an assistant message’s action menu in Chat.</p><Button type="button" onClick={() => setGenerating(true)} disabled={!batch} leadingIcon={<Sparkles className="h-4 w-4" />} className="mt-4">Generate with AI</Button></div> :
       <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="mb-5 flex flex-wrap items-start justify-between gap-3"><div><div className="text-xs font-semibold uppercase tracking-wide text-violet-700">Current · Version {current.version}</div><h2 className="mt-1 text-xl font-bold text-slate-900">{current.title}</h2><p className="text-xs text-slate-400">Updated {formatDateTime(current.updated_at || current.created_at || '')}</p></div><div className="flex gap-2"><button onClick={() => setGenerating(true)} disabled={!batch} className="inline-flex items-center gap-2 rounded-lg bg-violet-600 px-3 py-2 text-sm text-white hover:bg-violet-700 disabled:opacity-60"><Sparkles className="h-4 w-4"/>Generate</button><button onClick={beginEdit} className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm"><Pencil className="h-4 w-4"/>Edit as new version</button><button onClick={archive} disabled={saving} className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm text-red-700"><Archive className="h-4 w-4"/>Archive</button></div></div>
+        <div className="mb-5 flex flex-wrap items-start justify-between gap-3"><div><div className="text-xs font-semibold uppercase tracking-wide text-violet-700">Current · Version {current.version}</div><h2 className="mt-1 text-xl font-bold text-slate-900">{current.title}</h2><p className="text-xs text-slate-400">Updated {formatDateTime(current.updated_at || current.created_at || '')}</p></div><div className="flex flex-wrap gap-2"><Button type="button" onClick={() => setGenerating(true)} disabled={!batch} leadingIcon={<Sparkles className="h-4 w-4" />}>Generate</Button><Button type="button" variant="secondary" onClick={beginEdit} leadingIcon={<Pencil className="h-4 w-4" />}>Edit as new version</Button><Button type="button" variant="danger" onClick={archive} disabled={saving} leadingIcon={<Archive className="h-4 w-4" />}>Archive</Button></div></div>
         <BlueprintView blueprint={current}/>
       </section>)}
     <section><div className="mb-3 flex items-center justify-between"><h2 className="font-semibold text-slate-800">Version history</h2><button onClick={() => void refresh()} className="rounded p-1 text-slate-500"><RefreshCw className="h-4 w-4"/></button></div><div className="space-y-2">{history.length === 0 ? <p className="text-sm text-slate-500">No saved versions yet.</p> : history.map((item)=><details key={item.blueprint_id} className="rounded-xl border border-slate-200 bg-white px-4 py-3"><summary className="cursor-pointer text-sm font-medium text-slate-800">v{item.version} · {item.title} <span className="ml-2 text-xs font-normal text-slate-400">{item.status}</span></summary><div className="mt-4"><BlueprintView blueprint={item}/></div><div className="mt-3 flex flex-wrap gap-2 border-t border-slate-100 pt-3">{item.blueprint_id !== current?.blueprint_id && <button onClick={()=>void revertVersion(item.blueprint_id, item.version)} disabled={saving} className="inline-flex items-center gap-1.5 rounded-md border border-violet-200 px-3 py-1.5 text-xs font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-60"><RotateCcw className="h-3.5 w-3.5"/>Make current</button>}<button onClick={()=>void deleteVersion(item.blueprint_id, item.version)} disabled={saving} className="inline-flex items-center gap-1.5 rounded-md border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-60"><Trash2 className="h-3.5 w-3.5"/>Delete</button></div></details>)}</div></section>
@@ -167,11 +167,15 @@ function GeneratePlanPanel({
             </label>
             <GenerationAttachments run={run} />
             <div className="flex flex-col items-end gap-2">
-              <button onClick={() => void handleGenerate()} disabled={run.sending || missing.length > 0}
-                className="inline-flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed">
-                {run.sending ? <Spinner tone="inverse" size={16} /> : <Sparkles className="h-4 w-4" />}
+              <Button
+                type="button"
+                onClick={() => void handleGenerate()}
+                disabled={run.sending || missing.length > 0}
+                loading={run.sending}
+                leadingIcon={<Sparkles className="h-4 w-4" />}
+              >
                 Generate outline
-              </button>
+              </Button>
               {missing.length > 0 && !run.sending && (
                 <p className="text-xs text-slate-500">Add {missing.join(', ')} to continue.</p>
               )}

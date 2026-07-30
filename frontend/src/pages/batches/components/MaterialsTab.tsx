@@ -34,7 +34,7 @@ import {
 } from '../../../services/chatService'
 import { formatDateTime } from '../../../utils/formatDate'
 import { emitChatCreated } from '../../../utils/chatEvents'
-import { BTN_PRIMARY } from '../constants'
+import { BTN_PRIMARY, BTN_SECONDARY } from '../constants'
 import { IndexStatusBadge } from './IndexStatusBadge'
 import { getCurrentCourseBlueprint, type CourseBlueprint } from '../../../services/courseBlueprintService'
 import { IconButton, Spinner } from '../../../design-system'
@@ -335,24 +335,25 @@ export function MaterialsTab({
   }
 
   return (
-    <div className="flex flex-col min-h-[560px]">
-      <div className="flex flex-1 min-h-0 gap-6">
-        <div className="flex-1 min-w-0 flex flex-col min-h-0">
-          <h3 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
-            <MessageCircle className="w-4 h-4 text-violet-600" />
-            Chat History
-          </h3>
-          <div className="flex-1 overflow-y-auto bg-white rounded-2xl shadow-sm border border-slate-100">
+    <div className="flex h-full min-h-0 flex-col gap-3">
+      {/* Columns share the same top edge; composer stays pinned below. */}
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_20rem] lg:overflow-hidden lg:items-stretch">
+        <section className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm lg:h-full">
+          <div className="flex shrink-0 items-center gap-2 border-b border-slate-100 px-4 py-3">
+            <MessageCircle className="h-4 w-4 text-violet-600" />
+            <h3 className="text-sm font-semibold text-slate-700">Chat History</h3>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto">
             {chatsLoading ? (
-              <div className="flex flex-col items-center justify-center py-16 gap-3">
+              <div className="flex flex-col items-center justify-center gap-3 py-16">
                 <Spinner size={24} />
                 <p className="text-sm text-slate-500">Loading chats…</p>
               </div>
             ) : chats.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-center px-6">
-                <MessageCircle className="w-8 h-8 text-slate-300 mb-2" />
+              <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
+                <MessageCircle className="mb-2 h-8 w-8 text-slate-300" />
                 <span className="text-sm font-medium text-slate-500">No chats yet.</span>
-                <p className="text-xs text-slate-400 mt-1">
+                <p className="mt-1 text-xs text-slate-400">
                   Start a conversation using the input below.
                 </p>
               </div>
@@ -360,9 +361,7 @@ export function MaterialsTab({
               <ul className="divide-y divide-slate-100">
                 {chats.map((chat) => (
                   <li key={chat.chat_id} className="relative group">
-                    <div
-                      className="w-full text-left px-4 py-3 hover:bg-violet-50/60 transition-colors"
-                    >
+                    <div className="w-full px-4 py-3 text-left transition-colors hover:bg-violet-50/60">
                       <div className="flex items-start justify-between gap-3">
                         <div
                           className="min-w-0 flex-1 cursor-pointer"
@@ -381,22 +380,22 @@ export function MaterialsTab({
                                 if (e.key === 'Enter') void commitRename()
                                 if (e.key === 'Escape') cancelRename()
                               }}
-                              className="w-full bg-transparent text-sm font-medium text-slate-900 outline-none border-b border-violet-400"
+                              className="w-full border-b border-violet-400 bg-transparent text-sm font-medium text-slate-900 outline-none"
                               onClick={(e) => e.stopPropagation()}
                             />
                           ) : (
-                            <div className="text-sm font-medium text-slate-900 truncate">
+                            <div className="truncate text-sm font-medium text-slate-900">
                               {chat.title}
                             </div>
                           )}
                           {chat.preview && renamingId !== chat.chat_id && (
-                            <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">
+                            <p className="mt-0.5 line-clamp-2 text-xs text-slate-500">
                               {chat.preview}
                             </p>
                           )}
                         </div>
-                        <div className="flex items-start gap-2 flex-shrink-0">
-                          <span className="text-xs text-slate-400 whitespace-nowrap">
+                        <div className="flex flex-shrink-0 items-start gap-2">
+                          <span className="whitespace-nowrap text-xs text-slate-400">
                             {chat.updated_at || chat.created_at
                               ? formatDateTime(chat.updated_at ?? chat.created_at)
                               : '—'}
@@ -432,9 +431,11 @@ export function MaterialsTab({
                               <>
                                 <button
                                   type="button"
-                                  onClick={() => setMenuOpenId((value) => (
-                                    value === chat.chat_id ? null : chat.chat_id
-                                  ))}
+                                  onClick={() =>
+                                    setMenuOpenId((value) =>
+                                      value === chat.chat_id ? null : chat.chat_id,
+                                    )
+                                  }
                                   className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
                                   aria-label="Open chat actions"
                                 >
@@ -474,20 +475,42 @@ export function MaterialsTab({
               </ul>
             )}
           </div>
-        </div>
+        </section>
 
-        <div className="w-80 flex-shrink-0 flex flex-col min-h-0 gap-4">
-          <div className="rounded-xl border border-violet-200 bg-violet-50/70 p-4">
-            <div className="flex items-center gap-2 text-sm font-semibold text-violet-900"><BookOpenCheck className="h-4 w-4"/>Course Blueprint</div>
-            {blueprint ? <><p className="mt-2 text-sm font-medium text-slate-800">{blueprint.title}</p><p className="mt-1 text-xs text-slate-500">Version {blueprint.version} · {blueprint.weekly_plan.length} weeks planned</p><p className="mt-1 text-xs text-slate-400">Updated {formatDateTime(blueprint.updated_at || blueprint.created_at || '')}</p></> : <p className="mt-2 text-xs text-slate-600">No active planning memory yet.</p>}
-            <button onClick={onOpenPlanning} className="mt-3 w-full rounded-lg border border-violet-300 bg-white px-3 py-2 text-sm font-medium text-violet-800">Open Blueprint</button>
+        <aside className="flex min-h-0 min-w-0 flex-col gap-4 lg:h-full lg:overflow-y-auto">
+          <div className="shrink-0 rounded-2xl border border-violet-200 bg-violet-50/70 p-4">
+            <div className="flex items-center gap-2 text-sm font-semibold text-violet-900">
+              <BookOpenCheck className="h-4 w-4" />
+              Course Blueprint
+            </div>
+            {blueprint ? (
+              <>
+                <p className="mt-2 text-sm font-medium text-slate-800">{blueprint.title}</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Version {blueprint.version} · {blueprint.weekly_plan.length} weeks planned
+                </p>
+                <p className="mt-1 text-xs text-slate-400">
+                  Updated {formatDateTime(blueprint.updated_at || blueprint.created_at || '')}
+                </p>
+              </>
+            ) : (
+              <p className="mt-2 text-xs text-slate-600">No active planning memory yet.</p>
+            )}
+            <button
+              type="button"
+              onClick={onOpenPlanning}
+              className={`${BTN_SECONDARY} mt-3 w-full`}
+            >
+              Open Blueprint
+            </button>
           </div>
-          <div>
-            <h3 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
-              <Upload className="w-4 h-4 text-violet-600" />
+
+          <div className="shrink-0">
+            <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-700">
+              <Upload className="h-4 w-4 text-violet-600" />
               Upload Materials
             </h3>
-            <p className="text-xs text-slate-500 mb-3">
+            <p className="mb-3 text-xs text-slate-500">
               PDFs, documents, and text files are indexed for AI search. Up to{' '}
               {MAX_COURSE_SPACE_FILES} files per space.
             </p>
@@ -512,7 +535,7 @@ export function MaterialsTab({
                 </>
               ) : (
                 <>
-                  <Upload className="w-4 h-4" />
+                  <Upload className="h-4 w-4" />
                   Upload File
                 </>
               )}
@@ -524,13 +547,15 @@ export function MaterialsTab({
             )}
           </div>
 
-          <div className="flex-1 min-h-0 flex flex-col">
-            <div className="mb-3 flex items-center justify-between gap-2">
-              <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
-                <FileText className="w-4 h-4 text-violet-600" />
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <div className="mb-3 flex shrink-0 items-center justify-between gap-2">
+              <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                <FileText className="h-4 w-4 text-violet-600" />
                 Uploaded Files
                 {files.length > 0 && (
-                  <span className="text-xs font-normal text-slate-400">({files.length} / {MAX_COURSE_SPACE_FILES})</span>
+                  <span className="text-xs font-normal text-slate-400">
+                    ({files.length} / {MAX_COURSE_SPACE_FILES})
+                  </span>
                 )}
               </h3>
               <button
@@ -541,29 +566,29 @@ export function MaterialsTab({
                 aria-label="Refresh files"
                 title="Refresh files"
               >
-                <RefreshCw className={`w-4 h-4 ${filesLoading ? 'animate-spin' : ''}`} />
+                <RefreshCw className={`h-4 w-4 ${filesLoading ? 'animate-spin' : ''}`} />
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto bg-white rounded-2xl shadow-sm border border-slate-100">
+            <div className="min-h-[12rem] flex-1 overflow-y-auto rounded-2xl border border-slate-100 bg-white shadow-sm">
               {filesLoading && files.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-12 gap-3">
+                <div className="flex flex-col items-center justify-center gap-3 py-12">
                   <Spinner size={24} />
                   <p className="text-sm text-slate-500">Loading files…</p>
                 </div>
               ) : files.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-12 text-center px-4">
-                  <FileText className="w-7 h-7 text-slate-300 mb-2" />
+                <div className="flex flex-col items-center justify-center px-4 py-12 text-center">
+                  <FileText className="mb-2 h-7 w-7 text-slate-300" />
                   <span className="text-sm font-medium text-slate-500">No files uploaded.</span>
                 </div>
               ) : (
                 <ul className="divide-y divide-slate-100">
                   {files.map((f) => (
-                    <li key={f.file_id} className="px-4 py-3 hover:bg-slate-50/80 transition-colors">
+                    <li key={f.file_id} className="px-4 py-3 transition-colors hover:bg-slate-50/80">
                       <div className="flex items-start gap-2">
-                        <FileText className="w-4 h-4 text-slate-400 flex-shrink-0 mt-0.5" />
+                        <FileText className="mt-0.5 h-4 w-4 flex-shrink-0 text-slate-400" />
                         <div className="min-w-0 flex-1">
                           <div
-                            className="text-sm font-medium text-slate-900 truncate"
+                            className="truncate text-sm font-medium text-slate-900"
                             title={f.file_name}
                           >
                             {f.file_title || f.file_name}
@@ -573,21 +598,27 @@ export function MaterialsTab({
                             <p className="mt-1 text-xs font-medium text-slate-600">
                               {batchFileStatusLabel(f)}
                             </p>
-                            {['uploading', 'pending', 'indexing', 'deleting'].includes(f.index_status) && (
-                              <p className="text-xs text-slate-500 mt-1 animate-pulse">
+                            {['uploading', 'pending', 'indexing', 'deleting'].includes(
+                              f.index_status,
+                            ) && (
+                              <p className="mt-1 animate-pulse text-xs text-slate-500">
                                 {f.index_message || 'Indexing in progress...'}
                               </p>
                             )}
                             {f.index_error && (
-                              <p className="text-xs text-red-600 mt-1 break-words">
+                              <p className="mt-1 break-words text-xs text-red-600">
                                 {f.index_error}
                               </p>
                             )}
-                            {f.overlay_warning && <p className="mt-1 break-words text-xs text-amber-700">{f.overlay_warning}</p>}
+                            {f.overlay_warning && (
+                              <p className="mt-1 break-words text-xs text-amber-700">
+                                {f.overlay_warning}
+                              </p>
+                            )}
                           </div>
                           {f.created_at && (
-                            <span className="flex items-center gap-1 text-xs text-slate-400 mt-1">
-                              <Clock className="w-3 h-3" />
+                            <span className="mt-1 flex items-center gap-1 text-xs text-slate-400">
+                              <Clock className="h-3 w-3" />
                               {formatDateTime(new Date(f.created_at))}
                             </span>
                           )}
@@ -596,10 +627,10 @@ export function MaterialsTab({
                           type="button"
                           onClick={() => onDeleteFile(f)}
                           disabled={f.index_status === 'deleting'}
-                          className="p-1.5 rounded-md text-slate-400 hover:text-red-600 hover:bg-red-50 disabled:opacity-50 transition-colors flex-shrink-0"
+                          className="flex-shrink-0 rounded-md p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
                           aria-label="Delete file"
                         >
-                          <Trash2 className="w-4 h-4" />
+                          <Trash2 className="h-4 w-4" />
                         </button>
                       </div>
                     </li>
@@ -608,27 +639,23 @@ export function MaterialsTab({
               )}
             </div>
           </div>
-        </div>
+        </aside>
       </div>
 
-      {/* Same composer as the chat page — shared chrome, so the two cannot
-          drift. The controls differ: there is no chat yet to attach files to or
-          run a workflow in, so this row carries only the web-search toggle,
-          whose value travels with the first message. */}
-      <div className="flex-shrink-0 pt-4 mt-4 border-t border-slate-200/80">
-        <div className="max-w-3xl">
+      <div className="shrink-0 border-t border-slate-200/80 pt-3">
+        <div className="w-full max-w-3xl">
           {attachmentErrors.map((error) => (
-            <p key={error} className="mb-1 text-xs text-red-600">{error}</p>
+            <p key={error} className="mb-1 text-xs text-red-600">
+              {error}
+            </p>
           ))}
           <ComposerTint active={webSearch}>
             <ComposerSurface>
-              {/* Same eased growth as the chat composer, from the same shared
-                  primitives — a staged file arriving here must not feel like a
-                  different product from one attached in a chat. */}
-              {/* Keyed on the entries, not stagedFiles, so removing the last
-                  tile plays as two beats: the tile leaves, then the box closes
-                  behind it. */}
-              <ComposerCollapse open={stagedEntries.length > 0} region="attachments" className="px-1.5 pb-1 pt-2">
+              <ComposerCollapse
+                open={stagedEntries.length > 0}
+                region="attachments"
+                className="px-1.5 pb-1 pt-2"
+              >
                 <div className="flex flex-wrap gap-2">
                   {stagedEntries.map(({ key, item, leaving }) => (
                     <div key={key} className={leaving ? 'mila-tile-out' : 'mila-tile-in'}>

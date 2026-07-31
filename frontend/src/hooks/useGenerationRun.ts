@@ -248,11 +248,12 @@ export function useGenerationRun(batch: Batch | null, persistKey?: string) {
   const appendRunEvent = useCallback((runId: string, event: AgentRunEvent) => {
     setRunStates((prev) => {
       const current = prev[runId] || { status: 'running' as AgentRunStatus, events: [], steps: {} }
+      // Stable sort on the timestamp alone — `created_at` is whole seconds and
+      // `event_id` is a random uuid, so tie-breaking on the id shuffles
+      // everything inside one second. See the same note in useChatPage.
       const events = current.events.some((e) => e.event_id === event.event_id)
         ? current.events
-        : [...current.events, event].sort(
-            (a, b) => (a.created_at || 0) - (b.created_at || 0) || a.event_id.localeCompare(b.event_id),
-          )
+        : [...current.events, event].sort((a, b) => (a.created_at || 0) - (b.created_at || 0))
       return { ...prev, [runId]: { ...current, events } }
     })
   }, [])

@@ -63,6 +63,10 @@ def create_quiz_form_for_user(
                 source_lines.append(f"• [{source.get('source_type', 'web')}] {label}{f' — {url}' if url else ''}")
         if source_lines:
             description = (description + "\n\nSources:\n" + "\n".join(source_lines)).strip()
+    # Forms API rejects info.description beyond 4096 chars — never let sources
+    # (or an unusually long model description) fail the whole export.
+    if len(description) > 4000:
+        description = description[:4000].rstrip() + "…"
 
     forms = _build_forms_service(uid)
     drive = _build_drive_service(uid)

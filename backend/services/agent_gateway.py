@@ -150,6 +150,7 @@ async def start_chat_run(
         "status": "running"
     }
     """
+    preflight_start = time.perf_counter()
     connectors = _normalize_connectors(connectors)
 
     # --- 1. Load trusted batch context from Firestore ---
@@ -190,7 +191,7 @@ async def start_chat_run(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    agent_session_id = ensure_chat_agent_session(
+    agent_session_id, session_existed = ensure_chat_agent_session(
         batch_id=batch_id,
         chat_id=chat_id,
         lecturer_id=lecturer_id,
@@ -250,6 +251,7 @@ async def start_chat_run(
     stash_run_dispatch(
         batch_id=batch_id, chat_id=chat_id, run_id=run_id,
         session_state=session_state, user_message=user_message,
+        session_assume_exists=session_existed,
     )
 
     # --- 6. Dispatch now, or defer until attachments finish processing ---
@@ -284,8 +286,10 @@ async def start_chat_run(
 
     # --- 7. Return immediately ---
     logger.info(
-        "gateway run_id=%s chat_id=%s batch_id=%s lecturer_id=%s status=%s pending_attachments=%d",
+        "gateway run_id=%s chat_id=%s batch_id=%s lecturer_id=%s status=%s pending_attachments=%d "
+        "event=preflight_total duration_ms=%d",
         run_id, chat_id, batch_id, lecturer_id, run_status, len(pending_ids),
+        int((time.perf_counter() - preflight_start) * 1000),
     )
     return {
         "user_message": user_msg,
@@ -328,6 +332,7 @@ async def run_agent_task(batch_id: str, chat_id: str, run_id: str) -> None:
         lecturer_id=str(run.get("lecturer_id") or ""),
         user_message=str(payload.get("user_message") or ""),
         session_state=payload.get("session_state") or {},
+        session_assume_exists=bool(payload.get("session_assume_exists")),
     )
 
 
@@ -1568,6 +1573,7 @@ async def _run_agent_background(
     lecturer_id: str,
     user_message: str,
     session_state: dict[str, Any],
+    session_assume_exists: bool = False,
 ) -> None:
     """Stream the Agent Engine response, persist the result, update run status.
 
@@ -1636,6 +1642,7 @@ async def _run_agent_background(
                 session_id=agent_session_id,
                 lecturer_id=lecturer_id,
                 session_state=session_state,
+                session_assume_exists=session_assume_exists,
             )
         ) as agent_stream:
             # Ripping the stream out from under the SDK can surface as an error

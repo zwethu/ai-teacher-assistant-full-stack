@@ -33,17 +33,34 @@
   /* Quiet scrollbars, everywhere.
      The platform default — a wide track with stepper arrows — is visually the
      loudest thing on most screens and pulls the eye to the edge of whatever it
-     borders. This keeps the position cue but makes it a soft violet thumb
-     floating on a transparent track.
+     borders. So the thumb stays invisible at rest and fades in as a soft violet
+     capsule once the pointer is over the scrolling area: the page reads clean,
+     and the position cue is there exactly when someone is in a position to use
+     it. The gutter is reserved either way, so revealing the thumb never reflows
+     the content beneath it.
 
-     scrollbar-width / scrollbar-color are inherited, so setting them on <html>
-     reaches every element (Firefox). The ::-webkit-* pseudo-elements are not
-     inherited, hence the universal selector for Chromium and Safari.
+     scrollbar-color must be declared on `*`, not just <html>. It is an
+     inherited property, so a rule like `*:hover` on an ancestor would otherwise
+     cascade down and light up a scrollbar the pointer is nowhere near — which
+     is every scrollbar, the moment the cursor enters the window. Declaring it
+     directly on every element beats the inherited value, so only the element
+     actually under the pointer reveals its thumb.
+
+     Chromium ignores the ::-webkit-scrollbar pseudo-elements outright when
+     scrollbar-color / scrollbar-width are set, so those rules below are purely
+     a fallback for engines without the standard properties.
 
      .no-scrollbar still wins: a class beats `*`, and a rule on the element
      beats an inherited value. */
   html {
     scrollbar-width: thin;
+  }
+
+  * {
+    scrollbar-color: transparent transparent;
+  }
+
+  *:hover {
     scrollbar-color: rgba(187, 164, 226, 0.6) transparent;
   }
 
@@ -58,15 +75,32 @@
   }
 
   *::-webkit-scrollbar-thumb {
-    background-color: rgba(187, 164, 226, 0.6);
+    background-color: transparent;
     border-radius: 9999px;
     /* transparent border + content-box clip gives the thumb breathing room */
     border: 3px solid transparent;
     background-clip: content-box;
+    transition: background-color 0.2s ease;
+  }
+
+  *:hover::-webkit-scrollbar-thumb {
+    background-color: rgba(187, 164, 226, 0.6);
   }
 
   *::-webkit-scrollbar-thumb:hover {
     background-color: rgba(157, 128, 203, 0.85);
+  }
+
+  /* Touch and reduced-motion users never get a hover state — keep the thumb
+     permanently visible for them rather than permanently hidden. */
+  @media (hover: none) {
+    * {
+      scrollbar-color: rgba(187, 164, 226, 0.6) transparent;
+    }
+
+    *::-webkit-scrollbar-thumb {
+      background-color: rgba(187, 164, 226, 0.6);
+    }
   }
 
   /* the stepper arrows at each end of the track */

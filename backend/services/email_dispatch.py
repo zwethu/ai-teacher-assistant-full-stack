@@ -13,7 +13,7 @@ from typing import Any
 
 from google.cloud.firestore import SERVER_TIMESTAMP
 
-from services.gmail_service import send_email
+from services.gmail_service import GmailSendError, create_draft, send_email
 from services.google_workspace.credentials import read_refresh_token
 from utils.firestore_client import get_firestore
 
@@ -92,6 +92,66 @@ def send_pending_email_now(
         "sent_count": len(sent),
         "failed_count": len(failed),
         "recipients": sent,
+        "failed": failed,
+    }
+
+
+def save_pending_email_as_draft(
+    *,
+    uid: str,
+    recipients: list[str],
+    subject: str,
+    body: str,
+    source_run_id: str = "",
+) -> dict[str, Any]:
+    """Create one Gmail draft per recipient, then record a history doc."""
+    db = get_firestore()
+    refresh_token = read_refresh_token(db, uid)
+    if not refresh_token:
+        raise EmailDispatchError("Google account not connected.")
+
+    saved: list[str] = []
+    failed: list[dict[str, str]] = []
+    for to in recipients:
+        try:
+            create_draft(refresh_token, to, subject, body)
+            saved.append(to)
+        except Exception as exc:
+            logger.warning(
+                "chat email draft failed to=%s run_id=%s: %s", to, source_run_id, exc
+            )
+            failed.append({"to": to, "error": str(exc)[:300]})
+
+    if not saved:
+        detail = failed[0]["error"] if failed else "No recipients."
+        raise EmailDispatchError(f"Failed to create draft: {detail}")
+
+    now = datetime.now(timezone.utc)
+    try:
+        db.collection(EMAILS_COLLECTION).add(
+            {
+                "uid": uid,
+                "to": _joined(saved),
+                "recipients": saved,
+                "subject": subject,
+                "body": body,
+                "status": "draft",
+                "drafted_at": now,
+                "draftedAt": now,
+                "created_at": SERVER_TIMESTAMP,
+                "createdAt": SERVER_TIMESTAMP,
+                "source_run_id": source_run_id,
+            }
+        )
+    except Exception as exc:
+        logger.warning(
+            "failed to record draft-email history run_id=%s: %s", source_run_id, exc
+        )
+
+    return {
+        "draft_count": len(saved),
+        "failed_count": len(failed),
+        "recipients": saved,
         "failed": failed,
     }
 

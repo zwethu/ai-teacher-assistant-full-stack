@@ -20,6 +20,22 @@ class SendEmailRequest(BaseModel):
     body: str
 
 
+class GenerateEmailRequest(BaseModel):
+    prompt: str
+    batch_name: str = ""
+    course_name: str = ""
+
+
+class SaveDraftRequest(BaseModel):
+    to: str
+    subject: str
+    body: str
+
+
+class SendDraftRequest(BaseModel):
+    draft_id: str
+
+
 class ScheduleEmailRequest(BaseModel):
     to: str
     subject: str

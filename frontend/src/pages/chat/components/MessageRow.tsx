@@ -34,6 +34,7 @@ import { startGoogleOAuth } from '../../../services/authService'
 import {
   exportPendingQuizToGoogleForms,
   generateDocsFromPendingArtifact,
+  savePendingEmailDraft,
   schedulePendingEmail,
   sendPendingEmail,
   updatePendingEmail,
@@ -1246,12 +1247,13 @@ export function EmailActionButtons({
   const sendable = metadata.pending_email_sendable === true
   const alreadySent = metadata.email_sent === true
   const alreadyScheduled = metadata.email_scheduled === true
+  const alreadyDrafted = metadata.email_drafted === true
   const runId = String(msg.run_id || '')
   const chatId = msg.chat_id
   const recipientCount =
     typeof metadata.email_recipient_count === 'number' ? metadata.email_recipient_count : 0
 
-  const [busy, setBusy] = useState<'send' | 'schedule' | 'edit' | null>(null)
+  const [busy, setBusy] = useState<'send' | 'schedule' | 'edit' | 'draft' | null>(null)
   const [showSchedule, setShowSchedule] = useState(false)
   const [sendAt, setSendAt] = useState('')
   const [showEdit, setShowEdit] = useState(false)
@@ -1259,12 +1261,14 @@ export function EmailActionButtons({
     subject: String(metadata.email_subject || ''),
     body: String(metadata.email_body || ''),
   })
-  const [done, setDone] = useState<{ kind: 'sent' | 'scheduled'; detail: string } | null>(
+  const [done, setDone] = useState<{ kind: 'sent' | 'scheduled' | 'draft'; detail: string } | null>(
     alreadySent
       ? { kind: 'sent', detail: '' }
       : alreadyScheduled
         ? { kind: 'scheduled', detail: String(metadata.email_send_at || '') }
-        : null,
+        : alreadyDrafted
+          ? { kind: 'draft', detail: '' }
+          : null,
   )
   const [needsGoogle, setNeedsGoogle] = useState(false)
   const [error, setError] = useState('')
@@ -1296,6 +1300,27 @@ export function EmailActionButtons({
           failed > 0
             ? `${res.sent_count} sent, ${failed} failed`
             : `${res.sent_count} recipient${res.sent_count === 1 ? '' : 's'}`,
+      })
+    } catch (err) {
+      onError(err)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function handleSaveDraft() {
+    setError('')
+    setNeedsGoogle(false)
+    setBusy('draft')
+    try {
+      const res = await savePendingEmailDraft(batchId, chatId, runId)
+      const failed = res.failed_count || 0
+      setDone({
+        kind: 'draft',
+        detail:
+          failed > 0
+            ? `${res.draft_count} saved, ${failed} failed`
+            : `${res.draft_count} recipient${res.draft_count === 1 ? '' : 's'}`,
       })
     } catch (err) {
       onError(err)
@@ -1358,7 +1383,9 @@ export function EmailActionButtons({
           <Mail className="h-4 w-4" />
           {done.kind === 'sent'
             ? `Email sent${done.detail ? ` — ${done.detail}` : ''}`
-            : `Email scheduled${done.detail ? ` for ${formatMaybeDate(done.detail)}` : ''}`}
+            : done.kind === 'draft'
+              ? `Saved to Gmail drafts${done.detail ? ` — ${done.detail}` : ''}`
+              : `Email scheduled${done.detail ? ` for ${formatMaybeDate(done.detail)}` : ''}`}
         </span>
       </div>
     )
@@ -1375,6 +1402,15 @@ export function EmailActionButtons({
         >
           {busy === 'send' ? <Spinner tone="inverse" size={16} /> : <Send className="h-4 w-4" />}
           {busy === 'send' ? 'Sending…' : `Send now${recipientCount ? ` (${recipientCount})` : ''}`}
+        </button>
+        <button
+          type="button"
+          onClick={() => void handleSaveDraft()}
+          disabled={busy !== null}
+          className="inline-flex items-center gap-2 rounded-md border border-violet-200 bg-white px-3 py-2 text-sm font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-70"
+        >
+          {busy === 'draft' ? <Spinner size={16} /> : <Save className="h-4 w-4" />}
+          {busy === 'draft' ? 'Saving…' : 'Save as draft'}
         </button>
         <button
           type="button"

@@ -292,6 +292,9 @@ export default function PlayEntryPage() {
       <AvatarSelectPage
         nickname={nickname}
         onSelect={a => { setAvatar(a); setStep('mode_select'); }}
+        // Back from the first choice means "that's not the name I wanted" —
+        // the nickname screen re-saves the profile, so it doubles as an edit.
+        onBack={() => { setNicknameInput(nickname); setStep('nickname'); }}
       />
     );
   }
@@ -304,6 +307,7 @@ export default function PlayEntryPage() {
         nickname={nickname}
         playerUid={userUid}
         avatar={avatar}
+        onBack={() => setStep('avatar_select')}
       />
     );
   }

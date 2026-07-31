@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { PuzzlePiece, LinkSimple, Basket, PawPrint, Fish } from '@phosphor-icons/react';
+import { ArrowLeft, PuzzlePiece, LinkSimple, Basket, PawPrint, Fish } from '@phosphor-icons/react';
 import type { Icon } from '@phosphor-icons/react';
 import type { GameMode, GameSession, AvatarType } from '../types/catGame.types';
 import { saveGameModeChoice } from '../lib/gameSession';
@@ -14,6 +14,8 @@ type Props = {
   nickname: string;
   playerUid: string;
   avatar: AvatarType;
+  /** Back to the buddy picker. Omitted where nothing precedes this screen. */
+  onBack?: () => void;
 };
 
 const MODES: { mode: GameMode; icon: Icon; label: string; desc: string }[] = [
@@ -37,7 +39,13 @@ const MODES: { mode: GameMode; icon: Icon; label: string; desc: string }[] = [
   },
 ];
 
-export default function GameModeSelectPage({ session, nickname, playerUid, avatar }: Props) {
+export default function GameModeSelectPage({
+  session,
+  nickname,
+  playerUid,
+  avatar,
+  onBack,
+}: Props) {
   const navigate = useNavigate();
   const [selected, setSelected] = useState<GameMode | null>(null);
   const [loading, setLoading] = useState(false);
@@ -64,6 +72,18 @@ export default function GameModeSelectPage({ session, nickname, playerUid, avata
   return (
     <div className={`mode-select-bg theme-${avatar}`}>
       <div className="mode-select-card">
+        {onBack && (
+          <button
+            type="button"
+            className="play-back-btn"
+            onClick={onBack}
+            disabled={loading}
+            aria-label="Back to buddy select"
+            title="Back to buddy select"
+          >
+            <ArrowLeft size={18} weight="bold" />
+          </button>
+        )}
         <MusicToggle />
         <CatSprite mood="playful" species={avatar} />
         <h2 className="mode-select-title">How do you want to play, {nickname}?</h2>

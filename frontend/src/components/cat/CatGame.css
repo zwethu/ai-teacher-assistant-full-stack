@@ -486,8 +486,14 @@
 .cat-sprite--cat .cat-lottie { width: 200px; height: 200px; }
 .cat-sprite--cat.cat-sprite--result .cat-lottie { width: 250px; height: 250px; }
 .cat-sprite--cat.cat-sprite--game .cat-lottie { width: 280px; height: 280px; }
-.cat-sprite--cat .cat-shadow { width: 104px; }
-.cat-sprite--cat.cat-sprite--game .cat-shadow { width: 150px; }
+/* The shadow needs the same correction as the speech bubble below: the cat's
+   drawing sits in the middle of its canvas, leaving ~27% of the height empty
+   underneath, where the dog leaves ~5%. The shared -6px would strand the cat's
+   shadow ~70px below its feet, so each cat box claws back its own empty band
+   (27% of 200/250/280px) to land on the same contact the dog gets. */
+.cat-sprite--cat .cat-shadow { width: 104px; margin-top: -52px; }
+.cat-sprite--cat.cat-sprite--result .cat-shadow { margin-top: -65px; }
+.cat-sprite--cat.cat-sprite--game .cat-shadow { width: 150px; margin-top: -72px; }
 
 .cat-mood-happy    .cat-lottie { animation: catBounce 0.6s ease; }
 .cat-mood-confused .cat-lottie { animation: catWobble 0.6s ease; }

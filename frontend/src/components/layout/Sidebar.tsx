@@ -20,8 +20,6 @@ import {
 import { useAuth } from '../../hooks/useAuth'
 import { getStress, type StressState } from '../../services/wellnessService'
 import WellnessPopover from '../wellness/WellnessPopover'
-import { SessionsNavItem } from './SessionsNavItem'
-
 const NAV_ITEMS: {
   to: string
   label: string
@@ -145,25 +143,13 @@ function navLinkClass(
 
 interface NavItemsProps {
   showLabels: boolean
-  collapsed?: boolean
   onNavigate?: () => void
 }
 
-function NavItems({ showLabels, collapsed = false, onNavigate }: NavItemsProps) {
+function NavItems({ showLabels, onNavigate }: NavItemsProps) {
   return (
     <>
       {NAV_ITEMS.map(({ to, label, icon: Icon, end }) => {
-        if (to === '/chat-history') {
-          return (
-            <SessionsNavItem
-              key={to}
-              showLabels={showLabels}
-              collapsed={collapsed}
-              onNavigate={onNavigate}
-            />
-          )
-        }
-
         return (
           <NavLink
             key={to}
@@ -372,7 +358,7 @@ export default function Sidebar({
         </div>
 
         <nav className="flex-1 space-y-2 px-5 pt-2 pb-4 overflow-y-auto">
-          <NavItems showLabels onNavigate={onMobileClose} collapsed={false} />
+          <NavItems showLabels onNavigate={onMobileClose} />
         </nav>
 
         {uid && (
@@ -423,7 +409,7 @@ export default function Sidebar({
         </div>
 
         <nav className={`flex-1 pt-2 pb-4 space-y-2 overflow-y-auto overflow-x-hidden ${collapsed ? 'px-0 flex flex-col items-center' : 'px-5'}`}>
-          <NavItems showLabels={!collapsed} collapsed={collapsed} />
+          <NavItems showLabels={!collapsed} />
         </nav>
 
         {!collapsed && uid && (

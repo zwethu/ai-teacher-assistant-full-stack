@@ -684,10 +684,21 @@ def safe_run_error_message(exc: Exception) -> str:
     return "Unexpected backend error."
 
 
+def _artifact_staged_this_run(state: dict[str, Any], stamp_key: str) -> bool:
+    """Run-scope guard: the agent stamps outline/generation payloads with the run
+    that produced them (capture_agent_step). Session state is long-lived per chat,
+    so a stale payload from an earlier run must never be extracted as this run's
+    result — the same contract email/game already enforce via staged_in_run."""
+    run_id = str(state.get("run_id") or "")
+    return bool(run_id) and str(state.get(stamp_key) or "") == run_id
+
+
 def extract_lesson_plan_full_from_state(state: dict[str, Any]) -> dict[str, Any] | None:
     """Return a plausible LessonPlanFull payload from Agent Platform state."""
     active_type = str(state.get("active_artifact_type") or "").strip()
     if active_type and active_type != "lesson_plan":
+        return None
+    if not _artifact_staged_this_run(state, "generation_staged_in_run"):
         return None
 
     raw = _state_payload(state, "lesson_plan_full")
@@ -715,6 +726,8 @@ def extract_lab_full_from_state(state: dict[str, Any]) -> dict[str, Any] | None:
     active_type = str(state.get("active_artifact_type") or "").strip()
     if active_type and active_type != "lab":
         return None
+    if not _artifact_staged_this_run(state, "generation_staged_in_run"):
+        return None
 
     raw = _state_payload(state, "lab_full")
     if not isinstance(raw, dict):
@@ -741,6 +754,8 @@ def extract_quiz_full_from_state(state: dict[str, Any]) -> dict[str, Any] | None
     active_type = str(state.get("active_artifact_type") or "").strip()
     if active_type and active_type not in {"quiz", "assessment"}:
         return None
+    if not _artifact_staged_this_run(state, "generation_staged_in_run"):
+        return None
 
     raw = _state_payload(state, "quiz_full")
     if not isinstance(raw, dict):
@@ -764,6 +779,8 @@ def extract_course_blueprint_full_from_state(state: dict[str, Any]) -> dict[str,
     """Return a plausible CourseBlueprintRecommendation payload (course-level, no week)."""
     active_type = str(state.get("active_artifact_type") or "").strip()
     if active_type and active_type != "course_blueprint":
+        return None
+    if not _artifact_staged_this_run(state, "generation_staged_in_run"):
         return None
     raw = _state_payload(state, "course_blueprint_full")
     if not isinstance(raw, dict):
@@ -886,6 +903,8 @@ def extract_outline_from_state(
         "lesson_plan": "lesson_plan_outline", "lab": "lab_outline",
         "quiz": "quiz_outline", "course_blueprint": "course_blueprint_outline",
     }.get(artifact_type)
+    if key and not _artifact_staged_this_run(state, "outline_staged_in_run"):
+        return None
     payload = _state_payload(state, key) if key else None
     if not payload or not str(payload.get("title") or "").strip():
         return None

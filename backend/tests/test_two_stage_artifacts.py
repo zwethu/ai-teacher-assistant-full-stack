@@ -26,7 +26,7 @@ class TwoStageArtifactTest(unittest.TestCase):
             _validate_invoke_request(body)
 
     def test_outline_extraction_and_markdown(self) -> None:
-        state = {"lesson_plan_outline": {
+        state = {"run_id": "r1", "outline_staged_in_run": "r1", "lesson_plan_outline": {
             "title": "Week 1", "week": 1, "subject": "Power BI",
             "objectives": [{"objective": "Build a report"}],
             "topics_covered": ["Data import"],
@@ -74,7 +74,7 @@ class TwoStageArtifactTest(unittest.TestCase):
         with patch.object(agent_gateway, "mark_agent_run_pending_artifact"):
             pending = agent_gateway.maybe_store_pending_artifact_from_session(
                 batch_id="b", lecturer_id="u", chat_id="c", run_id="r",
-                state={"active_artifact_type": "quiz", "quiz_full": quiz},
+                state={"run_id": "r", "generation_staged_in_run": "r", "active_artifact_type": "quiz", "quiz_full": quiz},
                 rendered_markdown="", lecturer_email="", workflow_type="assessment.generate",
                 requested_week=3,
             )

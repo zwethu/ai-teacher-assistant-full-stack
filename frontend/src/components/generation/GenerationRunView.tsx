@@ -140,7 +140,7 @@ export function GenerationRunView({
               open={refineOpen}
               onClose={() => setRefineOpen(false)}
               placeholder="e.g. add a hands-on activity in week 2, shorten the lecture to 20 minutes…"
-              onSubmit={(text) => run.sendFollowUp(text)}
+              onSubmit={(text) => run.sendFollowUp(text, activeMessage)}
             />
           </div>
         )}

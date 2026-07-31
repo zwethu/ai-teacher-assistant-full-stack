@@ -218,6 +218,18 @@ class LabDocBuilder:
             )
         )
 
+        if lab.sources:
+            self._append_section_divider(blocks)
+            blocks.append(TextBlock(BlockType.HEADING1, "Sources"))
+            for src in lab.sources:
+                label = "[course_material]" if src.source_type == "course_material" else "[web]"
+                parts = [label, src.title]
+                if src.file_title and src.file_title != src.title:
+                    parts.append(f"({src.file_title})")
+                if src.url:
+                    parts.append(f"— {src.url}")
+                blocks.append(TextBlock(BlockType.BULLET, " ".join(parts)))
+
         return blocks
 
     def _build_student(self) -> list[Block]:

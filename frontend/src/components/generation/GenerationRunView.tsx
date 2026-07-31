@@ -126,8 +126,12 @@ export function GenerationRunView({
             <OutlineApprovalCard
               msg={activeMessage}
               disabled={run.sending}
-              completed={false}
-              superseded={false}
+              completed={
+                String(activeMessage.metadata?.outline_approval_status || '') === 'approved'
+              }
+              superseded={
+                String(activeMessage.metadata?.outline_approval_status || '') === 'superseded'
+              }
               onApprove={() => run.approveOutline(activeMessage)}
             />
             <div className="flex flex-wrap items-center gap-2">

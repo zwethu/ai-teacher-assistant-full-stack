@@ -478,6 +478,14 @@ def claim_approvable_outline_run(
             raise RuntimeError("Outline is not ready for approval")
         if data.get("outline_artifact_type") != artifact_type:
             raise RuntimeError("Outline artifact type does not match workflow")
+        # Integrity check: the payload must hash to what was stored at outline-ready
+        # time — a Firestore round-trip type mutation between Phase A and approval
+        # would otherwise silently hand Phase B a different outline.
+        stored_hash = str(data.get("outline_content_hash") or "")
+        payload = data.get("outline_payload")
+        if stored_hash and isinstance(payload, dict):
+            if _content_hash(payload) != stored_hash:
+                raise RuntimeError("Approved outline failed integrity verification")
         txn.update(run_ref, {"outline_status": "approved", "updated_at": SERVER_TIMESTAMP})
         txn.update(chat_ref, {"latest_outline_run_id": "", "updated_at": SERVER_TIMESTAMP})
         return data

@@ -91,6 +91,10 @@ async def ensure_session_with_state(
                 session_id,
                 exc,
             )
+            # The chat doc says this session existed, but Vertex no longer has it —
+            # almost always the 90-day TTL. The recreated session is empty, so
+            # earlier outlines/artifacts in agent memory are gone. Surface that.
+            _emit_session_expired_event(state)
 
     session = await _get_session(
         service=service,
@@ -190,6 +194,29 @@ async def _append_state(
         actions=EventActions(state_delta=state),
     )
     await service.append_event(session=session, event=event)
+
+
+def _emit_session_expired_event(state: dict[str, Any]) -> None:
+    """Best-effort run event when a supposedly-existing session had expired."""
+    run_id = str(state.get("run_id") or "")
+    if not run_id:
+        return
+    try:
+        from utils.rtdb_client import write_run_event
+
+        write_run_event(
+            run_id,
+            event_type="backend.session.expired",
+            kind="thinking",
+            status="running",
+            title="Starting a fresh session — earlier conversation context has expired.",
+            summary="Starting a fresh session — earlier conversation context has expired.",
+            detail={"mode": "status"},
+            batch_id=str(state.get("batch_id") or ""),
+            chat_id=str(state.get("chat_id") or ""),
+        )
+    except Exception:
+        logger.warning("failed to emit session-expired event", exc_info=True)
 
 
 def _local_session(*, app_name: str, user_id: str, session_id: str) -> Session:

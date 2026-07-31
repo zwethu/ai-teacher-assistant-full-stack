@@ -24,6 +24,16 @@ def render_lesson_plan_markdown(payload: dict[str, Any]) -> str:
     ]
     lines.extend(f"- {item.objective} ({item.bloom_level})" for item in plan.objectives)
 
+    if plan.type_specific_plan:
+        lines.extend(["", "## Type-Specific Plan"])
+        for key, value in plan.type_specific_plan.items():
+            label = str(key).replace("_", " ").title()
+            if isinstance(value, list):
+                lines.extend(["", f"### {label}"])
+                lines.extend(f"- {item}" for item in value)
+            else:
+                lines.append(f"- **{label}:** {value}")
+
     if plan.prerequisites:
         lines.extend(["", "## Prerequisites"])
         lines.extend(f"- {item}" for item in plan.prerequisites)
@@ -53,6 +63,13 @@ def render_lesson_plan_markdown(payload: dict[str, Any]) -> str:
         _append_list(lines, "Student Actions", activity.student_actions)
         _append_list(lines, "Instructions", activity.instructions)
         _append_list(lines, "Materials", activity.materials_needed)
+        if activity.materials_table:
+            headers = sorted({str(k) for row in activity.materials_table if isinstance(row, dict) for k in row})
+            if headers:
+                lines.extend(["", "#### Materials Table", "", "| " + " | ".join(h.replace("_", " ").title() for h in headers) + " |", "|" + "---|" * len(headers)])
+                for row in activity.materials_table:
+                    if isinstance(row, dict):
+                        lines.append("| " + " | ".join(str(row.get(h, "")) for h in headers) + " |")
         _append_list(lines, "Assessment Checks", activity.assessment_checks)
         _append_code_blocks(lines, "Prompt Templates", activity.prompt_templates, quote=True)
         _append_code_blocks(lines, "Code / Configuration Blocks", activity.code_blocks)
@@ -63,6 +80,8 @@ def render_lesson_plan_markdown(payload: dict[str, Any]) -> str:
             "",
             "## Assessment",
             f"### {plan.assessment.title}",
+            f"*{plan.assessment.type} — {plan.assessment.estimated_time} min*",
+            "",
             plan.assessment.description,
         ]
     )
@@ -77,6 +96,7 @@ def render_lesson_plan_markdown(payload: dict[str, Any]) -> str:
 
     lines.extend(["", "## Homework", f"### {plan.homework.title}", plan.homework.description])
     _append_list(lines, "Tasks", plan.homework.tasks)
+    _append_list(lines, "Resources Needed", plan.homework.resources_needed)
 
     if plan.teacher_notes:
         lines.extend(["", "## Teacher Notes", plan.teacher_notes])

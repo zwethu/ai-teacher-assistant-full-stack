@@ -1005,7 +1005,17 @@ _OUTLINE_CONTEXT_KEYS = (
 
 
 def outline_context_snapshot(state: dict[str, Any]) -> dict[str, Any]:
-    return {key: state[key] for key in _OUTLINE_CONTEXT_KEYS if key in state}
+    snapshot = {key: state[key] for key in _OUTLINE_CONTEXT_KEYS if key in state}
+    # course_blueprint_outline rides in the context snapshot and later overwrites
+    # the normalized payload in Phase B's session state — normalize it here so the
+    # blueprint workflow receives a dict like every other artifact type, even when
+    # the agent stored the outline as a JSON string.
+    raw_blueprint = snapshot.get("course_blueprint_outline")
+    if raw_blueprint is not None:
+        normalized = _state_payload({"course_blueprint_outline": raw_blueprint}, "course_blueprint_outline")
+        if isinstance(normalized, dict):
+            snapshot["course_blueprint_outline"] = normalized
+    return snapshot
 
 
 def _state_payload(state: dict[str, Any], key: str) -> dict[str, Any] | None:
@@ -1547,30 +1557,11 @@ def _web_search_message_metadata(
         if len(citations) >= 40:
             break
 
-    is_card = bool(
-        message_metadata.get("artifact_preview_card")
-        or message_metadata.get("outline_approvable")
-        or message_metadata.get("pending_exportable")
-        or message_metadata.get("export_result")
-    )
-    if is_card:
-        text = "\n".join(
-            filter(
-                None,
-                [visible_text, str(message_metadata.get("assistant_intro") or "")],
-            )
-        )
-        referenced_indices = {
-            int(number)
-            for group in re.findall(r"\[([1-9]\d*(?:\s*,\s*[1-9]\d*)*)\]", text)
-            for number in re.findall(r"[1-9]\d*", group)
-        }
-        referenced = any(
-            source["index"] in referenced_indices or source["url"] in text
-            for source in sources
-        )
-        if not referenced:
-            return {}
+    # Card messages (outline approval, artifact preview, export) used to DROP all
+    # web citations unless a [n] marker literally appeared in the machine-rendered
+    # markdown — which it rarely did, so the HITL decision points showed no sources
+    # at all despite web search having run. Citations now always attach when web
+    # search produced sources; the frontend renders them as chips/side panel.
 
     queries = [
         str(value)[:300]

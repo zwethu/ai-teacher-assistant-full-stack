@@ -31,8 +31,9 @@ class NativeStreamingTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["web_citations"][0]["url"], "https://example.edu/path")
         self.assertEqual(len(result["web_sources"]), 1)
 
-    def test_web_search_metadata_skips_failed_and_unreferenced_cards(self) -> None:
+    def test_web_search_metadata_skips_failed_but_keeps_card_citations(self) -> None:
         source = {"index": 1, "title": "Official", "url": "https://example.edu/path"}
+        # Failed web search still yields no metadata.
         self.assertEqual(
             agent_gateway._web_search_message_metadata(
                 {"last_web_search": {"status": "failed", "sources": [source]}},
@@ -47,14 +48,16 @@ class NativeStreamingTest(unittest.IsolatedAsyncioTestCase):
             message_metadata={"artifact_preview_card": True},
         )
         self.assertTrue(grouped["web_search_used"])
-        self.assertEqual(
-            agent_gateway._web_search_message_metadata(
-                {"last_web_search": {"status": "success", "sources": [source]}},
-                visible_text="# Artifact preview",
-                message_metadata={"artifact_preview_card": True},
-            ),
-            {},
+        # Card messages (outline approval / artifact preview) now KEEP citations even
+        # when the machine-rendered markdown carries no [n] marker — the HITL decision
+        # points were exactly where sources used to vanish.
+        unmarked = agent_gateway._web_search_message_metadata(
+            {"last_web_search": {"status": "success", "sources": [source]}},
+            visible_text="# Artifact preview",
+            message_metadata={"artifact_preview_card": True},
         )
+        self.assertTrue(unmarked["web_search_used"])
+        self.assertEqual(unmarked["web_source_count"], 1)
 
     def test_web_search_metadata_supports_twenty_sources_and_forty_citations(self) -> None:
         sources = [

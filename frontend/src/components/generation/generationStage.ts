@@ -66,6 +66,8 @@ export function deriveGenerationStage(run: GenerationRunState): DerivedStage {
 
   const isPending = Boolean(active.pending || active.status === 'pending')
   if (isPending || status === 'running' || status === 'awaiting_attachments') {
+    // 'refine' (a plain follow-up run) reads as outline work in progress; only a
+    // real Phase-B run shows the full-generation label.
     return {
       stage: activePhase === 'full' ? 'generating_full' : 'generating_outline',
       activeMessage: active,

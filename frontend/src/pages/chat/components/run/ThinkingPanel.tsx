@@ -33,11 +33,10 @@ export function ThinkingPanel({ events, runStatus }: Props) {
     () =>
       events
         .filter((event) => event.kind === 'thinking')
-        .sort(
-          (a, b) =>
-            (a.created_at || 0) - (b.created_at || 0) ||
-            a.event_id.localeCompare(b.event_id),
-        ),
+        // Stable sort on the timestamp alone — see `appendRunEvent`. Breaking
+        // ties on `event_id` picked a random note out of each second, so the
+        // line showed an arbitrary thought and could appear to go backwards.
+        .sort((a, b) => (a.created_at || 0) - (b.created_at || 0)),
     [events],
   )
   const isRunning = runStatus === 'running'

@@ -1228,11 +1228,15 @@ export function useChatPage() {
   function appendRunEvent(runId: string, event: AgentRunEvent) {
     setRunStates((prev) => {
       const current = prev[runId] || { status: 'running' as AgentRunStatus, events: [], steps: {} }
+      // No event_id tiebreak. The agent stamps `created_at` in whole seconds
+      // (`int(time.time())`) and mints `event_id` from `uuid4().hex[:16]`, so
+      // ordering ties by id shuffles everything that happened inside the same
+      // second into random order — and several thinking notes a second is
+      // normal. Array.sort is stable, so an equal `created_at` keeps arrival
+      // order, which is what the RTDB child stream already delivers.
       const events = current.events.some((item) => item.event_id === event.event_id)
         ? current.events
-        : [...current.events, event].sort(
-            (a, b) => (a.created_at || 0) - (b.created_at || 0) || a.event_id.localeCompare(b.event_id),
-          )
+        : [...current.events, event].sort((a, b) => (a.created_at || 0) - (b.created_at || 0))
       return { ...prev, [runId]: { ...current, events } }
     })
     anchorToBottomDuringLiveUpdate()

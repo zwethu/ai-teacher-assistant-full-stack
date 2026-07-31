@@ -49,6 +49,12 @@ export function GenerationRunView({
 
   const generating = stage === 'generating_outline' || stage === 'generating_full'
 
+  // Terminal actions report their result back into the run so the stepper can
+  // reach its final step without waiting for a remount to re-read Firestore.
+  const deliver = (patch: Record<string, unknown>) => {
+    if (activeMessage?.message_id) run.markArtifactDelivered(activeMessage.message_id, patch)
+  }
+
   const refineTrigger = (label: string) => (
     <button
       type="button"
@@ -148,9 +154,14 @@ export function GenerationRunView({
         {(stage === 'preview' || stage === 'done') && activeMessage && (
           <div className="space-y-3">
             <ArtifactPreviewCard content={activeMessage.content} metadata={activeMessage.metadata || {}} />
-            <ArtifactExportButton batchId={batch.id} msg={activeMessage} />
-            <BlueprintSaveButton batchId={batch.id} msg={activeMessage} onSaved={onBlueprintSaved} />
-            <GameCreateButton batchId={batch.id} msg={activeMessage} />
+            <ArtifactExportButton batchId={batch.id} msg={activeMessage} onDelivered={deliver} />
+            <BlueprintSaveButton
+              batchId={batch.id}
+              msg={activeMessage}
+              onSaved={onBlueprintSaved}
+              onDelivered={deliver}
+            />
+            <GameCreateButton batchId={batch.id} msg={activeMessage} onDelivered={deliver} />
             <div className="flex flex-wrap items-center gap-2 pt-1">
               {runState && <RunInspector run={runState} />}
               {stage === 'preview' && refineTrigger('Refine this draft')}

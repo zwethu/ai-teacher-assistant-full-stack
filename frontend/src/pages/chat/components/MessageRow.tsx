@@ -59,7 +59,7 @@ import {
 } from '../utils/webCitations'
 import { RunDetails } from './run/RunDetails'
 import { ThinkingPanel } from './run/ThinkingPanel'
-import { createGameFromRun } from '../../../services/gameService'
+import { createGameFromRun, gamePlayUrl } from '../../../services/gameService'
 import { saveBlueprintFromRun } from '../../../services/courseBlueprintService'
 import { EXPORT_FORMAT_LABELS, exportMessage, type ChatExportFormat } from '../../../services/chatService'
 import type { PreviewableAttachment } from './AttachmentPreview'
@@ -1125,7 +1125,17 @@ export function MarkdownBlock({ content, webSources = [], onCitationSelect }: { 
   )
 }
 
-export function BlueprintSaveButton({ batchId, msg, onSaved }: { batchId: string; msg: ChatMessage; onSaved?: (version: number | null) => void }) {
+export function BlueprintSaveButton({
+  batchId,
+  msg,
+  onSaved,
+  onDelivered,
+}: {
+  batchId: string
+  msg: ChatMessage
+  onSaved?: (version: number | null) => void
+  onDelivered?: (patch: Record<string, unknown>) => void
+}) {
   const metadata = msg.metadata || {}
   const savable = metadata.pending_savable_blueprint === true
   const alreadySavedId = String(metadata.course_blueprint_saved_id || '')
@@ -1146,6 +1156,10 @@ export function BlueprintSaveButton({ batchId, msg, onSaved }: { batchId: string
       const res = await saveBlueprintFromRun(batchId, chatId, runId)
       setSavedVersion(res.version ?? null)
       onSaved?.(res.version ?? null)
+      onDelivered?.({
+        course_blueprint_saved_id: res.blueprint_id,
+        pending_savable_blueprint: false,
+      })
     } catch {
       setError('Could not save the course plan. Please retry.')
     } finally {
@@ -1170,7 +1184,15 @@ export function BlueprintSaveButton({ batchId, msg, onSaved }: { batchId: string
   )
 }
 
-export function GameCreateButton({ batchId, msg }: { batchId: string; msg: ChatMessage }) {
+export function GameCreateButton({
+  batchId,
+  msg,
+  onDelivered,
+}: {
+  batchId: string
+  msg: ChatMessage
+  onDelivered?: (patch: Record<string, unknown>) => void
+}) {
   const metadata = msg.metadata || {}
   const savable = metadata.pending_savable_game === true
   const runId = String(msg.run_id || '')
@@ -1180,7 +1202,11 @@ export function GameCreateButton({ batchId, msg }: { batchId: string; msg: ChatM
     typeof metadata.game_item_count === 'number' ? metadata.game_item_count : 0
 
   const [creating, setCreating] = useState(false)
-  const [created, setCreated] = useState<{ gameId: string; itemCount: number } | null>(null)
+  // Seeded from metadata so a game created in an earlier session still shows its
+  // player link instead of the card going blank on reload.
+  const [created, setCreated] = useState<{ gameId: string; itemCount: number } | null>(
+    metadata.game_id ? { gameId: String(metadata.game_id), itemCount } : null,
+  )
   const [error, setError] = useState('')
 
   if (!savable && !created) return null
@@ -1192,6 +1218,11 @@ export function GameCreateButton({ batchId, msg }: { batchId: string; msg: ChatM
     try {
       const game = await createGameFromRun(batchId, chatId, runId, contentHash)
       setCreated({ gameId: game.gameId, itemCount: game.itemCount })
+      onDelivered?.({
+        game_id: game.gameId,
+        game_item_count: game.itemCount,
+        pending_savable_game: false,
+      })
     } catch (err) {
       const maybe = err as { response?: { data?: { detail?: unknown } }; message?: string }
       const detail = maybe.response?.data?.detail
@@ -1206,10 +1237,13 @@ export function GameCreateButton({ batchId, msg }: { batchId: string; msg: ChatM
   return (
     <div className="mt-2">
       {created ? (
-        <span className="inline-flex items-center gap-1.5 text-sm font-medium text-violet-700">
-          <Gamepad2 className="h-4 w-4" />
-          Game created{created.itemCount ? ` · ${created.itemCount} pairs` : ''}
-        </span>
+        <div className="space-y-2">
+          <span className="inline-flex items-center gap-1.5 text-sm font-medium text-violet-700">
+            <Gamepad2 className="h-4 w-4" />
+            Game created{created.itemCount ? ` · ${created.itemCount} pairs` : ''}
+          </span>
+          <GamePlayLinkRow gameId={created.gameId} />
+        </div>
       ) : (
         <Button type="button" onClick={handleCreate} loading={creating} disabled={!chatId || !runId} size="sm">
           <Gamepad2 className="h-4 w-4" />
@@ -1217,6 +1251,44 @@ export function GameCreateButton({ batchId, msg }: { batchId: string; msg: ChatM
         </Button>
       )}
       {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+    </div>
+  )
+}
+
+/** Share row for a created game — the game's counterpart to an exported doc link. */
+function GamePlayLinkRow({ gameId }: { gameId: string }) {
+  const url = gamePlayUrl(gameId)
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    if (!copied) return
+    const timer = window.setTimeout(() => setCopied(false), 2000)
+    return () => window.clearTimeout(timer)
+  }, [copied])
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <a
+        href={url}
+        target="_blank"
+        rel="noreferrer"
+        className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+      >
+        <ExternalLink className="h-3.5 w-3.5" /> Open player
+      </a>
+      <button
+        type="button"
+        onClick={() => {
+          navigator.clipboard.writeText(url).then(
+            () => setCopied(true),
+            () => undefined,
+          )
+        }}
+        className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+      >
+        {copied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+        {copied ? 'Copied' : 'Copy link for students'}
+      </button>
     </div>
   )
 }
@@ -1531,9 +1603,11 @@ export function EmailActionButtons({
 export function ArtifactExportButton({
   batchId,
   msg,
+  onDelivered,
 }: {
   batchId: string
   msg: ChatMessage
+  onDelivered?: (patch: Record<string, unknown>) => void
 }) {
   const metadata = msg.metadata || {}
   const artifactId = String(metadata.draft_artifact_id || '')
@@ -1626,11 +1700,12 @@ export function ArtifactExportButton({
         : artifactType === 'quiz'
           ? await exportQuizDraftToGoogleForms(batchId, artifactId)
           : await exportArtifactDraftToGoogleDocs(batchId, artifactId)
+      let delivered = exported
       if (artifactType === 'lab' && (!exported.lecturer_doc_url || !exported.student_doc_url)) {
         try {
           const artifact = await getArtifact(batchId, exported.artifact_id || artifactId)
           const refreshed = artifactToExportResult(artifact)
-          setResult({
+          delivered = {
             ...exported,
             lecturer_doc_url: exported.lecturer_doc_url || refreshed.lecturer_doc_url,
             lecturer_doc_id: exported.lecturer_doc_id || refreshed.lecturer_doc_id,
@@ -1640,13 +1715,20 @@ export function ArtifactExportButton({
             student_doc_id: exported.student_doc_id || refreshed.student_doc_id,
             student_drive_file_name:
               exported.student_drive_file_name || refreshed.student_drive_file_name,
-          })
-          return
+          }
         } catch {
           // The export succeeded; keep the direct response if the follow-up read is unavailable.
         }
       }
-      setResult(exported)
+      setResult(delivered)
+      onDelivered?.({
+        doc_url: delivered.doc_url || '',
+        form_url: delivered.form_url || '',
+        lecturer_doc_url: delivered.lecturer_doc_url || '',
+        student_doc_url: delivered.student_doc_url || '',
+        pending_exportable: false,
+        exportable: false,
+      })
     } catch (err) {
       const maybe = err as { response?: { data?: { detail?: unknown } }; message?: string }
       const detail = maybe.response?.data?.detail

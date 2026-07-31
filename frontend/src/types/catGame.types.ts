@@ -41,7 +41,8 @@ export type BehaviorSummary = BehaviorSignals & {
 export type GameSession = {
   id: string;
   batchId: string;
-  status: 'open' | 'closed' | 'expired';
+  /** 'active' is legacy: games created before the backend adopted this contract. */
+  status: 'open' | 'closed' | 'expired' | 'active';
   items: GameItem[];
   createdAt: Date;
   expiresAt?: Date;

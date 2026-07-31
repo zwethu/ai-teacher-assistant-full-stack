@@ -12,6 +12,7 @@ const useBatchSelection = vi.fn()
 vi.mock('../services/gameService', () => ({
   listGames: (...args: unknown[]) => listGames(...args),
   deleteGame: vi.fn(),
+  gamePlayUrl: (gameId: string) => `${window.location.origin}/play/${gameId}`,
 }))
 
 vi.mock('../hooks/useBatchSelection', () => ({

@@ -33,6 +33,7 @@ from services.agent_sessions import (
     mark_agent_run_pending_artifact_export_failed,
     mark_agent_run_pending_artifact_exported,
 )
+from services.chat_service import update_assistant_message_metadata_for_run
 from utils.firestore_client import get_firestore
 
 logger = logging.getLogger(__name__)
@@ -158,7 +159,9 @@ def create_game_from_pending(
         "itemCount": len(items),
         "modes": list(GAME_MODES),
         "gameModeStats": _initial_mode_stats(),
-        "status": "active",
+        # The player app gates entry on exactly this spelling (open|closed|expired);
+        # anything else renders as "Not Available" to every student.
+        "status": "open",
         # Hashed from the content only — item ids are backend-assigned, so including them
         # would make the same extracted game hash differently on every create.
         "contentHash": _hash_content({"title": content.title, "items": content_items}),
@@ -189,6 +192,28 @@ def create_game_from_pending(
         # The game exists; failing to close the run's lock must not fail the request.
         logger.exception(
             "Game created but run pending-artifact marker failed run_id=%s game_id=%s",
+            payload.run_id,
+            game_ref.id,
+        )
+
+    try:
+        # The Docs/Forms exports stamp their result onto the assistant message, and the
+        # generation stepper reads that metadata to decide the run is finished. Without
+        # this the preview card stays savable and the workflow never leaves step 3.
+        update_assistant_message_metadata_for_run(
+            batch_id=batch_id,
+            chat_id=payload.chat_id,
+            run_id=payload.run_id,
+            metadata={
+                "game_id": game_ref.id,
+                "game_item_count": len(items),
+                "pending_savable_game": False,
+                "pending_exportable": False,
+            },
+        )
+    except Exception:
+        logger.exception(
+            "Game created but assistant message metadata update failed run_id=%s game_id=%s",
             payload.run_id,
             game_ref.id,
         )

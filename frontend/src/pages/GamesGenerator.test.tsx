@@ -26,6 +26,7 @@ let pendingAttachments: AttachmentFixture[] = []
 vi.mock('../services/gameService', () => ({
   listGames: (...args: unknown[]) => listGames(...args),
   deleteGame: vi.fn(),
+  gamePlayUrl: (gameId: string) => `${window.location.origin}/play/${gameId}`,
 }))
 
 vi.mock('../services/artifactService', () => ({
@@ -129,6 +130,39 @@ describe('Games — source picker', () => {
     expect(params.message).toContain('week 3')
     // A game comes from one source only — never the open web.
     expect(params.webSearch).toBe(false)
+  })
+
+  it('asks for 30 pairs by default and sends the chosen count', async () => {
+    listArtifacts.mockResolvedValue([lessonPlan])
+    renderPage()
+
+    await waitFor(() => expect(screen.getByText('Week 3 — Test Doubles')).toBeTruthy())
+    const field = screen.getByLabelText('Number of pairs') as HTMLInputElement
+    expect(field.value).toBe('30')
+    // 30 seconds a pair — the standard 30-pair game is a 15-minute round.
+    expect(screen.getByText('About 15 min to play')).toBeTruthy()
+
+    await userEvent.clear(field)
+    await userEvent.type(field, '12')
+    await userEvent.click(screen.getByRole('button', { name: /Week 3 — Test Doubles/ }))
+    await userEvent.click(screen.getByRole('button', { name: /Generate game/ }))
+
+    await waitFor(() => expect(generate).toHaveBeenCalled())
+    expect(generate.mock.calls[0][0].message).toContain('exactly 12 term/definition pairs')
+  })
+
+  it('refuses a pair count the backend would reject', async () => {
+    listArtifacts.mockResolvedValue([lessonPlan])
+    renderPage()
+
+    await waitFor(() => expect(screen.getByText('Week 3 — Test Doubles')).toBeTruthy())
+    await userEvent.click(screen.getByRole('button', { name: /Week 3 — Test Doubles/ }))
+    const field = screen.getByLabelText('Number of pairs')
+    await userEvent.clear(field)
+    await userEvent.type(field, '99')
+
+    expect(screen.getByText('Pick between 4 and 40')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Generate game/ }).hasAttribute('disabled')).toBe(true)
   })
 
   it('drops an uploaded file when saved work is picked instead', async () => {

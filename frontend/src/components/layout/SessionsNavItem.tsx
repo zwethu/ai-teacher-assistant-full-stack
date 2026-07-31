@@ -4,7 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import {
   Check,
   ChevronRight,
-  Clock,
+  History,
   MoreHorizontal,
   Pencil,
   Trash2,
@@ -343,7 +343,7 @@ export function SessionsNavItem({ collapsed, onNavigate }: Props) {
           title="Sessions"
           aria-label="Go to sessions"
         >
-          <Clock className={`w-5 h-5 flex-shrink-0 ${iconClass(isActive)}`} />
+          <History className={`w-5 h-5 flex-shrink-0 ${iconClass(isActive)}`} />
         </button>
 
         {previewVisible &&
@@ -385,29 +385,31 @@ export function SessionsNavItem({ collapsed, onNavigate }: Props) {
       onMouseEnter={() => setHovering(true)}
       onMouseLeave={() => setHovering(false)}
     >
+      {/* The row keeps its identity icon at all times, like every other nav
+          item; the disclosure arrow sits on the trailing edge where it reads as
+          "there is more under this" rather than replacing what the row is. */}
       <div className={sessionsExpandedClass(isActive)}>
         <button
           type="button"
-          onClick={toggleInline}
-          className="flex-shrink-0 rounded-md hover:bg-violet-50/50 transition-colors"
-          aria-label={inlineOpen ? 'Collapse sessions' : 'Expand sessions'}
-          aria-expanded={inlineOpen}
+          onClick={goToHistory}
+          className="flex min-w-0 flex-1 items-center gap-3 text-left"
         >
-          {showArrow ? (
-            <ChevronRight
-              className={`w-5 h-5 flex-shrink-0 transition-transform duration-200 ${iconClass(isActive)} ${inlineOpen ? 'rotate-90' : ''}`}
-            />
-          ) : (
-            <Clock className={`w-5 h-5 flex-shrink-0 ${iconClass(isActive)}`} />
-          )}
+          <History className={`w-5 h-5 flex-shrink-0 ${iconClass(isActive)}`} />
+          <span className="truncate sidebar-text">Sessions</span>
         </button>
 
         <button
           type="button"
-          onClick={goToHistory}
-          className="flex-1 min-w-0 text-left truncate sidebar-text"
+          onClick={toggleInline}
+          className={`flex-shrink-0 rounded-md p-0.5 transition-opacity hover:bg-violet-50/50 focus-visible:opacity-100 ${
+            showArrow ? 'opacity-100' : 'opacity-0'
+          }`}
+          aria-label={inlineOpen ? 'Collapse sessions' : 'Expand sessions'}
+          aria-expanded={inlineOpen}
         >
-          Sessions
+          <ChevronRight
+            className={`w-4 h-4 flex-shrink-0 transition-transform duration-200 ${iconClass(isActive)} ${inlineOpen ? 'rotate-90' : ''}`}
+          />
         </button>
       </div>
 

@@ -52,7 +52,8 @@ export default function PlayEntryPage() {
     getGameSession(assessmentId)
       .then(s => {
         if (!s) { setStep('invalid'); return; }
-        if (s.status !== 'open') { setStep('unavailable'); return; }
+        // 'active' is the spelling games created before the status fix carry.
+        if (s.status !== 'open' && s.status !== 'active') { setStep('unavailable'); return; }
         setSession(s);
         const unsubscribe = auth.onAuthStateChanged(user => {
           if (user && user.email) {

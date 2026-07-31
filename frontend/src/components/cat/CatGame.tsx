@@ -17,11 +17,12 @@ import PageSpinner from '../ui/PageSpinner';
 import { playRoundClear, playWrong } from './juice';
 import { useMusic } from './useMusic';
 import { saveAttempt, startTimedRun } from '../../lib/gameSession';
+import { gameTimeLimitMs } from '../../lib/gameTiming';
 import './CatGame.css';
 
-// Static gameplay parameters (methodology: defined in the engine, not by AI)
-const SECONDS_PER_ITEM = 30;
-const MIN_LIMIT_MS = 60_000;
+// Static gameplay parameters (methodology: defined in the engine, not by AI).
+// Shared with the lecturer's generator form so the round length it quotes and
+// the clock the student actually gets can't drift apart.
 
 // A board of 30 items would be unplayable, so items are dealt out in pages of
 // 6. A page is cleared when all 6 are correct (same all-correct rule as before,
@@ -80,7 +81,7 @@ export default function CatGame({
 }: Props) {
   const activeItems    = items && items.length > 0 ? items : MOCK_ITEMS;
   const totalQuestions = activeItems.length;
-  const timeLimitMs    = Math.max(MIN_LIMIT_MS, totalQuestions * SECONDS_PER_ITEM * 1000);
+  const timeLimitMs    = gameTimeLimitMs(totalQuestions);
 
   // Whatever the session holds, dealt 6 at a time. A 6-item session is simply
   // a single page, so short sessions behave exactly as they did before.

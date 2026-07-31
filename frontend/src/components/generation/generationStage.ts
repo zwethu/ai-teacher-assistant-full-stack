@@ -81,14 +81,19 @@ export function deriveGenerationStage(run: GenerationRunState): DerivedStage {
   }
 
   if (isGeneratedArtifactPreviewMessage(active, false)) {
-    const hasLinks = Boolean(
+    // Each workflow ends by stamping its result onto the message. Docs and Forms
+    // exports leave a link; saving a game or a course plan leaves an id, so those
+    // count as delivered too or their runs could never finish.
+    const delivered = Boolean(
       metadata.doc_url ||
         metadata.form_url ||
         metadata.export_result ||
         metadata.lecturer_doc_url ||
-        metadata.student_doc_url,
+        metadata.student_doc_url ||
+        metadata.game_id ||
+        metadata.course_blueprint_saved_id,
     )
-    return { stage: hasLinks ? 'done' : 'preview', activeMessage: active, runState }
+    return { stage: delivered ? 'done' : 'preview', activeMessage: active, runState }
   }
 
   // Generic assistant result (e.g. a consulting reply) — treat as a preview.

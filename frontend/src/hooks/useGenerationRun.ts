@@ -716,6 +716,25 @@ export function useGenerationRun(batch: Batch | null, persistKey?: string) {
     if (persistIdRef.current) clearGenerationRun(persistIdRef.current)
   }, [])
 
+  /**
+   * Record a terminal action's result (an exported doc, a created game) onto the
+   * message it came from. The backend stamps the same fields onto the stored
+   * message, but only a remount would re-read them — patching here is what lets
+   * the workflow reach its final step while the user is still on the page.
+   */
+  const markArtifactDelivered = useCallback(
+    (messageId: string, patch: Record<string, unknown>) => {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.message_id === messageId
+            ? { ...m, metadata: { ...(m.metadata || {}), ...patch } }
+            : m,
+        ),
+      )
+    },
+    [],
+  )
+
   // ---- attachments (optional) ----
 
   const uploadAttachmentFiles = useCallback(
@@ -776,6 +795,7 @@ export function useGenerationRun(batch: Batch | null, persistKey?: string) {
     generate,
     approveOutline,
     sendFollowUp,
+    markArtifactDelivered,
     reset,
     uploadAttachmentFiles,
     removePendingAttachment,

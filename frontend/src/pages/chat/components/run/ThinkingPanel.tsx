@@ -62,22 +62,33 @@ export function ThinkingPanel({ events, runStatus, expandable = true }: Props) {
         ),
     [events],
   )
-  const hasEvents = thinkingEvents.length > 0
+  // Backend-emitted status notes ("Reading your request…") exist to fill the gap
+  // before the agent's first real thought. They count while running, but a
+  // finished run should summarize only genuine agent thinking — a plain chat
+  // turn with no agent notes goes back to rendering nothing at all.
+  const agentThinkingEvents = useMemo(
+    () => thinkingEvents.filter((event) => eventMode(event) !== 'status'),
+    [thinkingEvents],
+  )
   const isRunning = runStatus === 'running'
+  const isFinished =
+    runStatus === 'done' || runStatus === 'failed' || runStatus === 'cancelled'
+  const visibleEvents = isFinished ? agentThinkingEvents : thinkingEvents
+  const hasEvents = visibleEvents.length > 0
   const showPlaceholder = isRunning && !hasEvents
 
   const collapsedSummary = useMemo(() => {
     if (showPlaceholder) return 'Waiting for agent working notes...'
     if (!hasEvents) return ''
 
-    if (runStatus === 'done' || runStatus === 'failed' || runStatus === 'cancelled') {
+    if (isFinished) {
       // Finished — including stopped by the lecturer. Report the duration, not
       // whatever thought happened to be last.
-      return thoughtSummary(thinkingEvents)
+      return thoughtSummary(visibleEvents)
     }
 
-    return eventSummary(thinkingEvents[thinkingEvents.length - 1])
-  }, [hasEvents, showPlaceholder, thinkingEvents, runStatus])
+    return eventSummary(visibleEvents[visibleEvents.length - 1])
+  }, [hasEvents, showPlaceholder, visibleEvents, isFinished])
 
   const [open, setOpen] = useState(false)
   const label = open && isRunning ? 'Thinking' : collapsedSummary
@@ -138,14 +149,14 @@ export function ThinkingPanel({ events, runStatus, expandable = true }: Props) {
               </p>
             ) : (
               <div className="space-y-1.5">
-                {thinkingEvents.map((event, index) => {
+                {visibleEvents.map((event, index) => {
                   const mode = eventMode(event)
                   const rawText = eventRawText(event)
                   const summary = eventSummary(event)
                   const displayText = mode === 'public_delta' && rawText ? rawText : summary
                   // Only the newest note is "live" — pulsing every historical
                   // line at once would be noise rather than signal.
-                  const isLive = isRunning && index === thinkingEvents.length - 1
+                  const isLive = isRunning && index === visibleEvents.length - 1
 
                   return (
                     <div

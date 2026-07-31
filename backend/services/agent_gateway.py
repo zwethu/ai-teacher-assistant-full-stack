@@ -321,6 +321,23 @@ async def run_agent_task(batch_id: str, chat_id: str, run_id: str) -> None:
         logger.info("run_agent_task: run_id=%s already dispatched/terminal — skipping", run_id)
         return
     set_run_status(run_id, "running")
+    # First working note, immediately. The agent's own thinking events only start
+    # after the session round-trip + its first model turn (~5-10s), and a plain
+    # chat turn may never emit one — without this the panel shows the bare
+    # "Waiting for agent working notes..." placeholder for the whole gap.
+    write_run_event(
+        run_id,
+        event_type="backend.run.started",
+        kind="thinking",
+        status="running",
+        title="Reading your request…",
+        summary="Reading your request…",
+        # mode=status lets the panel show this while running but drop it from
+        # the post-completion "Thought for Ns" summary.
+        detail={"mode": "status"},
+        batch_id=batch_id,
+        chat_id=chat_id,
+    )
     run = read_run_doc(batch_id=batch_id, chat_id=chat_id, run_id=run_id) or {}
     payload = run.get("dispatch_payload") or {}
     await _run_agent_background(

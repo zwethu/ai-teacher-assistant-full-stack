@@ -11,6 +11,8 @@ export interface Email extends BaseDoc {
   sentAt: FirestoreTimestamp
   /** All recipients when an email targets more than one address. */
   recipients?: string[]
+  /** Gmail draft ids, one per recipient, for emails saved as drafts. */
+  draftIds?: string[]
   /** Batch ("space") this email was composed for, when sent from the batch flow. */
   batchId?: string
   batchName?: string

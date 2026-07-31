@@ -245,6 +245,25 @@ export async function sendPendingEmail(
   return res.data
 }
 
+export interface SavePendingEmailDraftResult {
+  success?: boolean
+  draft_count: number
+  failed_count: number
+  recipients: string[]
+  failed: { to: string; error: string }[]
+}
+
+export async function savePendingEmailDraft(
+  batchId: string,
+  chatId: string,
+  runId: string,
+): Promise<SavePendingEmailDraftResult> {
+  const res = await api.post<SavePendingEmailDraftResult>(
+    `/batches/${batchId}/chats/${chatId}/runs/${runId}/pending-artifact/save-email-draft`,
+  )
+  return res.data
+}
+
 export interface SchedulePendingEmailResult {
   success?: boolean
   email_id: string

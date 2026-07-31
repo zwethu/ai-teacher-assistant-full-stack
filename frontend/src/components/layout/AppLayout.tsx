@@ -29,9 +29,17 @@ export default function AppLayout() {
             </button>
           </header>
 
-          <main className="relative flex-1 flex flex-col min-h-0 overflow-hidden focus:outline-none px-4 pt-4 pb-4 md:px-8 md:pt-6 md:pb-6">
-            <div className="max-w-7xl mx-auto w-full flex-1 flex flex-col min-h-0 overflow-y-auto">
-              <Outlet />
+          {/* The scroller is horizontally full-bleed so its scrollbar sits flush
+              against the window edge instead of being stranded in a strip of
+              background. The bottom gap stays outside the scroller so it is a
+              permanent frame: as padding on the scrolling content it would only
+              appear once you reach the end, leaving rows flush against the
+              window edge for the whole scroll. */}
+          <main className="relative flex-1 flex flex-col min-h-0 overflow-hidden focus:outline-none pb-4 md:pb-6">
+            <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
+              <div className="max-w-7xl mx-auto w-full flex-1 flex flex-col min-h-0 px-4 pt-4 md:px-8 md:pt-6">
+                <Outlet />
+              </div>
             </div>
           </main>
         </div>

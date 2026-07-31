@@ -32,6 +32,7 @@ from services.artifact_service import (
 from services.batch_service import get_batch
 from services.email_dispatch import (
     EmailDispatchError,
+    save_pending_email_as_draft,
     schedule_pending_email,
     send_pending_email_now,
 )
@@ -1104,6 +1105,68 @@ async def send_pending_email_endpoint(
             "pending_email_sendable": False,
             "email_sent": True,
             "email_sent_count": result["sent_count"],
+            "email_failed_count": result["failed_count"],
+        },
+    )
+    return {"success": True, **result}
+
+
+@router.post("/{chat_id}/runs/{run_id}/pending-artifact/save-email-draft", response_model=dict)
+async def save_pending_email_draft_endpoint(
+    batch_id: str,
+    chat_id: str,
+    run_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Save the staged email as Gmail draft(s) (teacher-confirmed)."""
+    lecturer_id: str = current_user["uid"]
+    early, pending, content, export_lock_id, mark_failed = _claim_pending_email(
+        batch_id, chat_id, run_id, lecturer_id
+    )
+    if early is not None:
+        return early
+
+    recipients = [str(r) for r in content["recipients"]]
+    subject = str(content.get("subject") or "")
+    body = str(content.get("body") or "")
+
+    write_run_event(
+        run_id, event_type="email.draft.started", status="started", title="Saving Gmail draft",
+        phase="email", batch_id=batch_id, chat_id=chat_id,
+    )
+    try:
+        assert_google_oauth_valid(lecturer_id, ["gmail.compose"])
+        result = save_pending_email_as_draft(
+            uid=lecturer_id, recipients=recipients, subject=subject, body=body,
+            source_run_id=run_id,
+        )
+    except (GoogleOAuthRequiredError, GoogleOAuthInvalidError) as exc:
+        mark_failed(str(exc))
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=GOOGLE_OAUTH_REQUIRED_DETAIL) from exc
+    except EmailDispatchError as exc:
+        mark_failed(str(exc))
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("pending email draft failed run_id=%s", run_id)
+        mark_failed(str(exc))
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to save draft") from exc
+
+    export_result = {"action": "draft", **result}
+    mark_agent_run_pending_artifact_exported(
+        batch_id=batch_id, chat_id=chat_id, run_id=run_id,
+        pending_artifact={**pending, "status": "exported", "export_result": export_result},
+    )
+    write_run_event(
+        run_id, event_type="email.draft.done", status="done", title="Gmail draft saved", phase="email",
+        detail={"drafts": result["draft_count"], "failed": result["failed_count"]},
+        batch_id=batch_id, chat_id=chat_id,
+    )
+    update_assistant_message_metadata_for_run(
+        batch_id=batch_id, chat_id=chat_id, run_id=run_id,
+        metadata={
+            "pending_email_sendable": False,
+            "email_drafted": True,
+            "email_draft_count": result["draft_count"],
             "email_failed_count": result["failed_count"],
         },
     )

@@ -10,6 +10,7 @@ const createGameFromRun = vi.fn()
 
 vi.mock('../../../services/gameService', () => ({
   createGameFromRun: (...args: unknown[]) => createGameFromRun(...args),
+  gamePlayUrl: (gameId: string) => `${window.location.origin}/play/${gameId}`,
 }))
 
 vi.mock('../../../services/chatService', () => ({

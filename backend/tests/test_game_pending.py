@@ -217,7 +217,8 @@ def test_create_game_writes_the_documented_document_shape():
         create_game_from_pending("batch-1", "lecturer-1", _request())
 
     assert written["batchId"] == "batch-1"
-    assert written["status"] == "active"
+    # The player app only opens a session whose status is exactly "open".
+    assert written["status"] == "open"
     # Flat per-mode play counters, with these exact spellings ("ropelink", not rope_link).
     assert written["gameModeStats"] == {"bucket": 0, "matching": 0, "ropelink": 0}
     # Every card carries a backend-assigned id the player app can key progress on.

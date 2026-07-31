@@ -52,6 +52,15 @@ export async function createGameFromRun(
   return res.data
 }
 
+/**
+ * The link a lecturer hands to students. `/play/:id` is a public route — students
+ * sign in there with Google and are checked against the batch roster — so this is
+ * an absolute URL, meant to be pasted into an email or an LMS.
+ */
+export function gamePlayUrl(gameId: string): string {
+  return `${window.location.origin}/play/${gameId}`
+}
+
 export async function listGames(batchId: string): Promise<GameSession[]> {
   const res = await api.get<GameSession[]>(`/batches/${batchId}/games`)
   return res.data

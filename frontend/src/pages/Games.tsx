@@ -2,7 +2,10 @@ import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   BookOpen,
+  Check,
   ChevronDown,
+  Copy,
+  ExternalLink,
   FileQuestion,
   FlaskConical,
   Gamepad2,
@@ -19,7 +22,8 @@ import type { Batch } from '../entity/Batch'
 import { useBatchSelection } from '../hooks/useBatchSelection'
 import { useGenerationRun } from '../hooks/useGenerationRun'
 import { listArtifacts, type Artifact } from '../services/artifactService'
-import { deleteGame, listGames, type GameSession } from '../services/gameService'
+import { gameTimeLimitMinutes } from '../lib/gameTiming'
+import { deleteGame, gamePlayUrl, listGames, type GameSession } from '../services/gameService'
 import type { ToastMessage } from '../types'
 import { getErrorMessage } from '../utils/errors'
 import { Spinner } from '../design-system'
@@ -27,6 +31,12 @@ import { Spinner } from '../design-system'
 // Saved work a game can be built from. Course plans are excluded: they are strategy, not
 // the term-bearing teaching content a term/definition game needs.
 const ARTIFACT_SOURCE_TYPES = ['lesson_plan', 'lab', 'quiz'] as const
+
+// Mirrors MIN_GAME_ITEMS / MAX_GAME_ITEMS in backend/entity/GameSession.py — the
+// backend re-validates, so asking for a count outside these fails the create.
+const MIN_PAIRS = 4
+const MAX_PAIRS = 40
+const DEFAULT_PAIRS = 30
 
 function artifactIcon(type: string) {
   if (type === 'lab') return FlaskConical
@@ -239,6 +249,7 @@ export default function Games() {
                         )}
                       </button>
                     </div>
+                    <GamePlayLink gameId={game.gameId} />
                     {expanded && (
                       <div className="border-t border-slate-100 bg-slate-50/60 px-4 py-3">
                         <ol className="space-y-2">
@@ -263,6 +274,50 @@ export default function Games() {
   )
 }
 
+/** The student-facing link for a game — the game's equivalent of a Google Docs URL. */
+function GamePlayLink({ gameId }: { gameId: string }) {
+  const url = gamePlayUrl(gameId)
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    if (!copied) return
+    const timer = window.setTimeout(() => setCopied(false), 2000)
+    return () => window.clearTimeout(timer)
+  }, [copied])
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopied(true)
+    } catch {
+      // Clipboard can be blocked (insecure origin, denied permission); the link
+      // is on screen and selectable, so there is nothing to recover from.
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-2 border-t border-slate-100 bg-slate-50/40 px-4 py-2.5">
+      <a
+        href={url}
+        target="_blank"
+        rel="noreferrer"
+        className="inline-flex flex-shrink-0 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+      >
+        <ExternalLink className="h-3.5 w-3.5" /> Open player
+      </a>
+      <button
+        type="button"
+        onClick={() => void handleCopy()}
+        className="inline-flex flex-shrink-0 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+      >
+        {copied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+        {copied ? 'Copied' : 'Copy link for students'}
+      </button>
+      <code className="min-w-0 flex-1 truncate text-xs text-slate-400">{url}</code>
+    </div>
+  )
+}
+
 /**
  * Source picker + generation run for one space. A game is built from exactly one source:
  * an uploaded document, or one saved artifact. The two choices are mutually exclusive —
@@ -275,6 +330,11 @@ function GameGenerator({ batch, onCreated }: { batch: Batch; onCreated: () => vo
   const [artifactsLoading, setArtifactsLoading] = useState(false)
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null)
   const [instructions, setInstructions] = useState('')
+  // Held as text so the field can be cleared while typing; validated before use.
+  const [pairCount, setPairCount] = useState(String(DEFAULT_PAIRS))
+
+  const pairs = Number(pairCount)
+  const pairsValid = Number.isInteger(pairs) && pairs >= MIN_PAIRS && pairs <= MAX_PAIRS
 
   const started = run.messages.length > 0 || Boolean(run.currentRunId)
   const uploads = run.pendingAttachments
@@ -315,8 +375,8 @@ function GameGenerator({ batch, onCreated }: { batch: Batch; onCreated: () => vo
   const hasSource = uploads.length > 0 || Boolean(selectedArtifact)
 
   async function handleGenerate() {
-    if (run.sending || !hasSource) return
-    const lines: string[] = []
+    if (run.sending || !hasSource || !pairsValid) return
+    const lines: string[] = [`Create exactly ${pairs} term/definition pairs.`]
     if (selectedArtifact) {
       const type = String(selectedArtifact.type || selectedArtifact.artifact_type || 'lesson_plan')
       const week = selectedArtifact.week
@@ -417,25 +477,55 @@ function GameGenerator({ batch, onCreated }: { batch: Batch; onCreated: () => vo
         </div>
       </div>
 
-      <div className="mt-4">
-        <label htmlFor="game-instructions" className="mb-1.5 block text-sm font-semibold text-slate-700">
-          Extra instructions (optional)
-        </label>
-        <input
-          id="game-instructions"
-          type="text"
-          value={instructions}
-          onChange={(event) => setInstructions(event.target.value)}
-          placeholder="e.g. 12 pairs, focus on the key definitions students confuse"
-          className="block w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm focus:border-violet-500 focus:ring-violet-500"
-        />
+      <div className="mt-4 grid gap-4 sm:grid-cols-[10rem_1fr]">
+        <div>
+          <label htmlFor="game-pair-count" className="mb-1.5 block text-sm font-semibold text-slate-700">
+            Number of pairs
+          </label>
+          <input
+            id="game-pair-count"
+            type="number"
+            inputMode="numeric"
+            min={MIN_PAIRS}
+            max={MAX_PAIRS}
+            value={pairCount}
+            onChange={(event) => setPairCount(event.target.value)}
+            aria-describedby="game-pair-count-hint"
+            aria-invalid={!pairsValid}
+            className={`block w-full rounded-md border px-3 py-2.5 text-sm focus:ring-violet-500 ${
+              pairsValid ? 'border-slate-300 focus:border-violet-500' : 'border-red-300 focus:border-red-500'
+            }`}
+          />
+          <p
+            id="game-pair-count-hint"
+            className={`mt-1 text-xs ${pairsValid ? 'text-slate-500' : 'text-red-600'}`}
+          >
+            {pairsValid
+              ? `About ${gameTimeLimitMinutes(pairs)} min to play`
+              : `Pick between ${MIN_PAIRS} and ${MAX_PAIRS}`}
+          </p>
+        </div>
+
+        <div>
+          <label htmlFor="game-instructions" className="mb-1.5 block text-sm font-semibold text-slate-700">
+            Extra instructions (optional)
+          </label>
+          <input
+            id="game-instructions"
+            type="text"
+            value={instructions}
+            onChange={(event) => setInstructions(event.target.value)}
+            placeholder="e.g. focus on the key definitions students confuse"
+            className="block w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm focus:border-violet-500 focus:ring-violet-500"
+          />
+        </div>
       </div>
 
       <div className="mt-4">
         <button
           type="button"
           onClick={() => void handleGenerate()}
-          disabled={run.sending || !hasSource}
+          disabled={run.sending || !hasSource || !pairsValid}
           className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-violet-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-violet-700 shadow-sm transition-colors disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none disabled:cursor-not-allowed"
         >
           {run.sending ? <Spinner tone="inverse" size={16} /> : <Sparkles className="h-4 w-4" />}

@@ -7,8 +7,8 @@ import {
   BarChart3,
   BookOpen,
   ChevronDown,
-  Clock,
   Gamepad2,
+  History,
   LogOut,
   Mail,
   Menu,
@@ -34,7 +34,7 @@ const NAV_ITEMS: {
   { to: '/assessments', label: 'Assessments', icon: BarChart3 },
   { to: '/email', label: 'Send Emails', icon: Mail },
   { to: '/games', label: 'Games', icon: Gamepad2 },
-  { to: '/chat-history', label: 'Sessions', icon: Clock },
+  { to: '/chat-history', label: 'Sessions', icon: History },
 ]
 
 function stressLabel(score: number): string {

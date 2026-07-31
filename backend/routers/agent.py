@@ -200,6 +200,7 @@ async def invoke_agent(
         )
 
     approved_outline: dict | None = None
+    approval_action = body.approval_action or ""
     if approval_action == "refine_outline":
         # Revision turn: fetch (don't consume) the outline being refined so the
         # gateway re-seeds it into session state as the CURRENT OUTLINE, then

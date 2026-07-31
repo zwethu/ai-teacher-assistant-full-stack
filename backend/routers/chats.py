@@ -14,8 +14,9 @@ from services.course_blueprint_service import save_blueprint_from_content
 from services.agent_sessions import (
     claim_pending_artifact_export,
     get_agent_run,
-    mark_agent_run_cancelled,
+    get_agent_run_with_pending_artifact,
     invalidate_latest_outline_for_followup,
+    mark_agent_run_cancelled,
     mark_agent_run_pending_artifact,
     mark_agent_run_pending_artifact_export_failed,
     mark_agent_run_pending_artifact_exported,
@@ -977,7 +978,9 @@ async def update_pending_email_endpoint(
     can be edited — once claimed (status "exporting") or sent, the run is immutable.
     """
     lecturer_id: str = current_user["uid"]
-    run = get_agent_run(
+    # Must be the *_with_pending_artifact reader: get_agent_run projects pending_artifact
+    # down to a bool (the run-creation request flag), so the dict never survives.
+    run = get_agent_run_with_pending_artifact(
         batch_id=batch_id, chat_id=chat_id, run_id=run_id, lecturer_id=lecturer_id
     )
     if run is None:

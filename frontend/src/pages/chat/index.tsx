@@ -9,6 +9,7 @@ export default function Chat() {
     <ChatErrorBoundary>
       <ChatLayout
         selectedBatch={state.selectedBatch}
+        setSelectedBatch={state.setSelectedBatch}
         batches={state.batches}
         batchesLoading={state.batchesLoading}
         activeChat={state.activeChat}
@@ -23,6 +24,7 @@ export default function Chat() {
         textareaRef={state.textareaRef}
         handleSend={state.handleSend}
         handleApproveOutline={state.handleApproveOutline}
+        applyPendingEmailEdit={state.applyPendingEmailEdit}
         activeGenerateMode={state.activeGenerateMode}
         setActiveGenerateMode={state.setActiveGenerateMode}
         handleInputKeyDown={state.handleInputKeyDown}

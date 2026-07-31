@@ -7,6 +7,7 @@ import { type ConnectorsState } from './ConnectorToggles'
 import type { RunUiState } from '../runTypes'
 import type { PendingChatAttachment } from '../hooks/useChatPage'
 import type { ChatAttachmentListItem } from '../../../entity/Chat'
+import type { UpdatePendingEmailResult } from '../../../services/chatService'
 import { Spinner, IconButton } from '../../../design-system'
 import type { PreviewableAttachment } from './AttachmentPreview'
 import { AttachmentCard, AttachmentViewer, attachmentStatusLabel } from './AttachmentPreview'
@@ -386,6 +387,7 @@ type MessagesPanelProps = {
   bottomInset?: number
   welcomeContent: React.ReactNode
   onApproveOutline: (message: ChatMessage) => void
+  onPendingEmailEdited: (runId: string, result: UpdatePendingEmailResult) => void
   onRetryMessage?: (message: ChatMessage) => void
   /** Quote a selected passage of a response into the composer. */
   onQuoteReply?: (excerpt: string) => void
@@ -403,6 +405,7 @@ export function ChatMessagesPanel({
   bottomInset,
   welcomeContent,
   onApproveOutline,
+  onPendingEmailEdited,
   onRetryMessage,
   onQuoteReply,
   retryingMessageId,
@@ -456,6 +459,7 @@ export function ChatMessagesPanel({
                 approvalDisabled={sending}
                 approvalCompleted={Boolean(msg.run_id && completedOutlineRunIds.has(msg.run_id))}
                 approvalSuperseded={Boolean(msg.run_id && supersededOutlineRunIds.has(msg.run_id))}
+                onPendingEmailEdited={onPendingEmailEdited}
                 onRetry={onRetryMessage}
                 onQuoteReply={onQuoteReply}
                 retrying={retryingMessageId === msg.message_id}

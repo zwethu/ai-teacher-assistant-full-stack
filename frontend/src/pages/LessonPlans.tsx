@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { BookOpen, Clock, ExternalLink, FileText, Plus, Sparkles } from 'lucide-react'
+import { BookOpen, ChevronDown, Clock, ExternalLink, FileText, Plus, Sparkles } from 'lucide-react'
 import type { ToastMessage } from '../types'
 import Toast from '../components/ui/Toast'
 import { getErrorMessage } from '../utils/errors'
@@ -93,6 +93,7 @@ export default function LessonPlans() {
   const [toast, setToast] = useState<ToastMessage | null>(null)
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [listLoading, setListLoading] = useState(false)
+  const [showOptional, setShowOptional] = useState(false)
 
   const showToast = useCallback((type: ToastMessage['type'], message: string) => {
     setToast({ type, message })
@@ -138,14 +139,13 @@ export default function LessonPlans() {
   const missing = missingRequiredInputs(form, Boolean(selectedBatch))
 
   return (
-    <div className="pb-12">
+    <div className="pb-8">
       <Toast toast={toast} onDismiss={() => setToast(null)} />
 
-      <div className="mb-6">
+      <div className="mb-4">
         <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Lesson Plans</h1>
         <p className="text-sm text-slate-500 mt-1">
-          Generate a lesson plan for a space. The agent uses the space's Course-Space files,
-          web search, and any files you attach.
+          Generate a lesson plan from Course-Space files, web search, and any attachments.
         </p>
       </div>
 
@@ -165,171 +165,181 @@ export default function LessonPlans() {
           </div>
         </div>
       ) : (
-        <form onSubmit={handleGenerate} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
-          <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-1.5">Space (batch)</label>
-            <select
-              required
-              value={selectedBatchId ?? ''}
-              onChange={(e) => setSelectedBatchId(e.target.value)}
-              disabled={batchesLoading}
-              className="block w-full rounded-md border border-slate-300 py-2.5 px-2 text-sm focus:border-violet-500 focus:ring-violet-500"
-            >
-              {batches.map((b) => (
-                <option key={b.id} value={b.id}>{b.batch_name} — {b.course_name}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-6">
+          <form onSubmit={handleGenerate} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm space-y-3">
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Week</label>
-              <input type="number" min={1} required value={form.week}
-                onChange={(e) => setForm((f) => ({ ...f, week: Number(e.target.value || 1) }))}
-                className="block w-full rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-violet-500 focus:ring-violet-500" />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Duration (min)</label>
-              <select value={form.duration} onChange={(e) => setForm((f) => ({ ...f, duration: Number(e.target.value) }))}
-                className="block w-full rounded-md border border-slate-300 py-2.5 px-2 text-sm focus:border-violet-500 focus:ring-violet-500">
-                {DURATIONS.map((d) => <option key={d} value={d}>{d}</option>)}
+              <label className="block text-sm font-semibold text-slate-700 mb-1">Space (batch)</label>
+              <select
+                required
+                value={selectedBatchId ?? ''}
+                onChange={(e) => setSelectedBatchId(e.target.value)}
+                disabled={batchesLoading}
+                className="block w-full rounded-md border border-slate-300 py-2 px-2 text-sm focus:border-violet-500 focus:ring-violet-500"
+              >
+                {batches.map((b) => (
+                  <option key={b.id} value={b.id}>{b.batch_name} — {b.course_name}</option>
+                ))}
               </select>
             </div>
-          </div>
 
-          <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-1.5">Lesson plan name (optional)</label>
-            <input type="text" value={form.title}
-              onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-              placeholder="Leave blank — agent names it from the course plan or topic"
-              className="block w-full rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-violet-500 focus:ring-violet-500" />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-1.5">Topic (optional)</label>
-            <input type="text" value={form.topic}
-              onChange={(e) => setForm((f) => ({ ...f, topic: e.target.value }))}
-              placeholder="Leave blank to let the agent choose from the course plan"
-              className="block w-full rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-violet-500 focus:ring-violet-500" />
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Level</label>
-              <select value={form.grade} onChange={(e) => setForm((f) => ({ ...f, grade: e.target.value }))}
-                className="block w-full rounded-md border border-slate-300 py-2.5 px-2 text-sm focus:border-violet-500 focus:ring-violet-500">
-                {GRADES.map((g) => <option key={g} value={g}>{g}</option>)}
-              </select>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1">Week</label>
+                <input type="number" min={1} required value={form.week}
+                  onChange={(e) => setForm((f) => ({ ...f, week: Number(e.target.value || 1) }))}
+                  className="block w-full rounded-md border border-slate-300 py-2 px-2.5 text-sm focus:border-violet-500 focus:ring-violet-500" />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1">Duration (min)</label>
+                <select value={form.duration} onChange={(e) => setForm((f) => ({ ...f, duration: Number(e.target.value) }))}
+                  className="block w-full rounded-md border border-slate-300 py-2 px-2 text-sm focus:border-violet-500 focus:ring-violet-500">
+                  {DURATIONS.map((d) => <option key={d} value={d}>{d}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1">Level</label>
+                <select value={form.grade} onChange={(e) => setForm((f) => ({ ...f, grade: e.target.value }))}
+                  className="block w-full rounded-md border border-slate-300 py-2 px-2 text-sm focus:border-violet-500 focus:ring-violet-500">
+                  {GRADES.map((g) => <option key={g} value={g}>{g}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1">Difficulty</label>
+                <select value={form.difficulty} onChange={(e) => setForm((f) => ({ ...f, difficulty: e.target.value }))}
+                  className="block w-full rounded-md border border-slate-300 py-2 px-2 text-sm focus:border-violet-500 focus:ring-violet-500 capitalize">
+                  {DIFFICULTIES.map((d) => <option key={d} value={d}>{d}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1">Approach</label>
+                <select value={form.approach} onChange={(e) => setForm((f) => ({ ...f, approach: e.target.value }))}
+                  className="block w-full rounded-md border border-slate-300 py-2 px-2 text-sm focus:border-violet-500 focus:ring-violet-500">
+                  {APPROACHES.map((a) => <option key={a} value={a}>{a}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1">Plan type</label>
+                <select value={form.planType} onChange={(e) => setForm((f) => ({ ...f, planType: e.target.value }))}
+                  className="block w-full rounded-md border border-slate-300 py-2 px-2 text-sm focus:border-violet-500 focus:ring-violet-500">
+                  {PLAN_TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
+                </select>
+              </div>
             </div>
+
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Difficulty</label>
-              <select value={form.difficulty} onChange={(e) => setForm((f) => ({ ...f, difficulty: e.target.value }))}
-                className="block w-full rounded-md border border-slate-300 py-2.5 px-2 text-sm focus:border-violet-500 focus:ring-violet-500 capitalize">
-                {DIFFICULTIES.map((d) => <option key={d} value={d}>{d}</option>)}
-              </select>
+              <label className="block text-sm font-semibold text-slate-700 mb-1">Prior knowledge</label>
+              <textarea rows={2} required value={form.priorKnowledge}
+                onChange={(e) => setForm((f) => ({ ...f, priorKnowledge: e.target.value }))}
+                placeholder="What students already know, e.g. basic spreadsheet concepts"
+                className="block w-full rounded-md border border-slate-300 py-2 px-2.5 text-sm focus:border-violet-500 focus:ring-violet-500 resize-y" />
             </div>
+
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Approach</label>
-              <select value={form.approach} onChange={(e) => setForm((f) => ({ ...f, approach: e.target.value }))}
-                className="block w-full rounded-md border border-slate-300 py-2.5 px-2 text-sm focus:border-violet-500 focus:ring-violet-500">
-                {APPROACHES.map((a) => <option key={a} value={a}>{a}</option>)}
-              </select>
+              <button
+                type="button"
+                onClick={() => setShowOptional((v) => !v)}
+                className="inline-flex items-center gap-1.5 text-sm font-medium text-violet-700 hover:text-violet-800"
+              >
+                <ChevronDown className={`h-4 w-4 transition-transform ${showOptional ? 'rotate-180' : ''}`} />
+                {showOptional ? 'Hide optional details' : 'Show optional details'}
+              </button>
+              {showOptional && (
+                <div className="mt-3 space-y-3 rounded-lg border border-slate-100 bg-slate-50/70 p-3">
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700 mb-1">Lesson plan name</label>
+                    <input type="text" value={form.title}
+                      onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+                      placeholder="Leave blank — agent names it from the course plan or topic"
+                      className="block w-full rounded-md border border-slate-300 py-2 px-2.5 text-sm focus:border-violet-500 focus:ring-violet-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700 mb-1">Topic</label>
+                    <input type="text" value={form.topic}
+                      onChange={(e) => setForm((f) => ({ ...f, topic: e.target.value }))}
+                      placeholder="Leave blank to let the agent choose from the course plan"
+                      className="block w-full rounded-md border border-slate-300 py-2 px-2.5 text-sm focus:border-violet-500 focus:ring-violet-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700 mb-1">Additional instructions</label>
+                    <textarea rows={2} value={form.instructions}
+                      onChange={(e) => setForm((f) => ({ ...f, instructions: e.target.value }))}
+                      placeholder="Anything else the agent should consider…"
+                      className="block w-full rounded-md border border-slate-300 py-2 px-2.5 text-sm focus:border-violet-500 focus:ring-violet-500 resize-y" />
+                  </div>
+                </div>
+              )}
             </div>
+
+            {selectedBatch && <GenerationAttachments run={run} />}
+            <p className="text-xs text-slate-400">
+              Course-Space files for the selected space are always used.
+            </p>
+
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Plan type</label>
-              <select value={form.planType} onChange={(e) => setForm((f) => ({ ...f, planType: e.target.value }))}
-                className="block w-full rounded-md border border-slate-300 py-2.5 px-2 text-sm focus:border-violet-500 focus:ring-violet-500">
-                {PLAN_TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
-              </select>
+              <button type="submit" disabled={run.sending || missing.length > 0}
+                className="inline-flex w-full items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-md text-white bg-violet-600 hover:bg-violet-700 shadow-sm transition-colors disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none disabled:cursor-not-allowed">
+                {run.sending ? <Spinner tone="inverse" size={16} /> : <Sparkles className="w-4 h-4" />}
+                Generate outline
+              </button>
+              {missing.length > 0 && !run.sending && (
+                <p className="mt-2 text-center text-xs text-slate-500">
+                  Add {joinReadable(missing)} to continue.
+                </p>
+              )}
             </div>
-          </div>
+          </form>
 
-          <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-1.5">Prior knowledge</label>
-            <textarea rows={2} required value={form.priorKnowledge}
-              onChange={(e) => setForm((f) => ({ ...f, priorKnowledge: e.target.value }))}
-              placeholder="What students already know before this lesson, e.g. basic spreadsheet and database concepts"
-              className="block w-full rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-violet-500 focus:ring-violet-500 resize-y" />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-1.5">Additional instructions (optional)</label>
-            <textarea rows={2} value={form.instructions}
-              onChange={(e) => setForm((f) => ({ ...f, instructions: e.target.value }))}
-              placeholder="Anything else the agent should consider…"
-              className="block w-full rounded-md border border-slate-300 py-2.5 px-3 text-sm focus:border-violet-500 focus:ring-violet-500 resize-y" />
-          </div>
-
-          {selectedBatch && <GenerationAttachments run={run} />}
-          <p className="text-xs text-slate-400">
-            Course-Space files for the selected space are always used.
-          </p>
-
-          <div>
-            <button type="submit" disabled={run.sending || missing.length > 0}
-              className="inline-flex w-full items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-md text-white bg-violet-600 hover:bg-violet-700 shadow-sm transition-colors disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none disabled:cursor-not-allowed">
-              {run.sending ? <Spinner tone="inverse" size={16} /> : <Sparkles className="w-4 h-4" />}
-              Generate outline
-            </button>
-            {missing.length > 0 && !run.sending && (
-              <p className="mt-2 text-center text-xs text-slate-500">
-                Add {joinReadable(missing)} to continue.
-              </p>
+          <div className="min-w-0">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold text-slate-700">Saved lesson plans</h2>
+              {selectedBatchId && (
+                <button type="button" onClick={() => void refreshArtifacts(selectedBatchId)}
+                  className="text-xs text-violet-700 hover:underline">Refresh</button>
+              )}
+            </div>
+            {listLoading ? (
+              <div className="flex items-center gap-2 text-sm text-slate-500 py-6">
+                <Spinner size={16} /> Loading…
+              </div>
+            ) : artifacts.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-10 text-center rounded-xl border border-slate-100 bg-white">
+                <FileText className="w-8 h-8 text-slate-300 mb-2" />
+                <p className="text-sm text-slate-500">No lesson plans yet for this space.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {artifacts.map((a) => (
+                  <article key={a.id} className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
+                    <div className="flex items-start gap-3 mb-2">
+                      <div className="h-9 w-9 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center border border-sky-100">
+                        <BookOpen className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <h3 className="font-semibold text-slate-900 truncate">{a.title || 'Lesson plan'}</h3>
+                        <p className="text-xs text-slate-500 mt-0.5">Week {a.week ?? '—'} · v{a.version ?? 1}</p>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 mb-3">
+                      {a.status && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600 border border-slate-200">
+                          <Clock className="w-3 h-3" />{a.status}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-400 mb-3">{timeAgo(a.updated_at ? new Date(a.updated_at) : null)}</p>
+                    {a.doc_url && (
+                      <a href={a.doc_url} target="_blank" rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50">
+                        <ExternalLink className="w-3.5 h-3.5" /> Open Google Doc
+                      </a>
+                    )}
+                  </article>
+                ))}
+              </div>
             )}
           </div>
-        </form>
-      )}
-
-      {/* Existing lesson plans (canonical artifacts) */}
-      <div className="mt-8">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold text-slate-700">Saved lesson plans</h2>
-          {selectedBatchId && (
-            <button type="button" onClick={() => void refreshArtifacts(selectedBatchId)}
-              className="text-xs text-violet-700 hover:underline">Refresh</button>
-          )}
         </div>
-        {listLoading ? (
-          <div className="flex items-center gap-2 text-sm text-slate-500 py-6">
-            <Spinner size={16} /> Loading…
-          </div>
-        ) : artifacts.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-10 text-center rounded-xl border border-slate-100 bg-white">
-            <FileText className="w-8 h-8 text-slate-300 mb-2" />
-            <p className="text-sm text-slate-500">No lesson plans yet for this space.</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {artifacts.map((a) => (
-              <article key={a.id} className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
-                <div className="flex items-start gap-3 mb-2">
-                  <div className="h-9 w-9 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center border border-sky-100">
-                    <BookOpen className="w-4 h-4" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <h3 className="font-semibold text-slate-900 truncate">{a.title || 'Lesson plan'}</h3>
-                    <p className="text-xs text-slate-500 mt-0.5">Week {a.week ?? '—'} · v{a.version ?? 1}</p>
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-center gap-2 mb-3">
-                  {a.status && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600 border border-slate-200">
-                      <Clock className="w-3 h-3" />{a.status}
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-slate-400 mb-3">{timeAgo(a.updated_at ? new Date(a.updated_at) : null)}</p>
-                {a.doc_url && (
-                  <a href={a.doc_url} target="_blank" rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50">
-                    <ExternalLink className="w-3.5 h-3.5" /> Open Google Doc
-                  </a>
-                )}
-              </article>
-            ))}
-          </div>
-        )}
-      </div>
+      )}
     </div>
   )
 }

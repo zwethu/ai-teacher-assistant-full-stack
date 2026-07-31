@@ -1188,10 +1188,13 @@ export function GameCreateButton({
   batchId,
   msg,
   onDelivered,
+  deadlineAt,
 }: {
   batchId: string
   msg: ChatMessage
   onDelivered?: (patch: Record<string, unknown>) => void
+  /** ISO deadline chosen on the generator form. Chat has no such form, so it is optional. */
+  deadlineAt?: string | null
 }) {
   const metadata = msg.metadata || {}
   const savable = metadata.pending_savable_game === true
@@ -1216,7 +1219,7 @@ export function GameCreateButton({
     setError('')
     setCreating(true)
     try {
-      const game = await createGameFromRun(batchId, chatId, runId, contentHash)
+      const game = await createGameFromRun(batchId, chatId, runId, contentHash, deadlineAt)
       setCreated({ gameId: game.gameId, itemCount: game.itemCount })
       onDelivered?.({
         game_id: game.gameId,

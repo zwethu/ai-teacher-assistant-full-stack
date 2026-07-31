@@ -65,22 +65,32 @@ describe('ChatSidePanel — Games', () => {
     expect(screen.getByText('Plant Biology')).toBeTruthy()
   })
 
-  it('shows pair count and remaining lifetime', async () => {
-    listGames.mockResolvedValue([game])
+  it('shows the pair count and the deadline, not the retention date', async () => {
+    listGames.mockResolvedValue([{ ...game, deadlineAt: inDays(5) }])
     renderPanel()
 
     await waitFor(() => expect(screen.getByText(/8 pairs/)).toBeTruthy())
-    expect(screen.getByText(/expires in 30 days/)).toBeTruthy()
+    expect(screen.getByText(/due /)).toBeTruthy()
+    // expiresAt is a storage marker; surfacing it only muddied which date binds students.
+    expect(screen.queryByText(/expires in/)).toBeNull()
   })
 
-  it('singularises a one-pair game and flags an expired one', async () => {
+  it('singularises a one-pair game and marks a passed deadline', async () => {
     listGames.mockResolvedValue([
-      { ...game, itemCount: 1, expiresAt: inDays(-2) },
+      { ...game, itemCount: 1, deadlineAt: inDays(-2) },
     ])
     renderPanel()
 
     await waitFor(() => expect(screen.getByText(/1 pair(?! s)/)).toBeTruthy())
-    expect(screen.getByText(/expired/)).toBeTruthy()
+    expect(screen.getByText(/closed /)).toBeTruthy()
+  })
+
+  it('says nothing about dates when the game has no deadline', async () => {
+    listGames.mockResolvedValue([game])
+    renderPanel()
+
+    await waitFor(() => expect(screen.getByText(/8 pairs/)).toBeTruthy())
+    expect(screen.queryByText(/due |closed /)).toBeNull()
   })
 
   it('tells the lecturer how to make one when the batch has none', async () => {

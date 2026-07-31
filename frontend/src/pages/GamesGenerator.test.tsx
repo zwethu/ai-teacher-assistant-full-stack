@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
@@ -26,6 +26,7 @@ let pendingAttachments: AttachmentFixture[] = []
 vi.mock('../services/gameService', () => ({
   listGames: (...args: unknown[]) => listGames(...args),
   deleteGame: vi.fn(),
+  updateGame: vi.fn(),
   gamePlayUrl: (gameId: string) => `${window.location.origin}/play/${gameId}`,
 }))
 
@@ -162,6 +163,43 @@ describe('Games — source picker', () => {
     await userEvent.type(field, '99')
 
     expect(screen.getByText('Pick between 4 and 40')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Generate game/ }).hasAttribute('disabled')).toBe(true)
+  })
+
+  it('has no deadline until one is asked for', async () => {
+    renderPage()
+
+    await waitFor(() => expect(listArtifacts).toHaveBeenCalled())
+    expect(screen.queryByLabelText('Deadline')).toBeNull()
+    expect(screen.getByText(/stays open until you close it/)).toBeTruthy()
+  })
+
+  it('offers a week from now as the starting deadline', async () => {
+    renderPage()
+
+    await waitFor(() => expect(listArtifacts).toHaveBeenCalled())
+    await userEvent.click(screen.getByLabelText('Set a deadline'))
+
+    const field = screen.getByLabelText('Deadline') as HTMLInputElement
+    const chosen = new Date(field.value).getTime() - Date.now()
+    expect(chosen).toBeGreaterThan(6.5 * 86_400_000)
+    expect(chosen).toBeLessThan(7.5 * 86_400_000)
+  })
+
+  it('refuses a deadline that has already passed', async () => {
+    listArtifacts.mockResolvedValue([lessonPlan])
+    renderPage()
+
+    await waitFor(() => expect(screen.getByText('Week 3 — Test Doubles')).toBeTruthy())
+    await userEvent.click(screen.getByRole('button', { name: /Week 3 — Test Doubles/ }))
+    await userEvent.click(screen.getByLabelText('Set a deadline'))
+    // A valid future default must not be what makes the button clickable in the
+    // negative case, so prove it is enabled first.
+    expect(screen.getByRole('button', { name: /Generate game/ }).hasAttribute('disabled')).toBe(false)
+
+    fireEvent.change(screen.getByLabelText('Deadline'), { target: { value: '2020-01-01T09:00' } })
+
+    expect(screen.getByText('Pick a date and time in the future.')).toBeTruthy()
     expect(screen.getByRole('button', { name: /Generate game/ }).hasAttribute('disabled')).toBe(true)
   })
 

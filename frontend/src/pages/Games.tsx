@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   BookOpen,
+  CalendarClock,
   Check,
   ChevronDown,
   Copy,
@@ -9,6 +10,8 @@ import {
   FileQuestion,
   FlaskConical,
   Gamepad2,
+  Lock,
+  LockOpen,
   Plus,
   RefreshCw,
   Sparkles,
@@ -23,7 +26,13 @@ import { useBatchSelection } from '../hooks/useBatchSelection'
 import { useGenerationRun } from '../hooks/useGenerationRun'
 import { listArtifacts, type Artifact } from '../services/artifactService'
 import { gameTimeLimitMinutes } from '../lib/gameTiming'
-import { deleteGame, gamePlayUrl, listGames, type GameSession } from '../services/gameService'
+import {
+  deleteGame,
+  gamePlayUrl,
+  listGames,
+  updateGame,
+  type GameSession,
+} from '../services/gameService'
 import type { ToastMessage } from '../types'
 import { getErrorMessage } from '../utils/errors'
 import { Spinner } from '../design-system'
@@ -37,6 +46,32 @@ const ARTIFACT_SOURCE_TYPES = ['lesson_plan', 'lab', 'quiz'] as const
 const MIN_PAIRS = 4
 const MAX_PAIRS = 40
 const DEFAULT_PAIRS = 30
+
+/**
+ * `datetime-local` speaks local wall-clock with no zone, so its value has to be built
+ * from local parts — `toISOString()` here would shift the clock by the UTC offset.
+ */
+function toLocalInputValue(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+    `T${pad(date.getHours())}:${pad(date.getMinutes())}`
+  )
+}
+
+/** The lecturer's due date, as students experience it. */
+function formatDeadline(value?: string | null): { text: string; passed: boolean } | null {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  const text = date.toLocaleString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+  return { text, passed: date.getTime() <= Date.now() }
+}
 
 function artifactIcon(type: string) {
   if (type === 'lab') return FlaskConical
@@ -58,16 +93,9 @@ function formatCreated(value?: string | null): string {
     : date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
-/** Games retire on their own TTL, so the page warns before one disappears. */
-function formatExpiry(value?: string | null): { text: string; expiring: boolean } {
-  if (!value) return { text: '', expiring: false }
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return { text: '', expiring: false }
-  const days = Math.ceil((date.getTime() - Date.now()) / 86_400_000)
-  if (days < 0) return { text: 'expired', expiring: true }
-  if (days === 0) return { text: 'expires today', expiring: true }
-  return { text: `expires in ${days} day${days === 1 ? '' : 's'}`, expiring: days <= 7 }
-}
+// A game's `expiresAt` is a data-retention marker, not a teaching date, and nothing
+// currently acts on it. Showing it alongside the deadline only raised the question of
+// which date students are actually held to, so the deadline is the one date on screen.
 
 export default function Games() {
   const navigate = useNavigate()
@@ -201,7 +229,6 @@ export default function Games() {
           ) : (
             <ul className="space-y-3">
               {games.map((game) => {
-                const expiry = formatExpiry(game.expiresAt)
                 const created = formatCreated(game.createdAt)
                 const expanded = expandedId === game.gameId
                 return (
@@ -214,16 +241,19 @@ export default function Games() {
                         <Gamepad2 className="h-5 w-5" />
                       </span>
                       <div className="min-w-0 flex-1">
-                        <h3 className="truncate text-base font-semibold text-slate-900">{game.title}</h3>
+                        <div className="flex items-center gap-2">
+                          <h3 className="truncate text-base font-semibold text-slate-900">
+                            {game.title}
+                          </h3>
+                          {game.status === 'closed' && (
+                            <span className="flex-shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                              Closed
+                            </span>
+                          )}
+                        </div>
                         <p className="mt-0.5 text-xs text-slate-500">
                           {game.itemCount} pair{game.itemCount === 1 ? '' : 's'}
                           {created ? ` · created ${created}` : ''}
-                          {expiry.text ? ' · ' : ''}
-                          {expiry.text && (
-                            <span className={expiry.expiring ? 'font-medium text-amber-600' : ''}>
-                              {expiry.text}
-                            </span>
-                          )}
                         </p>
                       </div>
                       <button
@@ -250,6 +280,18 @@ export default function Games() {
                       </button>
                     </div>
                     <GamePlayLink gameId={game.gameId} />
+                    <GameSchedule
+                      batchId={selectedBatchId ?? ''}
+                      game={game}
+                      onUpdated={(updated) =>
+                        setGames((prev) =>
+                          prev.map((entry) =>
+                            entry.gameId === updated.gameId ? updated : entry,
+                          ),
+                        )
+                      }
+                      onError={(message) => setToast({ type: 'error', message })}
+                    />
                     {expanded && (
                       <div className="border-t border-slate-100 bg-slate-50/60 px-4 py-3">
                         <ol className="space-y-2">
@@ -270,6 +312,120 @@ export default function Games() {
           )}
         </>
       )}
+    </div>
+  )
+}
+
+/**
+ * Deadline and open/closed state for one live game. Both are lecturer decisions that
+ * outlive the generator form — a due date gets extended, a game gets closed early —
+ * so they are editable here rather than only at creation.
+ */
+function GameSchedule({
+  batchId,
+  game,
+  onUpdated,
+  onError,
+}: {
+  batchId: string
+  game: GameSession
+  onUpdated: (game: GameSession) => void
+  onError: (message: string) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const deadline = formatDeadline(game.deadlineAt)
+  const closed = game.status === 'closed'
+  const editDate = value ? new Date(value) : null
+  const editValid = editDate !== null && !Number.isNaN(editDate.getTime()) && editDate > new Date()
+
+  async function apply(changes: Parameters<typeof updateGame>[2]) {
+    setSaving(true)
+    try {
+      onUpdated(await updateGame(batchId, game.gameId, changes))
+      setEditing(false)
+    } catch (err) {
+      onError(getErrorMessage(err, 'Could not update that game.'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function startEdit() {
+    setValue(
+      toLocalInputValue(
+        game.deadlineAt ? new Date(game.deadlineAt) : new Date(Date.now() + 7 * 86_400_000),
+      ),
+    )
+    setEditing(true)
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 px-4 py-2.5 text-xs">
+      <CalendarClock className="h-3.5 w-3.5 flex-shrink-0 text-slate-400" />
+
+      {editing ? (
+        <>
+          <input
+            type="datetime-local"
+            value={value}
+            min={toLocalInputValue(new Date())}
+            onChange={(event) => setValue(event.target.value)}
+            aria-label={`Deadline for ${game.title}`}
+            className="rounded-md border border-slate-300 px-2 py-1 text-xs focus:border-violet-500 focus:ring-violet-500"
+          />
+          <button
+            type="button"
+            onClick={() => void apply({ deadlineAt: editDate?.toISOString() })}
+            disabled={!editValid || saving}
+            className="rounded-md bg-violet-600 px-2.5 py-1 font-medium text-white hover:bg-violet-700 disabled:bg-slate-200 disabled:text-slate-400"
+          >
+            Save
+          </button>
+          <button
+            type="button"
+            onClick={() => setEditing(false)}
+            className="rounded-md px-2 py-1 font-medium text-slate-500 hover:text-slate-700"
+          >
+            Cancel
+          </button>
+        </>
+      ) : (
+        <>
+          <span className={deadline?.passed ? 'font-medium text-amber-600' : 'text-slate-500'}>
+            {deadline ? `Due ${deadline.text}${deadline.passed ? ' · passed' : ''}` : 'No deadline'}
+          </span>
+          <button
+            type="button"
+            onClick={startEdit}
+            className="font-medium text-violet-600 hover:text-violet-700"
+          >
+            {deadline ? 'Change' : 'Set deadline'}
+          </button>
+          {deadline && (
+            <button
+              type="button"
+              onClick={() => void apply({ clearDeadline: true })}
+              disabled={saving}
+              className="font-medium text-slate-400 hover:text-slate-600 disabled:opacity-50"
+            >
+              Remove
+            </button>
+          )}
+        </>
+      )}
+
+      <button
+        type="button"
+        onClick={() => void apply({ status: closed ? 'open' : 'closed' })}
+        disabled={saving}
+        className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1 font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+      >
+        {closed ? <LockOpen className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
+        {closed ? 'Reopen' : 'Close now'}
+      </button>
     </div>
   )
 }
@@ -332,9 +488,19 @@ function GameGenerator({ batch, onCreated }: { batch: Batch; onCreated: () => vo
   const [instructions, setInstructions] = useState('')
   // Held as text so the field can be cleared while typing; validated before use.
   const [pairCount, setPairCount] = useState(String(DEFAULT_PAIRS))
+  const [hasDeadline, setHasDeadline] = useState(false)
+  const [deadline, setDeadline] = useState('')
 
   const pairs = Number(pairCount)
   const pairsValid = Number.isInteger(pairs) && pairs >= MIN_PAIRS && pairs <= MAX_PAIRS
+
+  const deadlineDate = hasDeadline && deadline ? new Date(deadline) : null
+  const deadlineValid =
+    !hasDeadline ||
+    (deadlineDate !== null && !Number.isNaN(deadlineDate.getTime()) && deadlineDate > new Date())
+  // The deadline is not part of the prompt — the agent writes pairs, the backend owns
+  // when play stops — so it rides separately to the create call at the end of the run.
+  const deadlineIso = deadlineValid && deadlineDate ? deadlineDate.toISOString() : null
 
   const started = run.messages.length > 0 || Boolean(run.currentRunId)
   const uploads = run.pendingAttachments
@@ -375,7 +541,7 @@ function GameGenerator({ batch, onCreated }: { batch: Batch; onCreated: () => vo
   const hasSource = uploads.length > 0 || Boolean(selectedArtifact)
 
   async function handleGenerate() {
-    if (run.sending || !hasSource || !pairsValid) return
+    if (run.sending || !hasSource || !pairsValid || !deadlineValid) return
     const lines: string[] = [`Create exactly ${pairs} term/definition pairs.`]
     if (selectedArtifact) {
       const type = String(selectedArtifact.type || selectedArtifact.artifact_type || 'lesson_plan')
@@ -411,7 +577,12 @@ function GameGenerator({ batch, onCreated }: { batch: Batch; onCreated: () => vo
           </button>
         </div>
         <div className="max-h-[70vh] min-h-[20rem] overflow-y-auto">
-          <GenerationRunView batch={batch} run={run} accent="primary" />
+          <GenerationRunView
+            batch={batch}
+            run={run}
+            accent="primary"
+            gameDeadlineAt={deadlineIso}
+          />
         </div>
       </section>
     )
@@ -521,11 +692,55 @@ function GameGenerator({ batch, onCreated }: { batch: Batch; onCreated: () => vo
         </div>
       </div>
 
+      <div className="mt-4 rounded-lg border border-slate-200 p-4">
+        <label className="flex items-center gap-2.5">
+          <input
+            type="checkbox"
+            checked={hasDeadline}
+            onChange={(event) => {
+              setHasDeadline(event.target.checked)
+              // Default to a week out: something sensible to adjust beats an empty
+              // field the lecturer has to fill from scratch.
+              if (event.target.checked && !deadline) {
+                setDeadline(toLocalInputValue(new Date(Date.now() + 7 * 86_400_000)))
+              }
+            }}
+            className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
+          />
+          <span className="text-sm font-semibold text-slate-700">Set a deadline</span>
+        </label>
+        <p className="mt-1 text-xs text-slate-500">
+          {hasDeadline
+            ? 'Students cannot start the game after this time. You can extend it later.'
+            : 'Without one, the game stays open until you close it.'}
+        </p>
+
+        {hasDeadline && (
+          <div className="mt-3">
+            <input
+              id="game-deadline"
+              type="datetime-local"
+              value={deadline}
+              min={toLocalInputValue(new Date())}
+              onChange={(event) => setDeadline(event.target.value)}
+              aria-label="Deadline"
+              aria-invalid={!deadlineValid}
+              className={`block w-full max-w-xs rounded-md border px-3 py-2.5 text-sm focus:ring-violet-500 ${
+                deadlineValid ? 'border-slate-300 focus:border-violet-500' : 'border-red-300 focus:border-red-500'
+              }`}
+            />
+            {!deadlineValid && (
+              <p className="mt-1 text-xs text-red-600">Pick a date and time in the future.</p>
+            )}
+          </div>
+        )}
+      </div>
+
       <div className="mt-4">
         <button
           type="button"
           onClick={() => void handleGenerate()}
-          disabled={run.sending || !hasSource || !pairsValid}
+          disabled={run.sending || !hasSource || !pairsValid || !deadlineValid}
           className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-violet-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-violet-700 shadow-sm transition-colors disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none disabled:cursor-not-allowed"
         >
           {run.sending ? <Spinner tone="inverse" size={16} /> : <Sparkles className="h-4 w-4" />}

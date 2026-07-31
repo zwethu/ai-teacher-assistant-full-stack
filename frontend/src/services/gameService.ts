@@ -30,6 +30,8 @@ export type GameSession = {
   createdAt?: string | null
   updatedAt?: string | null
   expiresAt?: string | null
+  /** When students stop being allowed to play. Null means the game has no deadline. */
+  deadlineAt?: string | null
   idempotent?: boolean
 }
 
@@ -43,11 +45,30 @@ export async function createGameFromRun(
   chatId: string,
   runId: string,
   contentHash?: string,
+  deadlineAt?: string | null,
 ): Promise<GameSession> {
   const res = await api.post<GameSession>(`/batches/${batchId}/games/from-run`, {
     chat_id: chatId,
     run_id: runId,
     content_hash: contentHash || '',
+    deadline_at: deadlineAt || null,
+  })
+  return res.data
+}
+
+/**
+ * Extend or drop a deadline, or close/reopen a game. Omitted fields are left alone,
+ * so dropping a deadline takes the explicit flag rather than a null.
+ */
+export async function updateGame(
+  batchId: string,
+  gameId: string,
+  changes: { deadlineAt?: string; clearDeadline?: boolean; status?: 'open' | 'closed' },
+): Promise<GameSession> {
+  const res = await api.patch<GameSession>(`/batches/${batchId}/games/${gameId}`, {
+    ...(changes.deadlineAt ? { deadline_at: changes.deadlineAt } : {}),
+    ...(changes.clearDeadline ? { clear_deadline: true } : {}),
+    ...(changes.status ? { status: changes.status } : {}),
   })
   return res.data
 }

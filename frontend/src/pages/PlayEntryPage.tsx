@@ -14,15 +14,26 @@ import type { GameSession, AvatarType, StoredAttempt } from '../types/catGame.ty
 import CatSprite from '../components/cat/CatSprite';
 import CertificateModal from '../components/cat/CertificateModal';
 import { computeMedal } from '../components/cat/medal';
-import { formatDate } from '../utils/formatDate';
+import { formatDate, formatDateTime, toDate } from '../utils/formatDate';
 import AvatarSelectPage from './AvatarSelectPage';
 import GameModeSelectPage from './GameModeSelectPage';
 import './PlayEntryPage.css';
+
+/**
+ * A game is out of time once its lecturer-set deadline has passed. Checked on entry
+ * only: a student already mid-round keeps their round, because the alternative is
+ * voiding work that was legitimately started before the bell.
+ */
+function deadlinePassed(session: GameSession): boolean {
+  const due = toDate(session.deadlineAt);
+  return due !== null && due.getTime() <= Date.now();
+}
 
 type FlowStep =
   | 'loading'
   | 'invalid'
   | 'unavailable'
+  | 'past_deadline'
   | 'login'
   | 'checking_access'
   | 'not_enrolled'
@@ -54,7 +65,9 @@ export default function PlayEntryPage() {
         if (!s) { setStep('invalid'); return; }
         // 'active' is the spelling games created before the status fix carry.
         if (s.status !== 'open' && s.status !== 'active') { setStep('unavailable'); return; }
+        // Stored before the deadline gate so that screen can name the date it missed.
         setSession(s);
+        if (deadlinePassed(s)) { setStep('past_deadline'); return; }
         const unsubscribe = auth.onAuthStateChanged(user => {
           if (user && user.email) {
             setUserEmail(user.email);
@@ -172,6 +185,21 @@ export default function PlayEntryPage() {
           <h2 className="play-title">Not Available</h2>
           <p className="play-subtitle">This assessment is closed or has expired.</p>
           <p className="play-hint">Contact your teacher if you think this is a mistake 🐾</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (step === 'past_deadline') {
+    return (
+      <div className="play-entry-bg">
+        <div className="play-card">
+          <CatSprite mood="sleeping" />
+          <h2 className="play-title">Deadline Passed</h2>
+          <p className="play-subtitle">
+            This game closed on <strong>{formatDateTime(session?.deadlineAt)}</strong>.
+          </p>
+          <p className="play-hint">Ask your teacher if you need more time 🐾</p>
         </div>
       </div>
     );

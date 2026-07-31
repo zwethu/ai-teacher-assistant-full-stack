@@ -62,14 +62,33 @@
 
   *:hover {
     scrollbar-color: rgba(187, 164, 226, 0.6) transparent;
+    /* Only the fallback, for the frame before the transcript has been
+       measured. `useScrollbarGutter` replaces this with the container's real
+       `offsetWidth - clientWidth`, because the true width is not knowable from
+       CSS: Firefox picks its own for `scrollbar-width: thin`, and overlay
+       scrollbars reserve nothing at all. Matches the width below so the one
+       unmeasured frame lands in the right place on Chromium. */
+    --chat-scrollbar-gutter: 10px;
   }
 
+  /* Anything that overlays a scroll container must stop short of this, or it
+     paints over the thumb — `--chat-scrollbar-gutter` below has to track it.
+
+     `background: transparent` is not redundant with the track rule below.
+     Giving `::-webkit-scrollbar` a width is what makes Chromium treat this as
+     a custom scrollbar, and the scrollbar box then paints its own default
+     colour — so the gutter showed as a strip in a different colour beside the
+     page, most visibly where the thumb was not covering it. */
   *::-webkit-scrollbar {
     width: 10px;
     height: 10px;
+    background: transparent;
   }
 
+  /* -track is the whole channel, -track-piece the runs above and below the
+     thumb; they are separately paintable and both default to a colour. */
   *::-webkit-scrollbar-track,
+  *::-webkit-scrollbar-track-piece,
   *::-webkit-scrollbar-corner {
     background: transparent;
   }
@@ -103,9 +122,18 @@
     }
   }
 
-  /* the stepper arrows at each end of the track */
-  *::-webkit-scrollbar-button {
+  /* The stepper arrows at each end of the track. `display: none` alone still
+     left an arrow drawn at the top of the track, so the box is zeroed too —
+     and the single-button variants are named explicitly, which is the form
+     Chromium matches when it decides to draw one at only one end. */
+  *::-webkit-scrollbar-button,
+  *::-webkit-scrollbar-button:single-button,
+  *::-webkit-scrollbar-button:start,
+  *::-webkit-scrollbar-button:end {
     display: none;
+    width: 0;
+    height: 0;
+    background: transparent;
   }
 }
 
@@ -270,8 +298,8 @@
 
   .login-card {
     background: var(--surface-glass-strong);
-    backdrop-filter: blur(28px) saturate(1.7);
     -webkit-backdrop-filter: blur(28px) saturate(1.7);
+    backdrop-filter: blur(28px) saturate(1.7);
     border-left: 1px solid var(--border-glass);
     box-shadow: var(--shadow-glass-lg);
   }
@@ -464,26 +492,51 @@
       border-color 240ms cubic-bezier(0.16, 1, 0.3, 1);
   }
 
+  /* No backdrop-filter here — the frost lives on the web-search collapse
+     below, for the reasons set out there. Only paint changes,
+     and every property it changes is in the transition above, so arming and
+     disarming are the same 240ms in both directions. */
   .mila-composer-tint[data-active='true'] {
     border-color: color-mix(in srgb, var(--color-violet-200) 70%, transparent);
     background-color: color-mix(in srgb, var(--color-violet-50) 60%, transparent);
-    /* The web-search disclosure is a true frosted layer, not a pale wash:
-       transcript text crossing behind it loses legibility while the controls
-       themselves keep their crisp, high-contrast plane. */
-    backdrop-filter: blur(20px) saturate(1.35);
-    -webkit-backdrop-filter: blur(20px) saturate(1.35);
     padding: 4px;
   }
 
-  /* The conversation stays unobstructed: only this compact surface is glass.
-     Its low, diffuse shadow gives the composer a clear floating plane without
-     creating a footer-wide veil over the transcript. */
-  .mila-composer-surface {
-    box-shadow:
-      0 14px 34px rgba(63, 47, 107, 0.15),
-      inset 0 1px 0 rgba(255, 255, 255, 0.82),
-      inset 0 0 0 1px rgba(255, 255, 255, 0.3);
+  /* The frost belongs to the disclosure strip, not to the shell that wraps the
+     whole composer.
+
+     `backdrop-filter` makes an element a *backdrop root*, and descendants can
+     only sample what is painted inside that root — not the page behind it. With
+     the blur on the shell, `.maia-glass` on the composer surface was nested
+     inside one, so for exactly as long as web search was armed the composer
+     stopped refracting the transcript and flattened into a plain white box. It
+     came back the moment you disarmed, which is what made toggling feel
+     inconsistent. Blurring here instead keeps the strip legible over transcript
+     text and leaves the composer's own glass sampling the page in both states.
+
+     It goes on the collapse itself, not on the content inside it, for two
+     reasons. The collapse is already exactly the strip's box — same width as
+     the shell's inner edge, same position, height animating in step — so the
+     frosted layer coincides with the surface it frosts instead of being a
+     second rectangle laid over it. And the content carries the entrance
+     `transform`, which a backdrop-filter on the same element would sample
+     through.
+
+     The radius is not decoration. A backdrop-filter paints its own layer, and
+     an ancestor's `border-radius` does not clip it without `overflow: hidden`
+     — so a square-cornered frost inside the 26px shell showed its corners
+     poking out past the rounded edge. 22px is the shell's radius less its 4px
+     armed padding, which is also the composer surface's own radius: strip and
+     surface then read as one panel rather than two stacked cards.
+
+     No transition needed: the collapse clips it to zero height until it opens,
+     so the frost arrives with the height rather than snapping on ahead of it. */
+  .mila-composer-collapse[data-region='web-search'] {
+    border-radius: 22px 22px 0 0;
+    -webkit-backdrop-filter: blur(20px) saturate(1.35);
+    backdrop-filter: blur(20px) saturate(1.35);
   }
+
 
   /* Height easing that survives content changes, not just open↔closed.
      The height is measured in ComposerCollapse and set inline; CSS owns only
@@ -537,8 +590,15 @@
     }
   }
 
+  /* `backwards`, never `both`. This element wraps the composer's glass, and a
+     forwards fill leaves the animation applied to `opacity` and `transform`
+     for the life of the page — which keeps the wrapper a *backdrop root*, so
+     the surface inside it had nothing behind it to blur and the transcript
+     read straight through a 0.55 white fill. The final keyframe is already the
+     resting state (`opacity: 1; transform: none`), so dropping the forwards
+     fill costs nothing and hands the backdrop back. */
   .chat-composer-enter {
-    animation: chat-composer-enter 0.55s cubic-bezier(0.22, 1, 0.36, 1) 0.12s both;
+    animation: chat-composer-enter 0.55s cubic-bezier(0.22, 1, 0.36, 1) 0.12s backwards;
   }
 
   @keyframes chat-composer-enter {
@@ -594,6 +654,115 @@
     }
   }
 
+  /* The workflow chip's slot. Widens and narrows so everything after it in the
+     control row — the web-search toggle — moves with the layout instead of
+     teleporting when the chip finally unmounts at the end of its fade.
+
+     The horizontal twin of `.mila-step-out`'s row collapse, and chosen for the
+     same reason: it needs no measurement. A JS approach here read the toggle's
+     position every render to animate the difference, and `getBoundingClientRect`
+     includes an in-flight transform — so a render mid-slide (typing counts)
+     measured a moving target and restarted from it. That is a shake, not a
+     slide. Nothing to get out of step with here.
+
+     `1fr` is safe: the chip's content is fixed for the whole open or close. */
+  .mila-chip-slot {
+    display: grid;
+    grid-template-columns: 0fr;
+    transition: grid-template-columns 280ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .mila-chip-slot[data-open='true'] {
+    grid-template-columns: 1fr;
+  }
+
+  .mila-chip-slot > * {
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  /* Agent steps in the live run view.
+
+     A step is only on screen while it is in flight, plus a beat to show the
+     "Done" it earned, so rows arrive and leave constantly — and with parallel
+     tool calls, several at once. The motion is quieter and shorter than the
+     composer's for that reason: a settling step should read as work finishing,
+     not as a card being dismissed. */
+
+  /* Rises into place. New steps append below the ones already running, so
+     entering from beneath is where they come from. Scale starts at 0.98, never
+     0 — nothing appears out of nothing. */
+  .mila-step-in {
+    animation: mila-step-in 300ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    animation-delay: var(--mila-step-delay, 0ms);
+  }
+
+  @keyframes mila-step-in {
+    from {
+      opacity: 0;
+      transform: translate3d(0, 8px, 0) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  /* Collapses its own height on the way out, so the rows below slide up rather
+     than snapping when it is finally unmounted. Fading a row that keeps its
+     full height until removal is a jump dressed up as an animation.
+
+     `grid-template-rows: 1fr → 0fr` is safe here in a way it was not for the
+     composer: this element's content is fixed for the whole exit, so there is
+     no in-between size for `1fr` to resolve wrongly. Faster than the entrance —
+     the user has already read this row. */
+  .mila-step-out {
+    pointer-events: none;
+    display: grid;
+    grid-template-rows: 1fr;
+    animation: mila-step-out 240ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  @keyframes mila-step-out {
+    from {
+      grid-template-rows: 1fr;
+      opacity: 1;
+      transform: none;
+    }
+    to {
+      grid-template-rows: 0fr;
+      opacity: 0;
+      transform: translate3d(0, -2px, 0);
+    }
+  }
+
+  /* The row's spacing lives inside the collapsing box, so it collapses with it
+     — spacing left on the parent would survive the row and leave a gap behind. */
+  .mila-step-out > *,
+  .mila-step-in > * {
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  /* Running → Done. The badge changes colour and word at once, and a hard swap
+     reads as two objects rather than one changing state; a few pixels of blur
+     bridges them. No transform, so it does not fight the row's own entrance on
+     the frame a step first appears. */
+  .mila-badge-swap {
+    animation: mila-badge-swap 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  @keyframes mila-badge-swap {
+    from {
+      opacity: 0;
+      filter: blur(3px);
+    }
+    to {
+      opacity: 1;
+      filter: blur(0);
+    }
+  }
+
   /* Attachment tiles. Keyed list items only animate when their DOM node is
      created, so attaching a second file leaves the first one alone. */
   .mila-tile-in {
@@ -641,33 +810,38 @@
      hairline — two unrelated rule sets, so arming it changed background,
      border colour, blur and shadow all at once with nothing interpolating.
      Restated as one element with two states, the pill now lights up rather
-     than replacing itself. The blur is animated from zero instead of being
-     left on at rest, so the resting pill does not quietly frost the glass
-     surface underneath it. */
+     than replacing itself.
+
+     Armed is a flat violet wash, deliberately *not* `.maia-glass-tint`. MILA
+     reserves that surface for selected things, which the workflow mode chip
+     beside this one is — and when both wore it, a persistent setting and a
+     scope that lasts one message read as the same kind of object. A lighter
+     armed state keeps them distinguishable at a glance.
+
+     No `backdrop-filter` either. This sits inside `.maia-glass`, which is a
+     backdrop root, so a blur here could only sample that surface's own flat
+     white fill — and blurring a uniform fill returns the same uniform fill. It
+     rendered nothing while still costing a composited layer on every toggle. */
   .mila-toggle-pill {
     border: 1px solid color-mix(in srgb, var(--color-slate-200) 90%, transparent);
     background-color: transparent;
     box-shadow: none;
-    backdrop-filter: blur(0px) saturate(1);
-    -webkit-backdrop-filter: blur(0px) saturate(1);
     transition:
       background-color 240ms cubic-bezier(0.16, 1, 0.3, 1),
       border-color 240ms cubic-bezier(0.16, 1, 0.3, 1),
       box-shadow 240ms cubic-bezier(0.16, 1, 0.3, 1),
-      backdrop-filter 240ms cubic-bezier(0.16, 1, 0.3, 1),
       color 240ms cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   .mila-toggle-pill[data-armed='true'] {
-    background-color: var(--surface-glass-tint);
-    border-color: rgba(187, 164, 226, 0.55);
-    box-shadow: var(--shadow-glass);
-    backdrop-filter: blur(20px) saturate(1.6);
-    -webkit-backdrop-filter: blur(20px) saturate(1.6);
+    background-color: color-mix(in srgb, var(--color-violet-50) 85%, transparent);
+    border-color: color-mix(in srgb, var(--color-violet-200) 90%, transparent);
+    box-shadow: none;
   }
 
   @media (prefers-reduced-motion: reduce) {
     .mila-composer-tint,
+    .mila-chip-slot,
     .mila-composer-collapse,
     .mila-composer-collapse > *,
     .mila-composer-collapse[data-open='true'] > *,
@@ -676,6 +850,8 @@
     }
 
     .mila-composer-in,
+    .mila-step-in,
+    .mila-badge-swap,
     .mila-tile-in {
       animation: none;
     }
@@ -684,6 +860,7 @@
        after it was removed, which reads as lag rather than as calm. Nothing
        that is on its way out should be visible at all. */
     .mila-composer-out,
+    .mila-step-out,
     .mila-tile-out {
       display: none;
     }
@@ -697,4 +874,67 @@
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
+}
+
+/* ---------------------------------------------------------------------------
+   Unlayered on purpose.
+
+   The design system ships `.maia-glass` and friends with no `@layer`, and an
+   unlayered rule beats every layer regardless of specificity or source order.
+   So the `.mila-composer-surface` overrides that used to sit in
+   `@layer utilities` silently lost the cascade: the composer has been painting
+   the design system's `--shadow-glass`, not the low diffuse shadow written for
+   it. The whole surface is therefore stated here rather than half-inherited.
+
+   `--surface-glass-strong` (0.75), not `--surface-glass` (0.55). The composer
+   floats over the transcript, and at 0.55 with no working blur the conversation
+   read straight through it. 0.75 is the design system's own answer for panels
+   that sit above content and must stay legible — modals and the login card use
+   the same token.
+   --------------------------------------------------------------------------- */
+.mila-composer-surface {
+  background: var(--surface-glass-strong);
+  -webkit-backdrop-filter: blur(28px) saturate(1.7);
+  backdrop-filter: blur(28px) saturate(1.7);
+  border: 1px solid var(--border-glass);
+  /* Low and diffuse: a clear floating plane, without the footer-wide veil a
+     larger shadow casts over the transcript behind it. */
+  box-shadow:
+    0 14px 34px rgba(63, 47, 107, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.82),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.3);
+}
+
+/* The frosted floor behind the composer.
+
+   Unlayered for the same reason as `.mila-composer-surface` above: it has to
+   beat the design system's unlayered utilities if either is ever combined.
+
+   Blur and nothing else. It carried a white gradient as well, and that is what
+   read as a slab laid across the window — blur over the page's own smooth
+   lavender is invisible, but a white wash over it is a band with two visible
+   ends. Without the fill this is only ever apparent where there is something
+   behind it to soften, which is exactly the composer's own width, and it
+   disappears everywhere else.
+
+   A sibling of the composer, never an ancestor. An element with
+   `backdrop-filter` becomes a backdrop root, and wrapping the composer in one
+   is exactly what left its own glass with nothing to refract.
+
+   The mask is what keeps the top from being a seam: text crossing a hard blur
+   boundary is sharp on one side and smeared on the other. Solid to 90% puts
+   the dissolve in the footer's top padding, above the composer — 66% left the
+   tint shell's border ring in the fading zone with web search armed, and the
+   conversation showed through it. */
+.mila-composer-floor {
+  /* Stops at the transcript's scroll gutter, whose real width
+     `useScrollbarGutter` measures — the band spans the whole column and the
+     scrollbar belongs to the <main> painted behind it, so at full width it
+     blurred the thumb the moment it reached the bottom. */
+  right: var(--chat-scrollbar-gutter);
+
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-mask-image: linear-gradient(to top, #000 0%, #000 90%, transparent 100%);
+  mask-image: linear-gradient(to top, #000 0%, #000 90%, transparent 100%);
 }

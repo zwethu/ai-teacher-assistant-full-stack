@@ -1,21 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronDown, X } from 'lucide-react'
+import { ChevronDown } from 'lucide-react'
 import type { Batch } from '../../../entity/Batch'
+import { BatchMenuList } from './BatchMenuList'
 
 type Props = {
   batches: Batch[]
   batchesLoading: boolean
-  selectedBatch: Batch | null
-  onSelectBatch: (batch: Batch | null) => void
+  onSelectBatch: (batch: Batch) => void
 }
 
-export function BatchSelectorBar({
-  batches,
-  batchesLoading,
-  selectedBatch,
-  onSelectBatch,
-}: Props) {
+/** The "pick a space" chip above the composer. It exists only for the empty
+    state — once a space is chosen, the header names it and owns switching. */
+export function BatchSelectorBar({ batches, batchesLoading, onSelectBatch }: Props) {
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -43,9 +40,7 @@ export function BatchSelectorBar({
     ? 'Loading batches…'
     : batches.length === 0
       ? 'Create a batch →'
-      : selectedBatch
-        ? selectedBatch.batch_name
-        : 'Select a batch'
+      : 'Select a batch'
 
   return (
     <div ref={containerRef} className="relative px-4 pb-2 flex-shrink-0">
@@ -53,69 +48,34 @@ export function BatchSelectorBar({
         <button
           type="button"
           onClick={handleChipClick}
-          /* Tinted violet glass once a space is chosen — MILA's variant for
-             selected liquid surfaces. Plain glass while nothing is selected. */
           /* pointer-events-auto: the composer wrapper this sits in floats over
              the transcript and disables pointer events, so only the controls
              themselves take clicks — the rest of the band stays see-through. */
-          className={`pointer-events-auto inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
-            selectedBatch
-              ? 'maia-glass-tint text-violet-900'
-              : 'border border-violet-200/70 bg-white/70 text-slate-700 hover:bg-violet-50/60'
-          }`}
+          /* violet-900, not slate: white/70 over the page's purple canvas
+             composites to a lavender, and neutral gray reads muddy on it. */
+          className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-violet-200/70 bg-white/70 px-3 py-1.5 text-sm font-medium text-violet-900 transition-colors hover:bg-violet-50/60 active:scale-[0.97]"
+          aria-expanded={open}
         >
           <span className="truncate max-w-[220px]">{chipLabel}</span>
           {batches.length > 0 && (
-            <>
-              {selectedBatch && (
-                <span
-                  role="button"
-                  tabIndex={0}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onSelectBatch(null)
-                    setOpen(false)
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault()
-                      e.stopPropagation()
-                      onSelectBatch(null)
-                      setOpen(false)
-                    }
-                  }}
-                  className="p-0.5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600"
-                  aria-label="Clear batch selection"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </span>
-              )}
-              <ChevronDown className="w-4 h-4 text-slate-400" />
-            </>
+            <ChevronDown
+              className={`h-4 w-4 flex-none text-violet-500 transition-transform duration-200 ${
+                open ? 'rotate-180' : ''
+              }`}
+            />
           )}
         </button>
       </div>
 
       {open && batches.length > 0 && (
         <div className="pointer-events-auto absolute left-4 right-4 bottom-full mb-1 max-w-sm mx-auto rounded-xl border border-slate-200 bg-white shadow-lg z-30 overflow-hidden">
-          <div className="max-h-56 overflow-y-auto py-1">
-            {batches.map((batch) => (
-              <button
-                key={batch.id}
-                type="button"
-                onClick={() => {
-                  onSelectBatch(batch)
-                  setOpen(false)
-                }}
-                className={`w-full text-left px-4 py-2.5 text-sm hover:bg-violet-50/60 transition-colors ${
-                  selectedBatch?.id === batch.id ? 'text-violet-700 font-medium' : 'text-slate-700'
-                }`}
-              >
-                <div className="truncate">{batch.batch_name}</div>
-                <div className="text-xs text-slate-500 truncate">{batch.course_name}</div>
-              </button>
-            ))}
-          </div>
+          <BatchMenuList
+            batches={batches}
+            onSelect={(batch) => {
+              onSelectBatch(batch)
+              setOpen(false)
+            }}
+          />
         </div>
       )}
     </div>

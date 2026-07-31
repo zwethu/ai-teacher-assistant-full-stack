@@ -113,17 +113,25 @@ function CollapsibleRow({
   )
 }
 
+/**
+ * Keyed on the status it renders, so React remounts it when a step settles and
+ * `.mila-badge-swap` replays. Running → Done changes the word and the colour at
+ * once, and swapping that with no transition reads as two badges rather than
+ * one badge changing state — the blur in that animation is what bridges them.
+ */
 function StatusBadge({ status, failed }: { status: string; failed?: boolean }) {
+  const badge = 'mila-badge-swap rounded-full px-2 py-0.5 text-[10px] font-semibold'
+
   if (failed || status === 'failed') {
-    return <span className="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-700">Failed</span>
+    return <span key="failed" className={`${badge} bg-red-50 text-red-700`}>Failed</span>
   }
   if (status === 'done' || status === 'success') {
-    return <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Done</span>
+    return <span key="done" className={`${badge} bg-emerald-50 text-emerald-700`}>Done</span>
   }
   if (status === 'running' || status === 'started') {
-    return <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700">Running</span>
+    return <span key="running" className={`${badge} bg-violet-50 text-violet-700`}>Running</span>
   }
-  return <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">{status}</span>
+  return <span key={status} className={`${badge} bg-slate-100 text-slate-600`}>{status}</span>
 }
 
 function ChevronIcon({ open }: { open: boolean }) {

@@ -203,7 +203,11 @@ describe('ChatInput growth and return to rest', () => {
     expect(tint()).toBe('false')
     rerender(<ChatInput {...inputProps({ connectors: { web_search: true } })} />)
     expect(tint()).toBe('true')
-    expect(screen.getByText(/Web search is on/)).toBeTruthy()
+    // "can", not "will" — the toggle permits the search, the agent decides
+    // whether the question needs one. And no "Web search is on" opener: the
+    // switch below already says that, which made it the third signal for one
+    // boolean. What is left is what the switch cannot say.
+    expect(screen.getByText(/MILA can search the web when this message needs it/)).toBeTruthy()
   })
 })
 

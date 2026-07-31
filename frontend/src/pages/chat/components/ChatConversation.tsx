@@ -9,6 +9,7 @@ import type { PendingChatAttachment } from '../hooks/useChatPage'
 import type { ChatAttachmentListItem } from '../../../entity/Chat'
 import type { UpdatePendingEmailResult } from '../../../services/chatService'
 import { Spinner, IconButton } from '../../../design-system'
+import { useScrollbarGutter } from '../../../hooks/useScrollbarGutter'
 import type { PreviewableAttachment } from './AttachmentPreview'
 import { AttachmentCard, AttachmentViewer, attachmentStatusLabel } from './AttachmentPreview'
 import type { GenerateMode } from './ComposerSurface'
@@ -189,6 +190,14 @@ export function ChatInput({
         dimmed ? 'opacity-40 pointer-events-none' : ''
       }`}
     >
+      {/* Everything in this band that the composer does not itself cover — the
+          hint line, the bottom padding, the space above — had no surface over
+          it, so the conversation scrolled through in full focus. This softens
+          it. Blur only, no fill: it spans the band but is only ever visible
+          where there is something behind it, so it shows up around the
+          composer and nowhere else. */}
+      <div aria-hidden="true" className="mila-composer-floor pointer-events-none absolute inset-0 -z-10" />
+
       <div className={`${dimmed ? 'pointer-events-none' : 'pointer-events-auto'} relative max-w-3xl mx-auto`}>
         <ComposerCollapse
           open={processingNotice || hasBlockingAttachment || attachmentErrors.length > 0}
@@ -213,19 +222,21 @@ export function ChatInput({
               already finished moving. */}
           <ComposerCollapse open={connectors.web_search} region="web-search" className="px-3.5 py-1.5">
             {webSearchStripMounted && (
+              /* "can", not "will". The toggle is a permission, not a command:
+                 `web_search_gate.py` only *allows* the grounded search to run
+                 and the agent still decides whether the question needs it. A
+                 promise to search would be wrong on most messages.
+
+                 No close button, and no "Web search is on —" opener either.
+                 The switch in the control row already says it is on and is the
+                 one way to turn it off; a second dismiss put two identical X
+                 glyphs a few inches apart, one turning off a setting and one
+                 discarding the whole workflow. */
               <div className="flex items-center gap-2 text-xs font-medium text-violet-800">
                 <Globe className="h-3.5 w-3.5 flex-shrink-0" />
                 <span className="min-w-0 flex-1 truncate">
-                  Web search is on — MILA will look things up for this message.
+                  MILA can search the web when this message needs it.
                 </span>
-                <button
-                  type="button"
-                  onClick={() => onConnectorsChange('web_search', false)}
-                  className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-violet-700 hover:bg-violet-100"
-                  aria-label="Turn off web search"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
               </div>
             )}
           </ComposerCollapse>
@@ -310,6 +321,14 @@ export function ChatInput({
             onOpenPreviousAttachments={canUsePreviousAttachments ? openPreviousAttachments : undefined}
             onSelectMode={selectGenerateMode}
           />
+            {/* Mode first, then the modifier. The chip changes the placeholder,
+                the pipeline and what Send does; web search only colours how the
+                agent answers. Reading order should match how much each commits.
+
+                Unguarded: the chip owns its own presence so it can animate out
+                when the mode is cleared or the run consumes it. */}
+            <ComposerModeChip mode={activeGenerateMode} onClear={onClearGenerateMode} />
+
             {/* A real left-right switch — the design system's Switch, whose
                 .prompt.md names "Web Search" as its example connector toggle.
                 The outer <label htmlFor> lets the icon and text toggle it too;
@@ -320,10 +339,6 @@ export function ChatInput({
               disabled={disabled || sending}
               onChange={(value) => onConnectorsChange('web_search', value)}
             />
-
-            {/* Unguarded: the chip owns its own presence so it can animate out
-                when the mode is cleared or the run consumes it. */}
-            <ComposerModeChip mode={activeGenerateMode} onClear={onClearGenerateMode} />
 
             <ComposerSpacer />
 
@@ -410,6 +425,11 @@ export function ChatMessagesPanel({
   onQuoteReply,
   retryingMessageId,
 }: MessagesPanelProps) {
+  // This is the element the composer band overlays, so its scrollbar is the one
+  // the band has to stay clear of.
+  const scrollRef = useRef<HTMLElement | null>(null)
+  useScrollbarGutter(scrollRef)
+
   const safeMessages = messages.filter(Boolean)
   const completedOutlineRunIds = new Set(
     safeMessages
@@ -439,7 +459,7 @@ export function ChatMessagesPanel({
   )
 
   return (
-    <main className="flex-1 overflow-y-auto" style={{ paddingBottom: bottomInset }}>
+    <main ref={scrollRef} className="flex-1 overflow-y-auto" style={{ paddingBottom: bottomInset }}>
       <div className="max-w-3xl mx-auto px-4 py-8 min-h-full flex flex-col">
         {messagesLoading ? (
           <div className="flex-1 flex items-center justify-center">

@@ -17,8 +17,8 @@
 /* Liquid glass — panels, sidebars, cards-on-canvas */
 .maia-glass {
   background: var(--surface-glass);
-  backdrop-filter: blur(24px) saturate(1.6);
   -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  backdrop-filter: blur(24px) saturate(1.6);
   border: 1px solid var(--border-glass);
   box-shadow: var(--shadow-glass);
 }
@@ -26,8 +26,8 @@
 /* Stronger, more opaque glass — modals, login card */
 .maia-glass-strong {
   background: var(--surface-glass-strong);
-  backdrop-filter: blur(28px) saturate(1.7);
   -webkit-backdrop-filter: blur(28px) saturate(1.7);
+  backdrop-filter: blur(28px) saturate(1.7);
   border: 1px solid var(--border-glass);
   box-shadow: var(--shadow-glass-lg);
 }
@@ -35,16 +35,16 @@
 /* Thin frosted header strip */
 .maia-glass-header {
   background: var(--surface-glass-header);
-  backdrop-filter: blur(24px) saturate(1.5);
   -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  backdrop-filter: blur(24px) saturate(1.5);
   border-bottom: 1px solid var(--border-glass);
 }
 
 /* Tinted violet glass — active/selected liquid surfaces */
 .maia-glass-tint {
   background: var(--surface-glass-tint);
-  backdrop-filter: blur(20px) saturate(1.6);
   -webkit-backdrop-filter: blur(20px) saturate(1.6);
+  backdrop-filter: blur(20px) saturate(1.6);
   border: 1px solid rgba(187, 164, 226, 0.55);
   box-shadow: var(--shadow-glass);
 }
@@ -53,8 +53,8 @@
 .maia-liquid-pill {
   border-radius: var(--radius-full);
   background: var(--surface-glass);
-  backdrop-filter: blur(24px) saturate(1.6);
   -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  backdrop-filter: blur(24px) saturate(1.6);
   border: 1px solid var(--border-glass);
   box-shadow: var(--shadow-glass);
 }

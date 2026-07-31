@@ -208,6 +208,8 @@ export function ChatLayout(props: Props) {
         <div className="relative flex min-w-0 flex-1 flex-col">
         <ChatPageHeader
           selectedBatch={selectedBatch}
+          batches={batches}
+          onSelectBatch={setSelectedBatch}
           activeChat={activeChat}
           renamingId={renamingId}
           renameValue={renameValue}
@@ -300,18 +302,18 @@ export function ChatLayout(props: Props) {
           ref={composerRef}
           className="chat-composer-enter pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col bg-transparent"
         >
-          {/* The space picker rides with the composer rather than the header:
-              it is part of "what this message will be sent against", and it is
-              the only way to choose a batch on /chat. Hidden while a canonical
+          {/* Only while nothing is chosen. Once a space is selected the header
+              names it and owns switching, so a chip here would just repeat the
+              title back at the user. Hidden while a canonical
               /batches/:id/chats/:id route is still resolving, so it does not
               flash "Select a batch" over a chat that already has one. */}
-          {!isRouteInvalid &&
+          {!selectedBatch &&
+            !isRouteInvalid &&
             routeHydration !== 'hydrating' &&
-            (batchesLoading || batches.length > 0 || selectedBatch) && (
+            (batchesLoading || batches.length > 0) && (
               <BatchSelectorBar
                 batches={batches}
                 batchesLoading={batchesLoading}
-                selectedBatch={selectedBatch}
                 onSelectBatch={setSelectedBatch}
               />
             )}

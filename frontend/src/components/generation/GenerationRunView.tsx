@@ -82,13 +82,9 @@ export function GenerationRunView({
             {/* No status heading and no loading spinner here: the stepper above
                 already names the phase, and the thinking line is the one live
                 element. Two competing "we're working" animations read as noise. */}
-            {runState && (
-              <ThinkingPanel
-                events={runState.events}
-                runStatus={runState.status}
-                expandable={false}
-              />
-            )}
+            {/* `expandable` is gone — the panel is never expandable now, here
+                or in chat, which is what this call site already wanted. */}
+            {runState && <ThinkingPanel events={runState.events} runStatus={runState.status} />}
             <div className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-xs ${theme.softBorder} ${theme.softBg} ${theme.text}`}>
               <Info className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
               <span>

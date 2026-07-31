@@ -107,6 +107,13 @@ def render_lab_markdown(payload: dict[str, Any]) -> str:
         for item in lab.rubric:
             lines.append(f"| {item.criterion} | {item.excellent} | {item.satisfactory} | {item.needs_work} | {item.points or ''} |")
 
+    if lab.sources:
+        lines.extend(["", "## Sources"])
+        for source in lab.sources:
+            label = source.file_title or source.title
+            suffix = f" — {source.url}" if source.url else ""
+            lines.append(f"- [{source.source_type}] {label}{suffix}")
+
     return "\n".join(line for line in lines if line is not None).strip()
 
 

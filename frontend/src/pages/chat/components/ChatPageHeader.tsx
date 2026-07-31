@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import {
   Check,
+  ChevronDown,
   MoreHorizontal,
   PanelRight,
   Pencil,
@@ -8,6 +9,7 @@ import {
   X,
 } from 'lucide-react'
 import type { Batch } from '../../../entity/Batch'
+import { BatchMenuList } from './BatchMenuList'
 import type { Chat } from '../../../entity/Chat'
 import { EXPORT_FORMAT_LABELS, exportChat, type ChatExportFormat } from '../../../services/chatService'
 import { Spinner } from '../../../design-system'
@@ -30,6 +32,8 @@ function formatLastUpdated(value?: string | null): string {
 
 type Props = {
   selectedBatch: Batch | null
+  batches: Batch[]
+  onSelectBatch: (batch: Batch) => void
   activeChat: Chat | null
   renamingId: string | null
   renameValue: string
@@ -45,6 +49,8 @@ type Props = {
 
 export function ChatPageHeader({
   selectedBatch,
+  batches,
+  onSelectBatch,
   activeChat,
   renamingId,
   renameValue,
@@ -58,6 +64,7 @@ export function ChatPageHeader({
   panelOpen,
 }: Props) {
   const [menuOpen, setMenuOpen] = useState(false)
+  const [spaceMenuOpen, setSpaceMenuOpen] = useState(false)
   const [exporting, setExporting] = useState<ChatExportFormat | null>(null)
   const [exportError, setExportError] = useState('')
 
@@ -78,6 +85,7 @@ export function ChatPageHeader({
   }
   const [confirmDelete, setConfirmDelete] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
+  const spaceMenuRef = useRef<HTMLDivElement>(null)
   const isRenaming = !!activeChat && renamingId === activeChat.chat_id
 
   useEffect(() => {
@@ -96,7 +104,20 @@ export function ChatPageHeader({
     setConfirmDelete(false)
   }, [activeChat?.chat_id])
 
+  useEffect(() => {
+    if (!spaceMenuOpen) return
+    function handleMouseDown(event: MouseEvent) {
+      if (event.target instanceof Element && spaceMenuRef.current?.contains(event.target)) return
+      setSpaceMenuOpen(false)
+    }
+    document.addEventListener('mousedown', handleMouseDown)
+    return () => document.removeEventListener('mousedown', handleMouseDown)
+  }, [spaceMenuOpen])
+
   const spaceLabel = selectedBatch?.batch_name || 'No space selected'
+  // The composer no longer carries a space chip — it duplicated this title.
+  // Switching lives here instead, and only when there is somewhere to switch to.
+  const canSwitchSpace = !!selectedBatch && batches.length > 1
 
   // .maia-glass-header is exactly this surface in the design system:
   // white/35 + blur(24px) saturate(1.5) + a translucent white hairline.
@@ -117,10 +138,39 @@ export function ChatPageHeader({
             aria-label="Rename chat"
           />
         ) : (
-          <div className="min-w-0">
-            <h1 className="truncate text-sm font-semibold text-slate-800">{spaceLabel}</h1>
+          <div className="relative min-w-0" ref={spaceMenuRef}>
+            {canSwitchSpace ? (
+              <button
+                type="button"
+                onClick={() => setSpaceMenuOpen((open) => !open)}
+                className="-mx-1.5 flex max-w-full items-center gap-1 rounded-lg px-1.5 py-0.5 text-left transition-colors hover:bg-white/70 active:scale-[0.97]"
+                aria-label="Switch space"
+                aria-expanded={spaceMenuOpen}
+              >
+                <h1 className="truncate text-sm font-semibold text-slate-800">{spaceLabel}</h1>
+                <ChevronDown
+                  className={`h-3.5 w-3.5 flex-none text-violet-500 transition-transform duration-200 ${
+                    spaceMenuOpen ? 'rotate-180' : ''
+                  }`}
+                />
+              </button>
+            ) : (
+              <h1 className="truncate text-sm font-semibold text-slate-800">{spaceLabel}</h1>
+            )}
             {activeChat?.title && (
               <p className="truncate text-xs text-slate-500">{activeChat.title}</p>
+            )}
+            {spaceMenuOpen && (
+              <div className="absolute left-0 top-full z-40 mt-1 w-64 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+                <BatchMenuList
+                  batches={batches}
+                  selectedBatchId={selectedBatch?.id}
+                  onSelect={(batch) => {
+                    onSelectBatch(batch)
+                    setSpaceMenuOpen(false)
+                  }}
+                />
+              </div>
             )}
           </div>
         )}
@@ -191,7 +241,7 @@ export function ChatPageHeader({
                         onStartRename(activeChat)
                         setMenuOpen(false)
                       }}
-                      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-slate-600 hover:bg-violet-50 hover:text-slate-900"
+                      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-slate-600 hover:bg-violet-50 hover:text-violet-900"
                     >
                       <Pencil className="h-3.5 w-3.5" />
                       Rename session
@@ -207,7 +257,7 @@ export function ChatPageHeader({
                           type="button"
                           disabled={exporting !== null}
                           onClick={() => void handleExport(format)}
-                          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-slate-600 hover:bg-violet-50 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
+                          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-slate-600 hover:bg-violet-50 hover:text-violet-900 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {exporting === format ? (
                             <Spinner size={14} />

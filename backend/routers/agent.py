@@ -19,7 +19,11 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from services.agent_gateway import start_chat_run
-from services.agent_sessions import claim_approvable_outline_run
+from services.agent_sessions import (
+    claim_approvable_outline_run,
+    get_approvable_outline_run,
+    invalidate_latest_outline_for_followup,
+)
 from services.chat_service import (
     get_chat,
     get_or_create_workflow_chat,
@@ -97,8 +101,17 @@ def _validate_invoke_request(body: AgentInvokeRequest) -> None:
     approval_action = body.approval_action or ""
     if workflow_stage not in {"", "outline", "full"}:
         raise HTTPException(status_code=400, detail="workflow_stage must be '', 'outline', or 'full'")
-    if approval_action not in {"", "approve_outline"}:
-        raise HTTPException(status_code=400, detail="approval_action must be '' or 'approve_outline'")
+    if approval_action not in {"", "approve_outline", "refine_outline"}:
+        raise HTTPException(
+            status_code=400,
+            detail="approval_action must be '', 'approve_outline', or 'refine_outline'",
+        )
+    if approval_action == "refine_outline":
+        if workflow_stage != "outline" or not body.approved_outline_run_id:
+            raise HTTPException(
+                status_code=400,
+                detail="refine_outline requires workflow_stage='outline' and approved_outline_run_id",
+            )
     if workflow_stage == "outline" and body.save_draft:
         raise HTTPException(status_code=400, detail="outline stage cannot save a draft")
     if workflow_stage == "full" and body.pending_artifact:
@@ -187,6 +200,38 @@ async def invoke_agent(
         )
 
     approved_outline: dict | None = None
+    approval_action = body.approval_action or ""
+    if approval_action == "refine_outline":
+        # Revision turn: fetch (don't consume) the outline being refined so the
+        # gateway re-seeds it into session state as the CURRENT OUTLINE, then
+        # supersede the old approve card — the refine run will produce a NEW
+        # approvable outline via the normal outline-ready path.
+        approved_outline = get_approvable_outline_run(
+            batch_id=body.batch_id,
+            chat_id=chat_id,
+            run_id=body.approved_outline_run_id,
+            lecturer_id=lecturer_id,
+        )
+        if not approved_outline or not isinstance(
+            approved_outline.get("outline_payload"), dict
+        ):
+            raise HTTPException(status_code=404, detail="Outline to refine not found")
+        superseded_run_id = invalidate_latest_outline_for_followup(
+            batch_id=body.batch_id, chat_id=chat_id, lecturer_id=lecturer_id
+        )
+        if superseded_run_id:
+            try:
+                update_assistant_message_metadata_for_run(
+                    batch_id=body.batch_id,
+                    chat_id=chat_id,
+                    run_id=superseded_run_id,
+                    metadata={"outline_approval_status": "superseded"},
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to persist superseded outline metadata run_id=%s",
+                    superseded_run_id,
+                )
     if (body.workflow_stage or "") == "full" and body.pending_artifact:
         requested_family = "quiz" if (body.workflow_type or "").startswith(("assessment", "quiz")) else (body.workflow_type or "").split(".")[0]
         try:

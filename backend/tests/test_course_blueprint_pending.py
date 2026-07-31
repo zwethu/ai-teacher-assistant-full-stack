@@ -34,11 +34,11 @@ _OUTLINE = {
 
 
 def test_extract_full_requires_title_and_scope():
-    assert extract_course_blueprint_full_from_state({"course_blueprint_full": _FULL}) == _FULL
-    assert extract_course_blueprint_full_from_state({"course_blueprint_full": {"title": "x"}}) is None
+    assert extract_course_blueprint_full_from_state({"run_id": "r1", "generation_staged_in_run": "r1", "course_blueprint_full": _FULL}) == _FULL
+    assert extract_course_blueprint_full_from_state({"run_id": "r1", "generation_staged_in_run": "r1", "course_blueprint_full": {"title": "x"}}) is None
     # active_artifact_type mismatch is rejected
     assert extract_course_blueprint_full_from_state(
-        {"active_artifact_type": "lesson_plan", "course_blueprint_full": _FULL}
+        {"run_id": "r1", "generation_staged_in_run": "r1", "active_artifact_type": "lesson_plan", "course_blueprint_full": _FULL}
     ) is None
 
 
@@ -51,7 +51,7 @@ def test_extract_full_normalizes_generated_preference_entries():
         ],
     }
     extracted = extract_course_blueprint_full_from_state(
-        {"course_blueprint_full": generated}
+        {"run_id": "r1", "generation_staged_in_run": "r1", "course_blueprint_full": generated}
     )
     assert extracted is not None
     assert extracted["teaching_preferences"] == {
@@ -62,7 +62,7 @@ def test_extract_full_normalizes_generated_preference_entries():
 
 def test_extract_outline_blueprint_needs_no_week():
     result = extract_outline_from_state(
-        {"course_blueprint_outline": _OUTLINE}, "course_blueprint.generate"
+        {"run_id": "r1", "outline_staged_in_run": "r1", "course_blueprint_outline": _OUTLINE}, "course_blueprint.generate"
     )
     assert result is not None
     artifact_type, payload = result
@@ -121,7 +121,7 @@ def test_build_session_state_injects_approved_course_blueprint_outline():
             approved_outline={
                 "outline_artifact_type": "course_blueprint",
                 "outline_payload": _OUTLINE,
-                "outline_context": outline_context_snapshot({"course_blueprint_outline": _OUTLINE}),
+                "outline_context": outline_context_snapshot({"run_id": "r1", "outline_staged_in_run": "r1", "course_blueprint_outline": _OUTLINE}),
             },
         )
     assert state["course_blueprint_outline"] == _OUTLINE

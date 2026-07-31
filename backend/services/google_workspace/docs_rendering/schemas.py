@@ -220,3 +220,4 @@ class LabFull(BaseModel):
     safety_notes: list[str] = Field(default_factory=list)
     post_lab_questions: list[str] = Field(default_factory=list)
     rubric: list[LabRubricCriterion] = Field(default_factory=list)
+    sources: list[SourceCitation] = Field(default_factory=list)

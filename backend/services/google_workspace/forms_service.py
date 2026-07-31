@@ -49,6 +49,25 @@ def create_quiz_form_for_user(
     description = quiz_payload.get("description", "")
     questions = quiz_payload.get("questions", [])
 
+    # Verified grounding citations travel into the form description so the
+    # exported deliverable carries the same sources shown in the chat preview.
+    sources = quiz_payload.get("sources") or []
+    if isinstance(sources, list) and sources:
+        source_lines = []
+        for source in sources[:10]:
+            if not isinstance(source, dict):
+                continue
+            label = str(source.get("file_title") or source.get("title") or "").strip()
+            url = str(source.get("url") or "").strip()
+            if label or url:
+                source_lines.append(f"• [{source.get('source_type', 'web')}] {label}{f' — {url}' if url else ''}")
+        if source_lines:
+            description = (description + "\n\nSources:\n" + "\n".join(source_lines)).strip()
+    # Forms API rejects info.description beyond 4096 chars — never let sources
+    # (or an unusually long model description) fail the whole export.
+    if len(description) > 4000:
+        description = description[:4000].rstrip() + "…"
+
     forms = _build_forms_service(uid)
     drive = _build_drive_service(uid)
 

@@ -150,6 +150,7 @@ async def start_chat_run(
         "status": "running"
     }
     """
+    preflight_start = time.perf_counter()
     connectors = _normalize_connectors(connectors)
 
     # --- 1. Load trusted batch context from Firestore ---
@@ -190,7 +191,7 @@ async def start_chat_run(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    agent_session_id = ensure_chat_agent_session(
+    agent_session_id, session_existed = ensure_chat_agent_session(
         batch_id=batch_id,
         chat_id=chat_id,
         lecturer_id=lecturer_id,
@@ -250,6 +251,7 @@ async def start_chat_run(
     stash_run_dispatch(
         batch_id=batch_id, chat_id=chat_id, run_id=run_id,
         session_state=session_state, user_message=user_message,
+        session_assume_exists=session_existed,
     )
 
     # --- 6. Dispatch now, or defer until attachments finish processing ---
@@ -284,8 +286,10 @@ async def start_chat_run(
 
     # --- 7. Return immediately ---
     logger.info(
-        "gateway run_id=%s chat_id=%s batch_id=%s lecturer_id=%s status=%s pending_attachments=%d",
+        "gateway run_id=%s chat_id=%s batch_id=%s lecturer_id=%s status=%s pending_attachments=%d "
+        "event=preflight_total duration_ms=%d",
         run_id, chat_id, batch_id, lecturer_id, run_status, len(pending_ids),
+        int((time.perf_counter() - preflight_start) * 1000),
     )
     return {
         "user_message": user_msg,
@@ -317,6 +321,23 @@ async def run_agent_task(batch_id: str, chat_id: str, run_id: str) -> None:
         logger.info("run_agent_task: run_id=%s already dispatched/terminal — skipping", run_id)
         return
     set_run_status(run_id, "running")
+    # First working note, immediately. The agent's own thinking events only start
+    # after the session round-trip + its first model turn (~5-10s), and a plain
+    # chat turn may never emit one — without this the panel shows the bare
+    # "Waiting for agent working notes..." placeholder for the whole gap.
+    write_run_event(
+        run_id,
+        event_type="backend.run.started",
+        kind="thinking",
+        status="running",
+        title="Reading your request…",
+        summary="Reading your request…",
+        # mode=status lets the panel show this while running but drop it from
+        # the post-completion "Thought for Ns" summary.
+        detail={"mode": "status"},
+        batch_id=batch_id,
+        chat_id=chat_id,
+    )
     run = read_run_doc(batch_id=batch_id, chat_id=chat_id, run_id=run_id) or {}
     payload = run.get("dispatch_payload") or {}
     await _run_agent_background(
@@ -328,6 +349,7 @@ async def run_agent_task(batch_id: str, chat_id: str, run_id: str) -> None:
         lecturer_id=str(run.get("lecturer_id") or ""),
         user_message=str(payload.get("user_message") or ""),
         session_state=payload.get("session_state") or {},
+        session_assume_exists=bool(payload.get("session_assume_exists")),
     )
 
 
@@ -662,10 +684,21 @@ def safe_run_error_message(exc: Exception) -> str:
     return "Unexpected backend error."
 
 
+def _artifact_staged_this_run(state: dict[str, Any], stamp_key: str) -> bool:
+    """Run-scope guard: the agent stamps outline/generation payloads with the run
+    that produced them (capture_agent_step). Session state is long-lived per chat,
+    so a stale payload from an earlier run must never be extracted as this run's
+    result — the same contract email/game already enforce via staged_in_run."""
+    run_id = str(state.get("run_id") or "")
+    return bool(run_id) and str(state.get(stamp_key) or "") == run_id
+
+
 def extract_lesson_plan_full_from_state(state: dict[str, Any]) -> dict[str, Any] | None:
     """Return a plausible LessonPlanFull payload from Agent Platform state."""
     active_type = str(state.get("active_artifact_type") or "").strip()
     if active_type and active_type != "lesson_plan":
+        return None
+    if not _artifact_staged_this_run(state, "generation_staged_in_run"):
         return None
 
     raw = _state_payload(state, "lesson_plan_full")
@@ -693,6 +726,8 @@ def extract_lab_full_from_state(state: dict[str, Any]) -> dict[str, Any] | None:
     active_type = str(state.get("active_artifact_type") or "").strip()
     if active_type and active_type != "lab":
         return None
+    if not _artifact_staged_this_run(state, "generation_staged_in_run"):
+        return None
 
     raw = _state_payload(state, "lab_full")
     if not isinstance(raw, dict):
@@ -719,6 +754,8 @@ def extract_quiz_full_from_state(state: dict[str, Any]) -> dict[str, Any] | None
     active_type = str(state.get("active_artifact_type") or "").strip()
     if active_type and active_type not in {"quiz", "assessment"}:
         return None
+    if not _artifact_staged_this_run(state, "generation_staged_in_run"):
+        return None
 
     raw = _state_payload(state, "quiz_full")
     if not isinstance(raw, dict):
@@ -742,6 +779,8 @@ def extract_course_blueprint_full_from_state(state: dict[str, Any]) -> dict[str,
     """Return a plausible CourseBlueprintRecommendation payload (course-level, no week)."""
     active_type = str(state.get("active_artifact_type") or "").strip()
     if active_type and active_type != "course_blueprint":
+        return None
+    if not _artifact_staged_this_run(state, "generation_staged_in_run"):
         return None
     raw = _state_payload(state, "course_blueprint_full")
     if not isinstance(raw, dict):
@@ -864,6 +903,8 @@ def extract_outline_from_state(
         "lesson_plan": "lesson_plan_outline", "lab": "lab_outline",
         "quiz": "quiz_outline", "course_blueprint": "course_blueprint_outline",
     }.get(artifact_type)
+    if key and not _artifact_staged_this_run(state, "outline_staged_in_run"):
+        return None
     payload = _state_payload(state, key) if key else None
     if not payload or not str(payload.get("title") or "").strip():
         return None
@@ -964,7 +1005,17 @@ _OUTLINE_CONTEXT_KEYS = (
 
 
 def outline_context_snapshot(state: dict[str, Any]) -> dict[str, Any]:
-    return {key: state[key] for key in _OUTLINE_CONTEXT_KEYS if key in state}
+    snapshot = {key: state[key] for key in _OUTLINE_CONTEXT_KEYS if key in state}
+    # course_blueprint_outline rides in the context snapshot and later overwrites
+    # the normalized payload in Phase B's session state — normalize it here so the
+    # blueprint workflow receives a dict like every other artifact type, even when
+    # the agent stored the outline as a JSON string.
+    raw_blueprint = snapshot.get("course_blueprint_outline")
+    if raw_blueprint is not None:
+        normalized = _state_payload({"course_blueprint_outline": raw_blueprint}, "course_blueprint_outline")
+        if isinstance(normalized, dict):
+            snapshot["course_blueprint_outline"] = normalized
+    return snapshot
 
 
 def _state_payload(state: dict[str, Any], key: str) -> dict[str, Any] | None:
@@ -1506,30 +1557,11 @@ def _web_search_message_metadata(
         if len(citations) >= 40:
             break
 
-    is_card = bool(
-        message_metadata.get("artifact_preview_card")
-        or message_metadata.get("outline_approvable")
-        or message_metadata.get("pending_exportable")
-        or message_metadata.get("export_result")
-    )
-    if is_card:
-        text = "\n".join(
-            filter(
-                None,
-                [visible_text, str(message_metadata.get("assistant_intro") or "")],
-            )
-        )
-        referenced_indices = {
-            int(number)
-            for group in re.findall(r"\[([1-9]\d*(?:\s*,\s*[1-9]\d*)*)\]", text)
-            for number in re.findall(r"[1-9]\d*", group)
-        }
-        referenced = any(
-            source["index"] in referenced_indices or source["url"] in text
-            for source in sources
-        )
-        if not referenced:
-            return {}
+    # Card messages (outline approval, artifact preview, export) used to DROP all
+    # web citations unless a [n] marker literally appeared in the machine-rendered
+    # markdown — which it rarely did, so the HITL decision points showed no sources
+    # at all despite web search having run. Citations now always attach when web
+    # search produced sources; the frontend renders them as chips/side panel.
 
     queries = [
         str(value)[:300]
@@ -1568,6 +1600,7 @@ async def _run_agent_background(
     lecturer_id: str,
     user_message: str,
     session_state: dict[str, Any],
+    session_assume_exists: bool = False,
 ) -> None:
     """Stream the Agent Engine response, persist the result, update run status.
 
@@ -1636,6 +1669,7 @@ async def _run_agent_background(
                 session_id=agent_session_id,
                 lecturer_id=lecturer_id,
                 session_state=session_state,
+                session_assume_exists=session_assume_exists,
             )
         ) as agent_stream:
             # Ripping the stream out from under the SDK can surface as an error

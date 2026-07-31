@@ -34,14 +34,19 @@ def ensure_chat_agent_session(
     batch_id: str,
     chat_id: str,
     lecturer_id: str,
-) -> str:
-    """Return the chat's Agent session id, lazily backfilling old chat docs."""
+) -> tuple[str, bool]:
+    """Return (agent_session_id, existed_before) — lazily backfilling old chat docs.
+
+    existed_before=True means a previous run already recorded this session id, so
+    the Vertex session almost certainly exists and the gateway can skip the
+    existence-check round-trip (ensure_session_with_state assume_exists path).
+    """
     chat_ref = _chat_ref(batch_id, chat_id)
     snap = chat_ref.get()
     data = snap.to_dict() or {}
     agent_session_id = str(data.get("agent_session_id") or "").strip()
     if agent_session_id:
-        return agent_session_id
+        return agent_session_id, True
 
     agent_session_id = make_agent_session_id(chat_id)
     chat_ref.update(
@@ -51,7 +56,7 @@ def ensure_chat_agent_session(
             "updated_at": SERVER_TIMESTAMP,
         }
     )
-    return agent_session_id
+    return agent_session_id, False
 
 
 def create_agent_run_record(
@@ -158,12 +163,22 @@ def mark_agent_run_awaiting_attachments(
 
 
 def stash_run_dispatch(
-    *, batch_id: str, chat_id: str, run_id: str, session_state: dict[str, Any], user_message: str
+    *,
+    batch_id: str,
+    chat_id: str,
+    run_id: str,
+    session_state: dict[str, Any],
+    user_message: str,
+    session_assume_exists: bool = False,
 ) -> None:
     """Persist the inputs the agent-run task needs so it survives a restart."""
     _run_ref(batch_id, chat_id, run_id).update(
         {
-            "dispatch_payload": {"session_state": session_state, "user_message": user_message},
+            "dispatch_payload": {
+                "session_state": session_state,
+                "user_message": user_message,
+                "session_assume_exists": session_assume_exists,
+            },
             "updated_at": SERVER_TIMESTAMP,
         }
     )
@@ -463,6 +478,14 @@ def claim_approvable_outline_run(
             raise RuntimeError("Outline is not ready for approval")
         if data.get("outline_artifact_type") != artifact_type:
             raise RuntimeError("Outline artifact type does not match workflow")
+        # Integrity check: the payload must hash to what was stored at outline-ready
+        # time — a Firestore round-trip type mutation between Phase A and approval
+        # would otherwise silently hand Phase B a different outline.
+        stored_hash = str(data.get("outline_content_hash") or "")
+        payload = data.get("outline_payload")
+        if stored_hash and isinstance(payload, dict):
+            if _content_hash(payload) != stored_hash:
+                raise RuntimeError("Approved outline failed integrity verification")
         txn.update(run_ref, {"outline_status": "approved", "updated_at": SERVER_TIMESTAMP})
         txn.update(chat_ref, {"latest_outline_run_id": "", "updated_at": SERVER_TIMESTAMP})
         return data

@@ -605,13 +605,48 @@ export function useGenerationRun(batch: Batch | null, persistKey?: string) {
   )
 
   const sendFollowUp = useCallback(
-    async (text: string, webSearch = true) => {
+    async (text: string, refineOf: ChatMessage | null = null, webSearch = true) => {
       const content = text.trim()
       if (!batch || !content || sending || !chatRef.current) return
-      setActivePhase('refine')
-      if (persistIdRef.current) writeGenerationRun(persistIdRef.current, { activePhase: 'refine' })
       const chatId = chatRef.current.chat_id
+
+      // Outline revision: keep the workflow context so the backend re-seeds the
+      // current outline (CURRENT OUTLINE block) and the revised outline comes back
+      // as a NEW approvable card. A plain /messages follow-up would supersede the
+      // outline with no way to ever re-approve.
+      const refineMeta = refineOf?.metadata || {}
+      const refineArtifact = String(
+        refineMeta.outline_artifact_type || refineMeta.artifact_type || '',
+      )
+      const refineMode: GenerationWorkflow | '' =
+        refineArtifact === 'quiz' ? 'assessment' : (refineArtifact as GenerationWorkflow)
+      const canRefineOutline =
+        Boolean(refineOf?.run_id) &&
+        ['lesson_plan', 'lab', 'assessment', 'course_blueprint'].includes(refineMode)
+
+      setActivePhase(canRefineOutline ? 'outline' : 'refine')
+      if (persistIdRef.current) {
+        writeGenerationRun(persistIdRef.current, {
+          activePhase: canRefineOutline ? 'outline' : 'refine',
+        })
+      }
       await startRun(chatId, content, async () => {
+        if (canRefineOutline && refineOf) {
+          const data = await invokeAgent({
+            batch_id: batch.id,
+            chat_id: chatId,
+            workflow_type: `${refineMode}.generate`,
+            workflow_stage: 'outline',
+            approval_action: 'refine_outline',
+            approved_outline_run_id: refineOf.run_id,
+            week: typeof refineMeta.week === 'number' ? refineMeta.week : undefined,
+            pending_artifact: false,
+            save_draft: false,
+            message: content,
+            connectors: { web_search: webSearch },
+          })
+          return data as InvokeResult
+        }
         const data = await sendMessage(batch.id, chatId, content, { web_search: webSearch }, [])
         return data as InvokeResult
       })

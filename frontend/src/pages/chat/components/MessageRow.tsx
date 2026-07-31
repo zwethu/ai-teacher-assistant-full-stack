@@ -375,13 +375,11 @@ export const MessageRow = memo(function MessageRow({
               <QuoteReplyOverlay sourceRef={quoteSourceRef} onQuote={onQuoteReply} />
             )}
             {!isAwaitingAttachments && <RunDetails run={run} isFinal={isFinal} />}
+            {/* No wrapper: the panel renders nothing for a run it never saw
+                running, and a spacer div around it would leave that message
+                carrying a gap where a thinking line used to be. */}
             {run && !isAwaitingAttachments && (
-              <div className="mt-2">
-                <ThinkingPanel
-                  events={run.events}
-                  runStatus={run.status}
-                />
-              </div>
+              <ThinkingPanel events={run.events} runStatus={run.status} />
             )}
             <div className={run ? 'mt-3' : ''}>
               {isCancelled ? (

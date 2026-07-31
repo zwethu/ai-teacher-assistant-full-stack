@@ -55,4 +55,15 @@ def render_quiz_markdown(payload: dict[str, Any]) -> str:
                 heading = "Expected criteria / marking guidance" if raw_type == "short_answer" else "Explanation"
                 lines.extend(["", f"**{heading}:** {explanation}"])
             lines.append("")
+
+    sources = payload.get("sources") or []
+    if isinstance(sources, list) and sources:
+        lines.extend(["", "## Sources"])
+        for source in sources:
+            if not isinstance(source, dict):
+                continue
+            label = str(source.get("file_title") or source.get("title") or "")
+            url = str(source.get("url") or "")
+            suffix = f" — {url}" if url else ""
+            lines.append(f"- [{source.get('source_type', 'web')}] {label}{suffix}")
     return "\n".join(lines).strip()

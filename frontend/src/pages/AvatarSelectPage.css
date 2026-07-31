@@ -21,8 +21,8 @@
 .avatar-select-card {
   position: relative;
   background: rgba(255, 255, 255, 0.72);
-  backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
   border: 1.5px solid rgba(255, 255, 255, 0.7);
   border-radius: 30px;
   padding: 32px 30px 30px;

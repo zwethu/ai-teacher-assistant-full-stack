@@ -22,6 +22,23 @@ function statusRank(status: string): number {
   return 0
 }
 
+/**
+ * Is this row still in flight?
+ *
+ * With parallel tool calling there is no single "current step": each call
+ * carries its own `tool_call_id`, so a fan-out arrives as several rows that are
+ * active at once and settle independently. Asking each row rather than tracking
+ * a cursor is what makes one and many the same code path.
+ *
+ * After a run reaches a terminal status nothing is active — `normalizeRunRows`
+ * rewrites anything still `running` to the run's outcome, which is also what
+ * clears a row whose "done" event never arrived.
+ */
+export function isRowActive(row: NormalizedRunRow): boolean {
+  const status = normalizeStatus(row.status)
+  return status === 'running' || status === 'started'
+}
+
 export function normalizeStatus(status: string): string {
   if (status === 'error') return 'failed'
   if (status === 'success') return 'done'

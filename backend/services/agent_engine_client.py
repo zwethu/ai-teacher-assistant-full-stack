@@ -55,6 +55,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from collections.abc import AsyncIterator
 from typing import Any
 from urllib.parse import urlparse
@@ -127,6 +128,7 @@ async def stream_agent_response(
     session_id: str,
     lecturer_id: str,
     session_state: dict[str, Any],
+    session_assume_exists: bool = False,
 ) -> AsyncIterator[str]:
     """Stream text chunks from the deployed Agent Engine.
 
@@ -152,6 +154,7 @@ async def stream_agent_response(
         lecturer_id=lecturer_id,
         session_state=session_state,
         resource_name=resource_name,
+        session_assume_exists=session_assume_exists,
     ):
         yield chunk
 
@@ -188,11 +191,9 @@ async def _sdk_stream(
     lecturer_id: str,
     session_state: dict[str, Any],
     resource_name: str,
+    session_assume_exists: bool = False,
 ) -> AsyncIterator[str]:
-    """Real Agent Engine streaming call using google-cloud-aiplatform SDK.
-
-    TODO: Uncomment and test once AGENT_ENGINE_RESOURCE_NAME is set.
-    """
+    """Real Agent Engine streaming call using google-cloud-aiplatform SDK."""
     # --- Import guard: only import SDK when we actually call it ---
     try:
         import vertexai
@@ -202,13 +203,20 @@ async def _sdk_stream(
             f"Install it and set AGENT_ENGINE_RESOURCE_NAME. Original error: {exc}"
         ) from exc
 
+    span_start = time.perf_counter()
     agent = _get_agent(vertexai, resource_name)
+    logger.info(
+        "event=engine_get duration_ms=%d resource=%s",
+        int((time.perf_counter() - span_start) * 1000),
+        resource_name,
+    )
 
     await ensure_session_with_state(
         resource_name=resource_name,
         user_id=lecturer_id,
         session_id=session_id,
         state=session_state,
+        assume_exists=session_assume_exists,
     )
     logger.info(
         "Agent Platform session state applied before stream resource=%s user_id=%s "
@@ -270,7 +278,16 @@ async def _sdk_stream(
         aggregate_skip_count = 0
         saw_native_partial = False
         last_event_summary = ""
+        stream_start = time.perf_counter()
+        first_event_ms: int | None = None
         async for event in stream:
+            if first_event_ms is None:
+                first_event_ms = int((time.perf_counter() - stream_start) * 1000)
+                logger.info(
+                    "event=stream_first_event duration_ms=%d session_id=%s",
+                    first_event_ms,
+                    session_id,
+                )
             event_count += 1
             last_event_summary = _event_summary(event)
             event_kind = _event_kind(event)
@@ -328,7 +345,7 @@ async def _sdk_stream(
         logger.info(
             "Agent Engine native stream summary resource=%s user_id=%s session_id=%s "
             "events=%d root_partials=%d emitted_chunks=%d aggregate_skips=%d "
-            "native_multi_chunk=%s",
+            "native_multi_chunk=%s event=stream_total duration_ms=%d first_event_ms=%s",
             resource_name,
             lecturer_id,
             session_id,
@@ -337,6 +354,8 @@ async def _sdk_stream(
             final_chunk_count,
             aggregate_skip_count,
             root_partial_count > 1,
+            int((time.perf_counter() - stream_start) * 1000),
+            first_event_ms,
         )
         if event_count and not final_chunk_count:
             raise RuntimeError(
@@ -445,20 +464,32 @@ async def _create_or_get_session(
         raise
 
 
+# Engine handles are stable per resource; the uncached agent_engines.get() was a
+# measured ~2.3s network round-trip on every run.
+_AGENT_CACHE: dict[str, Any] = {}
+
+
 def _get_agent(vertexai_module: Any, resource_name: str) -> Any:
     """Get an Agent Engine handle with the current SDK, falling back to preview."""
+    cached = _AGENT_CACHE.get(resource_name)
+    if cached is not None:
+        return cached
     client_cls = getattr(vertexai_module, "Client", None)
     if client_cls is not None:
         try:
             client = client_cls(project=_PROJECT, location=_LOCATION)
-            return client.agent_engines.get(name=resource_name)
+            agent = client.agent_engines.get(name=resource_name)
+            _AGENT_CACHE[resource_name] = agent
+            return agent
         except AttributeError:
             logger.info("vertexai.Client agent_engines API unavailable; using preview fallback")
 
     from vertexai.preview import reasoning_engines  # type: ignore[import]
 
     vertexai_module.init(project=_PROJECT, location=_LOCATION)
-    return reasoning_engines.ReasoningEngine(resource_name)
+    agent = reasoning_engines.ReasoningEngine(resource_name)
+    _AGENT_CACHE[resource_name] = agent
+    return agent
 
 
 def _event_text(event: Any) -> str:

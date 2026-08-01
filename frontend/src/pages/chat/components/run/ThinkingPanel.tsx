@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { AgentRunEvent, AgentRunStatus } from '../../../../services/agentRunStream'
-import { Thinking } from '../../../../design-system'
+import { Spinner, Thinking } from '../../../../design-system'
 import { useExitDelay } from '../../../../hooks/useExitDelay'
 
 type Props = {
@@ -32,7 +32,15 @@ export function ThinkingPanel({ events, runStatus }: Props) {
   const thinkingEvents = useMemo(
     () =>
       events
-        .filter((event) => event.kind === 'thinking')
+        // Only REAL agent thoughts drive the garland. The backend's synthetic
+        // "Reading your request…" note (backend.run.started) covers the prep
+        // window — preflight, session append, engine pickup — before the agent
+        // exists; presenting it as a thought misrepresents that phase, so it is
+        // silent here and the pre-agent window renders as a bare spinner below.
+        .filter(
+          (event) =>
+            event.kind === 'thinking' && event.event_type !== 'backend.run.started',
+        )
         // Stable sort on the timestamp alone — see `appendRunEvent`. Breaking
         // ties on `event_id` picked a random note out of each second, so the
         // line showed an arbitrary thought and could appear to go backwards.
@@ -43,7 +51,7 @@ export function ThinkingPanel({ events, runStatus }: Props) {
   const hasEvents = thinkingEvents.length > 0
 
   const liveLabel = useMemo(() => {
-    if (!hasEvents) return 'Waiting for agent working notes...'
+    if (!hasEvents) return ''
     return eventSummary(thinkingEvents[thinkingEvents.length - 1])
   }, [hasEvents, thinkingEvents])
 
@@ -51,13 +59,26 @@ export function ThinkingPanel({ events, runStatus }: Props) {
   // swap to a stale or empty label for the 200ms it spends on its way out.
   const [lastLabel, setLastLabel] = useState(liveLabel)
   useEffect(() => {
-    if (isRunning) setLastLabel(liveLabel)
+    if (isRunning && liveLabel) setLastLabel(liveLabel)
   }, [isRunning, liveLabel])
 
   const mounted = useExitDelay(isRunning)
   if (!mounted) return null
 
   const label = isRunning ? liveLabel : lastLabel
+
+  if (!label) {
+    // Pre-agent phase: nothing is thinking yet — loading animation, no text.
+    return (
+      <div
+        className={`-mx-1.5 mt-2 inline-flex items-center px-1.5 py-1 ${
+          isRunning ? '' : 'mila-step-out'
+        }`}
+      >
+        <Spinner size={18} tone="muted" />
+      </div>
+    )
+  }
 
   return (
     /* The garland carries the "agent is thinking" signal and the live note

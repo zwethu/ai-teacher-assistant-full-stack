@@ -96,13 +96,55 @@ def test_kv_table_has_label_column_not_header_row():
         bg["tableCellStyle"]["backgroundColor"]["color"]["rgbColor"] != header_rgb
         for bg in cell_bgs
     )
-    assert any("updateTableColumnProperties" in r for r in styles)
+
+
+def _column_widths(styles):
+    widths: dict[int, float] = {}
+    for r in styles:
+        req = r.get("updateTableColumnProperties")
+        if not req:
+            continue
+        for col in req["columnIndices"]:
+            widths[col] = req["tableColumnProperties"]["width"]["magnitude"]
+    return widths
+
+
+def test_every_table_fits_the_page_width():
+    """API-inserted tables don't auto-fit — explicit widths must total the page."""
+    rubric = TableBlock(
+        headers=["Criterion", "Points", "Excellent", "Satisfactory", "Needs Work"],
+        rows=[["Mapping", "20", "Clear", "Basic", "Missing"]],
+    )
+    _, styles = render_phases([rubric])
+    widths = _column_widths(styles)
+    assert set(widths) == {0, 1, 2, 3, 4}
+    assert abs(sum(widths.values()) - theme.PAGE_CONTENT_WIDTH) < 1.0
+    # "Points" is numeric — narrow, so the prose columns get the width.
+    assert widths[1] < widths[0]
+
+
+def test_kv_table_widths_total_the_page():
+    table = TableBlock(headers=["Student sees", "Do it"], rows=[["Est. time", "5 min"]], kv=True)
+    _, styles = render_phases([table])
+    widths = _column_widths(styles)
+    assert widths[0] == theme.KV_LABEL_COL_WIDTH
+    assert abs(sum(widths.values()) - theme.PAGE_CONTENT_WIDTH) < 1.0
+
+
+def test_nested_lab_enums_render_as_values_not_enum_reprs():
+    from services.google_workspace.docs_rendering.schemas import LabFull
+
+    lab = LabFull.model_validate(
+        {"title": "T", "safety_profile": {"risk_level": "low"}, "environment_profile": {"modality": "wet_lab"}}
+    )
+    # str() lands directly in the exported doc — "LabRiskLevel.low" did too.
+    assert str(lab.safety_profile.risk_level) == "low"
+    assert str(lab.environment_profile.modality) == "wet_lab"
 
 
 def test_regular_table_keeps_brand_header_row():
     table = TableBlock(headers=["Time", "Activity"], rows=[["0–10", "Intro"]])
     _, styles = render_phases([table])
-    assert not any("updateTableColumnProperties" in r for r in styles)
     header_bgs = [
         r
         for r in styles

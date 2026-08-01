@@ -252,6 +252,62 @@ def _cell_bg_request(
     }
 
 
+# Header names that hold short numeric values — kept narrow so prose columns
+# get the width. Matched case-insensitively on the exact header text.
+_NARROW_HEADERS = {"points", "week", "duration", "est. minutes", "max points", "step number", "time"}
+_NARROW_COL_WIDTH = 55.0
+
+
+def _column_width_requests(
+    table: TableBlock, table_start: int, num_cols: int
+) -> list[dict[str, Any]]:
+    if num_cols <= 0:
+        return []
+    if table.kv:
+        widths = {
+            0: theme.KV_LABEL_COL_WIDTH,
+            **{
+                c: (theme.PAGE_CONTENT_WIDTH - theme.KV_LABEL_COL_WIDTH)
+                / max(num_cols - 1, 1)
+                for c in range(1, num_cols)
+            },
+        }
+    else:
+        narrow = {
+            c
+            for c, header in enumerate(table.headers)
+            if str(header).strip().lower() in _NARROW_HEADERS
+        }
+        if len(narrow) >= num_cols:
+            narrow = set()
+        wide_count = num_cols - len(narrow)
+        wide_width = (
+            theme.PAGE_CONTENT_WIDTH - len(narrow) * _NARROW_COL_WIDTH
+        ) / max(wide_count, 1)
+        widths = {
+            c: (_NARROW_COL_WIDTH if c in narrow else wide_width)
+            for c in range(num_cols)
+        }
+    # One request per distinct width, grouping the columns that share it.
+    by_width: dict[float, list[int]] = {}
+    for col, width in widths.items():
+        by_width.setdefault(round(width, 2), []).append(col)
+    return [
+        {
+            "updateTableColumnProperties": {
+                "tableStartLocation": {"index": table_start},
+                "columnIndices": cols,
+                "tableColumnProperties": {
+                    "widthType": "FIXED_WIDTH",
+                    "width": _pt(width),
+                },
+                "fields": "widthType,width",
+            }
+        }
+        for width, cols in sorted(by_width.items())
+    ]
+
+
 def _render_table(table: TableBlock, table_start: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     rows = [table.headers, *table.rows]
     num_rows = len(rows)
@@ -318,21 +374,14 @@ def _render_table(table: TableBlock, table_start: int) -> tuple[list[dict[str, A
                 _cell_bg_request(table_start, r, c, theme.COLOR_TABLE_ROW_ALT)
             )
 
-    if table.kv:
-        # A narrow fixed label column keeps the value column wide and scannable.
-        style_requests.append(
-            {
-                "updateTableColumnProperties": {
-                    "tableStartLocation": {"index": table_start},
-                    "columnIndices": [0],
-                    "tableColumnProperties": {
-                        "widthType": "FIXED_WIDTH",
-                        "width": _pt(theme.KV_LABEL_COL_WIDTH),
-                    },
-                    "fields": "widthType,width",
-                }
-            }
-        )
+    # Every table gets explicit column widths totalling the page content
+    # width: API-inserted tables do not auto-fit, so wide tables silently
+    # overflowed past the right margin. kv tables keep their narrow fixed
+    # label column; regular tables weight text columns evenly, with known
+    # numeric columns (Points, Week, minutes) held narrow.
+    style_requests.extend(
+        _column_width_requests(table, table_start, num_cols)
+    )
 
     border = _border(theme.COLOR_BORDER, 0.5, 0.0)
     border.pop("padding", None)  # cell borders have no padding field

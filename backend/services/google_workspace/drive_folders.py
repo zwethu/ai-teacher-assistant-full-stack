@@ -327,10 +327,12 @@ def upload_lab_starter_files(
 ) -> dict[str, str]:
     """Materialize the lab scaffold as real Drive files.
 
-    Starter + data files land directly in the week's student lab folder and
-    solution files in the week's lecturer folder — alongside the corresponding
-    doc, so sharing the folder shares the whole lab. Drive has no nested paths,
-    so file paths are flattened with '__'. Returns folder links; never raises
+    Each week folder gets a "Resources" subfolder so the doc stays visually
+    on top and the files don't crowd it. The student Resources folder gets
+    starter + data files; the lecturer Resources folder gets EVERYTHING —
+    the same starter/data files plus the solutions (lecturers need to run
+    the scaffold too, not just read answers). Drive has no nested paths, so
+    file paths are flattened with '__'. Returns folder links; never raises
     (file delivery must not fail the doc export).
     """
     result: dict[str, str] = {}
@@ -351,35 +353,43 @@ def upload_lab_starter_files(
             "upload_lab_starter_files",
             files=len(student_files) + len(solution_files),
         ), ThreadPoolExecutor(max_workers=8) as pool:
-            # Uploads are independent of each other; upload_text_file builds
-            # its own Drive service, so each future is thread-safe.
-            uploads = []
-            if student_files and student_parent_id:
-                uploads += [
+            # The two Resources folders are independent; the file uploads
+            # within each are too. upload_text_file builds its own Drive
+            # service, so every future is thread-safe.
+            student_folder_future = (
+                pool.submit(get_or_create_folder, uid, "Resources", student_parent_id)
+                if student_files and student_parent_id
+                else None
+            )
+            lecturer_folder_future = (
+                pool.submit(get_or_create_folder, uid, "Resources", lecturer_parent_id)
+                if (student_files or solution_files) and lecturer_parent_id
+                else None
+            )
+
+            def _upload_all(files: list[dict], parent_id: str) -> list:
+                return [
                     pool.submit(
                         upload_text_file,
                         uid,
                         name=str(f.get("path") or "file.txt").replace("/", "__"),
                         content=str(f.get("content") or ""),
-                        parent_id=student_parent_id,
+                        parent_id=parent_id,
                     )
-                    for f in student_files
+                    for f in files
                 ]
-                result["lab_files_folder_id"] = student_parent_id
-                result["lab_files_folder_url"] = folder_url(student_parent_id)
-            if solution_files and lecturer_parent_id:
-                uploads += [
-                    pool.submit(
-                        upload_text_file,
-                        uid,
-                        name=str(f.get("path") or "solution.txt").replace("/", "__"),
-                        content=str(f.get("content") or ""),
-                        parent_id=lecturer_parent_id,
-                    )
-                    for f in solution_files
-                ]
-                result["lab_solutions_folder_id"] = lecturer_parent_id
-                result["lab_solutions_folder_url"] = folder_url(lecturer_parent_id)
+
+            uploads = []
+            if student_folder_future is not None:
+                folder = student_folder_future.result()
+                uploads += _upload_all(student_files, folder["id"])
+                result["lab_files_folder_id"] = folder["id"]
+                result["lab_files_folder_url"] = folder.get("url") or folder_url(folder["id"])
+            if lecturer_folder_future is not None:
+                folder = lecturer_folder_future.result()
+                uploads += _upload_all(student_files + solution_files, folder["id"])
+                result["lab_solutions_folder_id"] = folder["id"]
+                result["lab_solutions_folder_url"] = folder.get("url") or folder_url(folder["id"])
             for upload in uploads:
                 upload.result()
     except Exception:  # pragma: no cover - defensive: delivery is best-effort

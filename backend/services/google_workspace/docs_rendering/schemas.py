@@ -137,6 +137,10 @@ class LabRiskLevel(str, Enum):
 
 
 class EnvironmentProfile(BaseModel):
+    # Without use_enum_values, str(profile.modality) renders "LabModality.x"
+    # into the exported doc instead of "x". Same for SafetyProfile below.
+    model_config = ConfigDict(use_enum_values=True)
+
     modality: LabModality = LabModality.coding_virtual
     operating_system: str | None = None
     runtime: str | None = None
@@ -150,6 +154,8 @@ class EnvironmentProfile(BaseModel):
 
 
 class SafetyProfile(BaseModel):
+    model_config = ConfigDict(use_enum_values=True)
+
     risk_level: LabRiskLevel = LabRiskLevel.low
     hazards: list[str] = Field(default_factory=list)
     ppe: list[str] = Field(default_factory=list)

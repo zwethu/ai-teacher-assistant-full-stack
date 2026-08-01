@@ -82,6 +82,9 @@ SIZE_CODE: Final[float] = 9.5
 SIZE_QUOTE: Final[float] = 11.0
 
 # Structure metrics (points)
+# Letter page (612pt) minus the default 1" margins — tables must total this,
+# because API-inserted tables do NOT auto-fit and overflow the page otherwise.
+PAGE_CONTENT_WIDTH: Final[float] = 468.0
 H1_RULE_WIDTH: Final[float] = 1.0
 QUOTE_BAR_WIDTH: Final[float] = 2.25
 QUOTE_INDENT: Final[float] = 16.0

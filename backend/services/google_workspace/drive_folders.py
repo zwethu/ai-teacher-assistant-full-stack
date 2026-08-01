@@ -324,14 +324,14 @@ def upload_lab_starter_files(
     starter_files: list[dict],
     student_parent_id: str,
     lecturer_parent_id: str,
-    base_name: str,
 ) -> dict[str, str]:
     """Materialize the lab scaffold as real Drive files.
 
-    Starter + data files land in a student-shareable "<base> — Lab Files" folder;
-    solution files land in a lecturer-only "<base> — Solutions" folder. Drive has
-    no nested paths, so file paths are flattened with '__'. Returns folder links;
-    never raises (file delivery must not fail the doc export).
+    Starter + data files land directly in the week's student lab folder and
+    solution files in the week's lecturer folder — alongside the corresponding
+    doc, so sharing the folder shares the whole lab. Drive has no nested paths,
+    so file paths are flattened with '__'. Returns folder links; never raises
+    (file delivery must not fail the doc export).
     """
     result: dict[str, str] = {}
     try:
@@ -351,54 +351,35 @@ def upload_lab_starter_files(
             "upload_lab_starter_files",
             files=len(student_files) + len(solution_files),
         ), ThreadPoolExecutor(max_workers=8) as pool:
-            # The two destination folders don't depend on each other, and the
-            # file uploads within a folder don't either — only folder-before-
-            # its-files ordering matters. upload_text_file builds its own Drive
-            # service, so each future is thread-safe.
-            student_folder_future = (
-                pool.submit(
-                    get_or_create_folder, uid, f"{base_name} — Lab Files", student_parent_id
-                )
-                if student_files
-                else None
-            )
-            solution_folder_future = (
-                pool.submit(
-                    get_or_create_folder, uid, f"{base_name} — Solutions", lecturer_parent_id
-                )
-                if solution_files
-                else None
-            )
-
+            # Uploads are independent of each other; upload_text_file builds
+            # its own Drive service, so each future is thread-safe.
             uploads = []
-            if student_folder_future is not None:
-                folder = student_folder_future.result()
+            if student_files and student_parent_id:
                 uploads += [
                     pool.submit(
                         upload_text_file,
                         uid,
                         name=str(f.get("path") or "file.txt").replace("/", "__"),
                         content=str(f.get("content") or ""),
-                        parent_id=folder["id"],
+                        parent_id=student_parent_id,
                     )
                     for f in student_files
                 ]
-                result["lab_files_folder_id"] = folder["id"]
-                result["lab_files_folder_url"] = folder.get("url") or folder_url(folder["id"])
-            if solution_folder_future is not None:
-                folder = solution_folder_future.result()
+                result["lab_files_folder_id"] = student_parent_id
+                result["lab_files_folder_url"] = folder_url(student_parent_id)
+            if solution_files and lecturer_parent_id:
                 uploads += [
                     pool.submit(
                         upload_text_file,
                         uid,
                         name=str(f.get("path") or "solution.txt").replace("/", "__"),
                         content=str(f.get("content") or ""),
-                        parent_id=folder["id"],
+                        parent_id=lecturer_parent_id,
                     )
                     for f in solution_files
                 ]
-                result["lab_solutions_folder_id"] = folder["id"]
-                result["lab_solutions_folder_url"] = folder.get("url") or folder_url(folder["id"])
+                result["lab_solutions_folder_id"] = lecturer_parent_id
+                result["lab_solutions_folder_url"] = folder_url(lecturer_parent_id)
             for upload in uploads:
                 upload.result()
     except Exception:  # pragma: no cover - defensive: delivery is best-effort

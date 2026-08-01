@@ -55,6 +55,10 @@ export type LessonPlanExportResult = {
   student_doc_url?: string
   student_doc_id?: string
   student_drive_file_name?: string
+  /** Week's student lab folder: student doc + starter/data files (shareable). */
+  student_drive_folder_url?: string
+  /** Week's lecturer lab folder: lecturer guide + solution files. */
+  lecturer_drive_folder_url?: string
   /** Drive folder holding the lab's runnable starter files (student-shareable). */
   lab_files_folder_url?: string
   /** Lecturer-only Drive folder holding solution files, when the lab has any. */

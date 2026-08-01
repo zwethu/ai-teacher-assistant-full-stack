@@ -28,6 +28,7 @@ from services.google_workspace.drive_folders import (
     delete_drive_file,
     ensure_batch_artifact_folders,
     get_drive_file_metadata,
+    get_or_create_folder,
 )
 from services.google_workspace.forms_service import create_quiz_form_for_user
 from services.artifact_export_validation import (
@@ -862,6 +863,33 @@ def export_lab_draft_to_google_docs(
     lecturer_folder_url = str(lecturer_folder.get("url") or folder_url)
     student_folder_id = str(student_folder.get("id") or folder_id)
     student_folder_url = str(student_folder.get("url") or folder_url)
+
+    # One folder per week per audience: the doc AND its materials land together,
+    # so the chat card can link to the week's folder instead of individual docs
+    # and sharing that folder shares the whole lab.
+    week_label = f"Week {week:02d}"
+    with log_span(logger, "export_week_folders", kind="lab"), ThreadPoolExecutor(
+        max_workers=2
+    ) as pool:
+        lecturer_week_future = (
+            pool.submit(get_or_create_folder, lecturer_id, week_label, lecturer_folder_id)
+            if lecturer_folder_id
+            else None
+        )
+        student_week_future = (
+            pool.submit(get_or_create_folder, lecturer_id, week_label, student_folder_id)
+            if student_folder_id
+            else None
+        )
+        if lecturer_week_future is not None:
+            lecturer_week = lecturer_week_future.result()
+            lecturer_folder_id = lecturer_week["id"]
+            lecturer_folder_url = lecturer_week["url"]
+        if student_week_future is not None:
+            student_week = student_week_future.result()
+            student_folder_id = student_week["id"]
+            student_folder_url = student_week["url"]
+
     lecturer_name = build_artifact_file_name(
         version=next_version,
         week=week,
@@ -925,9 +953,6 @@ def export_lab_draft_to_google_docs(
                 starter_files=[f for f in starter_files if isinstance(f, dict)],
                 student_parent_id=student_folder_id,
                 lecturer_parent_id=lecturer_folder_id,
-                base_name=build_artifact_file_name(
-                    version=next_version, week=week, artifact_type="lab", title=title
-                ),
             )
         export_metadata = metadata_future.result()
     metadata = {
@@ -1228,9 +1253,11 @@ def _update_source_message_export_metadata(
         "lecturer_doc_url",
         "lecturer_doc_id",
         "lecturer_drive_file_name",
+        "lecturer_drive_folder_url",
         "student_doc_url",
         "student_doc_id",
         "student_drive_file_name",
+        "student_drive_folder_url",
     ):
         value = export_updates.get(key)
         if value:

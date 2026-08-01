@@ -52,6 +52,7 @@ pnai-teacher-assistant for session service calls.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -61,6 +62,29 @@ from typing import Any
 from urllib.parse import urlparse
 
 from services.agent_platform_sessions import ensure_session_with_state
+
+# Quota/availability blips worth retrying. 429 RESOURCE_EXHAUSTED is the one
+# observed in production (Gemini quota); the 5xx family covers engine restarts.
+_TRANSIENT_ERROR_MARKERS = (
+    "429",
+    "resource_exhausted",
+    "resource exhausted",
+    "quota",
+    "503",
+    "unavailable",
+    "502",
+    "504",
+    "deadline_exceeded",
+    "internal error encountered",
+)
+_STREAM_START_ATTEMPTS = 3
+_STREAM_RETRY_DELAYS_S = (2.0, 8.0)
+
+
+def is_transient_engine_error(exc: Exception) -> bool:
+    """True for quota/availability failures that a short backoff can outlive."""
+    text = str(exc).lower()
+    return any(marker in text for marker in _TRANSIENT_ERROR_MARKERS)
 
 logger = logging.getLogger(__name__)
 
@@ -148,15 +172,45 @@ async def stream_agent_response(
     # _run_agent_background() already catches them and sets RTDB status=failed.
     # Silently swallowing errors would make a real deployment failure look like
     # a successful run with a placeholder message.
-    async for chunk in _sdk_stream(
-        user_message=user_message,
-        session_id=session_id,
-        lecturer_id=lecturer_id,
-        session_state=session_state,
-        resource_name=resource_name,
-        session_assume_exists=session_assume_exists,
-    ):
-        yield chunk
+    #
+    # Transient failures (429 quota, 5xx availability) are retried here ONLY
+    # when the stream died before its first event — at that point the agent has
+    # not executed anything, so a re-run has no side effects. Once events have
+    # flowed, tools may have run (searches, sends), so a mid-run failure is not
+    # re-run at this layer; the Gemini client inside the agent retries its own
+    # HTTP calls instead (retry_options in pnai/shared/config.py).
+    for attempt in range(1, _STREAM_START_ATTEMPTS + 1):
+        progress: dict[str, bool] = {"saw_event": False}
+        try:
+            async for chunk in _sdk_stream(
+                user_message=user_message,
+                session_id=session_id,
+                lecturer_id=lecturer_id,
+                session_state=session_state,
+                resource_name=resource_name,
+                session_assume_exists=session_assume_exists,
+                progress=progress,
+            ):
+                yield chunk
+            return
+        except Exception as exc:
+            retryable = (
+                not progress["saw_event"]
+                and attempt < _STREAM_START_ATTEMPTS
+                and is_transient_engine_error(exc)
+            )
+            if not retryable:
+                raise
+            delay = _STREAM_RETRY_DELAYS_S[attempt - 1]
+            logger.warning(
+                "event=stream_start_retry attempt=%d delay_s=%.0f session_id=%s "
+                "error=%.200s",
+                attempt,
+                delay,
+                session_id,
+                str(exc),
+            )
+            await asyncio.sleep(delay)
 
 
 async def ensure_session(
@@ -192,6 +246,7 @@ async def _sdk_stream(
     session_state: dict[str, Any],
     resource_name: str,
     session_assume_exists: bool = False,
+    progress: dict[str, bool] | None = None,
 ) -> AsyncIterator[str]:
     """Real Agent Engine streaming call using google-cloud-aiplatform SDK."""
     # --- Import guard: only import SDK when we actually call it ---
@@ -288,6 +343,10 @@ async def _sdk_stream(
                     first_event_ms,
                     session_id,
                 )
+                if progress is not None:
+                    # The agent is now executing: from here a re-run could
+                    # repeat tool side effects, so the caller must not retry.
+                    progress["saw_event"] = True
             event_count += 1
             last_event_summary = _event_summary(event)
             event_kind = _event_kind(event)

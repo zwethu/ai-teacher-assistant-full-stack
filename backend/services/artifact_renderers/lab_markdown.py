@@ -107,6 +107,15 @@ def render_lab_markdown(payload: dict[str, Any]) -> str:
         for item in lab.rubric:
             lines.append(f"| {item.criterion} | {item.excellent} | {item.satisfactory} | {item.needs_work} | {item.points or ''} |")
 
+    if lab.starter_files:
+        lines.extend(["", "## Lab Files (starter scaffold)"])
+        for f in lab.starter_files:
+            role = f" — {f.file_role}" if f.file_role and f.file_role != "starter" else ""
+            lines.extend(["", f"### `{f.path}`{role}"])
+            if f.description:
+                lines.append(f.description)
+            lines.extend([f"```{f.language or 'text'}", f.content.rstrip(), "```"])
+
     if lab.sources:
         lines.extend(["", "## Sources"])
         for source in lab.sources:

@@ -74,3 +74,25 @@ def test_outline_context_snapshot_normalizes_blueprint_json_string():
     assert isinstance(snapshot["course_blueprint_outline"], dict)
     assert snapshot["course_blueprint_outline"]["title"] == "SE Course"
     assert snapshot["research_summary"] == "r"
+
+
+def test_lab_starter_files_render_in_chat_and_docs():
+    from services.google_workspace.docs_rendering.schemas import LabFull
+    from services.google_workspace.docs_rendering.lab_builder import LabDocBuilder
+
+    payload = {
+        "title": "Lab W2", "week": 2, "topic": "Testing",
+        "starter_files": [
+            {"path": "tests/test_math.py", "language": "python", "content": "def test_add():\n    assert 1 + 1 == 2"},
+            {"path": "solutions/answers.py", "language": "python", "file_role": "solution", "content": "ANSWER = 42"},
+        ],
+    }
+    md = render_lab_markdown(payload)
+    assert "Lab Files (starter scaffold)" in md
+    assert "tests/test_math.py" in md and "def test_add" in md
+
+    lab = LabFull.model_validate(payload)
+    lect_text = " ".join(getattr(b, "text", "") for b in LabDocBuilder(lab, mode="lecturer").build())
+    stud_text = " ".join(getattr(b, "text", "") for b in LabDocBuilder(lab, mode="student").build())
+    assert "tests/test_math.py" in lect_text and "ANSWER = 42" in lect_text
+    assert "tests/test_math.py" in stud_text and "ANSWER = 42" not in stud_text

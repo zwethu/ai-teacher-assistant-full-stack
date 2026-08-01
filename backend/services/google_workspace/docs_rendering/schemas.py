@@ -192,6 +192,14 @@ class LabRubricCriterion(BaseModel):
     points: int | None = None
 
 
+class LabStarterFile(BaseModel):
+    path: str = ""
+    language: str = "text"
+    description: str = ""
+    file_role: str = "starter"
+    content: str = ""
+
+
 class LabFull(BaseModel):
     model_config = ConfigDict(use_enum_values=True)
 
@@ -221,3 +229,4 @@ class LabFull(BaseModel):
     post_lab_questions: list[str] = Field(default_factory=list)
     rubric: list[LabRubricCriterion] = Field(default_factory=list)
     sources: list[SourceCitation] = Field(default_factory=list)
+    starter_files: list[LabStarterFile] = Field(default_factory=list)

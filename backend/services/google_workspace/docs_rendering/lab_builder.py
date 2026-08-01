@@ -34,6 +34,22 @@ class LabDocBuilder:
     def _append_section_divider(blocks: list[Block]) -> None:
         blocks.append(TextBlock(BlockType.DIVIDER, _SECTION_DIVIDER))
 
+    @staticmethod
+    def _append_starter_files(blocks: list[Block], lab, *, include_solutions: bool) -> None:
+        files = [
+            f for f in getattr(lab, "starter_files", [])
+            if include_solutions or (f.file_role or "starter") != "solution"
+        ]
+        if not files:
+            return
+        blocks.append(TextBlock(BlockType.HEADING1, "Lab Files (starter scaffold)"))
+        for f in files:
+            role = f" ({f.file_role})" if f.file_role and f.file_role != "starter" else ""
+            blocks.append(TextBlock(BlockType.HEADING2, f"{f.path}{role}"))
+            if f.description:
+                blocks.append(TextBlock(BlockType.BODY, f.description))
+            blocks.append(TextBlock(BlockType.CODE, f.content.rstrip()))
+
     def _build_lecturer(self) -> list[Block]:
         lab = self._lab
         blocks: list[Block] = []
@@ -218,6 +234,8 @@ class LabDocBuilder:
             )
         )
 
+        self._append_starter_files(blocks, lab, include_solutions=True)
+
         if lab.sources:
             self._append_section_divider(blocks)
             blocks.append(TextBlock(BlockType.HEADING1, "Sources"))
@@ -316,6 +334,9 @@ class LabDocBuilder:
 
         blocks.append(TextBlock(BlockType.HEADING1, "Rubric Summary"))
         blocks.append(self._build_rubric_table(lab.rubric, student_view=True))
+
+        # Students get the scaffold but never lecturer-only solution files.
+        self._append_starter_files(blocks, lab, include_solutions=False)
 
         return blocks
 

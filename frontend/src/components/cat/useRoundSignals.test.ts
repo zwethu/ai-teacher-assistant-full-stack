@@ -41,14 +41,16 @@ describe('round signals', () => {
 
     const s = r.buildSignals()
 
+    // Position, "was it clean" and "when since round start" are all derivable
+    // (array order, wrongCount === 0, running sum) — the record stays minimal.
     expect(s.submissions).toEqual([
-      { index: 1, atMsSinceRoundStart: 12_000, durationMs: 12_000, clean: false, wrongCount: 2 },
-      { index: 2, atMsSinceRoundStart: 17_000, durationMs: 5_000,  clean: true,  wrongCount: 0 },
+      { durationMs: 12_000, wrongCount: 2 },
+      { durationMs: 5_000,  wrongCount: 0 },
     ])
     expect(s.submitCount).toBe(2)
     expect(s.wrongSubmitCount).toBe(1)
     expect(s.totalWrongLinksOrPairs).toBe(2)
-    expect(s.solveDurationMs).toBe(17_000)
+    expect(s.completed).toBe(true)
     expect(s.firstActionDelayMs).toBe(3_000)
     expect(s.reviewTimesMs).toEqual([4_000])   // feedback shown → next action
   })
@@ -61,13 +63,13 @@ describe('round signals', () => {
     expect(r.buildSignals().firstActionDelayMs).toBeNull()
   })
 
-  it('leaves solve time unset when the round never cleared', () => {
+  it('marks a round incomplete until a submit comes back clean', () => {
     const r = round()
     advance(5_000)
     r.recordSubmit(3)
 
     const s = r.buildSignals()
-    expect(s.solveDurationMs).toBeNull()
+    expect(s.completed).toBe(false)
     expect(s.submitCount).toBe(1)
   })
 
@@ -99,7 +101,7 @@ describe('round signals', () => {
     expect(s.submitCount).toBe(1)
     expect(s.wrongSubmitCount).toBe(0)
     expect(s.totalWrongLinksOrPairs).toBe(0)
-    expect(s.solveDurationMs).toBe(1_500)
+    expect(s.completed).toBe(true)
     expect(s.submissions[0].durationMs).toBe(1_500)
   })
 })

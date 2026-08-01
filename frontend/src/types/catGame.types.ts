@@ -26,11 +26,12 @@ export type AnswerRecord = {
 // it, gets told which parts were wrong, fixes them, sends again. Timing each
 // press separately is what separates "thought hard once" from "guessed six
 // times quickly"; the round total alone can't tell those apart.
+//
+// Deliberately just these two: position, "was it clean" and "when since round
+// start" are all derivable (array order, wrongCount === 0, running sum), and a
+// stored field nothing reads is a field a report can silently disagree with.
 export type SubmissionRecord = {
-  index: number;                    // 1-based, within its own round
-  atMsSinceRoundStart: number;      // when it landed, measured from the board appearing
   durationMs: number;               // time spent on it: since round start (1st) or since the previous submit
-  clean: boolean;                   // the whole board came back correct
   wrongCount: number;               // wrong pairs/links/chips in THIS submit
 };
 
@@ -45,22 +46,30 @@ export type BehaviorSignals = {
   wrongSubmitCount: number;         // submits that had at least one wrong pair/link
   totalWrongLinksOrPairs: number;   // cumulative wrong pairs across this round's submits
   reviewTimesMs: number[];          // durations between feedback shown → next change/submit
-  /** Board shown → the submit that cleared the round. Null if it never cleared
-   *  (timeout or demo skip). Excludes the post-clear celebration, so it is the
-   *  comparable "how long did the work take" number. */
-  solveDurationMs: number | null;
+  completed: boolean;               // a submit came back fully clean
   submissions: SubmissionRecord[];
 };
 
-// ─── One round (one page of items) as played ───────────────────────────────
-export type RoundSummary = BehaviorSignals & {
+// ─── One round (one page of items) as STORED on the attempt ────────────────
+// Slimmer than the signals the mode reports: the per-round planning delay and
+// review times are already rolled into the session totals every consumer reads,
+// so persisting them twice would just be duplication.
+export type RoundSummary = {
   roundIndex: number;               // 0-based
   itemCount: number;                // items dealt to this round
   /** Board dealt → round handed back to the engine. Includes the celebration
-   *  animation, so consecutive rounds tile the session with no gaps. Use
-   *  `solveDurationMs` to compare rounds without that fixed constant. */
+   *  animation, so consecutive rounds tile the session with no gaps. */
   durationMs: number;
+  /** Time this round's board was on screen but the tab was NOT visible. The
+   *  round clock keeps running in a background tab, so without this a player who
+   *  left to look something up is indistinguishable from one who sat and
+   *  thought — the two readings a long round could otherwise mean. */
+  awayMs: number;
+  submitCount: number;
+  wrongSubmitCount: number;
+  totalWrongLinksOrPairs: number;
   completed: boolean;               // cleared, vs cut short by timeout/skip
+  submissions: SubmissionRecord[];
 };
 
 // ─── Full stealth-assessment summary = per-round data + session totals ─────
@@ -82,6 +91,13 @@ export type BehaviorSummary = {
   /** Sum of the rounds' own durations: time actually spent on a board. The gap
    *  between this and `durationMs` is idle time, time away, and celebrations. */
   activePlayMs: number;
+
+  /** Total time the tab was hidden during the run, and how many separate times
+   *  they left. Long round + awayMs ≈ 0 reads as thinking; long round + a large
+   *  awayMs reads as leaving. Blind to a second device — a phone beside the
+   *  laptop never hides the tab. */
+  awayMs: number;
+  awayCount: number;
 
   timedOut: boolean;                // true if the countdown ran out before all-correct
   timeLimitMs: number;              // the time limit that was in effect
@@ -148,6 +164,13 @@ export type AttemptResult = {
   // player profile — a wider door than the feature is worth.
   nickname: string;
   email: string;
+  /** The name on the Google account, which is not the nickname they chose and
+   *  not necessarily the name on the class roster either. All three can differ,
+   *  so the export carries whichever ones exist. */
+  oauthName: string;
+  /** Copied so a results export never has to read the game document back just
+   *  to learn which class the attempt belongs to. */
+  batchId: string;
   /** The tier the student actually saw on their result screen. */
   medalTier: MedalTier;
 };

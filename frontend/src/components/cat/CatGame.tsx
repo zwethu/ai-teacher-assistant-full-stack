@@ -115,12 +115,21 @@ function chunk<T>(arr: T[], size: number): T[][] {
   return out;
 }
 
+/** What the engine holds per played round: the mode's full signals plus its own
+ *  stopwatch readings. Richer than the RoundSummary that gets STORED — the
+ *  per-round planning delay and review times exist only to be rolled into the
+ *  session totals, and persisting them twice was pure duplication. */
+type PlayedRound = BehaviorSignals & {
+  roundIndex: number;
+  itemCount: number;
+  durationMs: number;
+  awayMs: number;
+};
+
 /** Per-round data → session totals. Sums the counters, keeps the FIRST round's
  *  planning delay (that's the "puzzle shown → first move" beat; later rounds
- *  measure a warmed-up player and would dilute it). The rounds themselves are
- *  carried through untouched — summing them was the old behaviour, and it threw
- *  away every per-round timing before anything reached storage. */
-function sessionTotals(rounds: RoundSummary[]) {
+ *  measure a warmed-up player and would dilute it). */
+function sessionTotals(rounds: PlayedRound[]) {
   return {
     firstActionDelayMs:     rounds[0]?.firstActionDelayMs ?? null,
     submitCount:            rounds.reduce((n, r) => n + r.submitCount, 0),
@@ -132,6 +141,21 @@ function sessionTotals(rounds: RoundSummary[]) {
   };
 }
 
+/** The slice of a played round that is worth keeping. */
+function storedRound(round: PlayedRound): RoundSummary {
+  return {
+    roundIndex:             round.roundIndex,
+    itemCount:              round.itemCount,
+    durationMs:             round.durationMs,
+    awayMs:                 round.awayMs,
+    submitCount:            round.submitCount,
+    wrongSubmitCount:       round.wrongSubmitCount,
+    totalWrongLinksOrPairs: round.totalWrongLinksOrPairs,
+    completed:              round.completed,
+    submissions:            round.submissions,
+  };
+}
+
 type Props = {
   gameMode: GameMode;
   avatar?: AvatarType;
@@ -139,6 +163,9 @@ type Props = {
   nickname?: string;
   playerUid?: string;
   assessmentId?: string;
+  /** Stamped onto the attempt so a results export knows the class without
+   *  reading the game document back. Absent in the no-auth preview. */
+  batchId?: string;
 };
 
 export default function CatGame({
@@ -148,6 +175,7 @@ export default function CatGame({
   nickname = 'Player',
   playerUid,
   assessmentId,
+  batchId = '',
 }: Props) {
   const activeItems    = items && items.length > 0 ? items : MOCK_ITEMS;
   const totalQuestions = activeItems.length;
@@ -177,7 +205,7 @@ export default function CatGame({
   // completion handler needs the running totals synchronously to decide
   // whether it's finalizing, and a state update wouldn't have landed yet.
   const pageAnswersRef = useRef<AnswerRecord[]>([]);
-  const roundsRef      = useRef<RoundSummary[]>([]);
+  const roundsRef      = useRef<PlayedRound[]>([]);
 
   // When the current round's board went up. The engine owns this rather than
   // the mode: it's the only place that sees both ends of a round, so it can
@@ -288,10 +316,48 @@ export default function CatGame({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameOver, syncing, syncFailed]);
 
+  // ─── Time away from the tab ──────────────────────────────────────────────
+  // A round's clock is performance.now(), which keeps running while the tab is
+  // hidden — so a player who switched to another tab for three minutes looks
+  // exactly like one who spent three minutes thinking. This is the only thing
+  // that separates them. It cannot see a second device: a phone beside the
+  // laptop with the answers on it never hides this tab.
+  const hiddenSinceRef  = useRef<number | null>(null);
+  const sessionAwayRef  = useRef(0);
+  const roundAwayRef    = useRef(0);
+  const awayCountRef    = useRef(0);
+
+  useEffect(() => {
+    function onVisibilityChange() {
+      if (document.visibilityState === 'hidden') {
+        hiddenSinceRef.current = performance.now();
+        return;
+      }
+      if (hiddenSinceRef.current === null) return;
+      const away = performance.now() - hiddenSinceRef.current;
+      sessionAwayRef.current += away;
+      roundAwayRef.current   += away;
+      awayCountRef.current   += 1;
+      hiddenSinceRef.current = null;
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, []);
+
+  /** Away time including a spell still in progress — a player can finish a round,
+   *  or run the clock out, while the tab is still hidden. */
+  function awayNow(base: number) {
+    const open = hiddenSinceRef.current;
+    return base + (open === null ? 0 : performance.now() - open);
+  }
+
   // A board becomes visible on the first render after the clock syncs, and
   // again on every page turn. Both are the same event as far as timing goes.
   useEffect(() => {
-    if (!syncing && !gameOver) roundStartRef.current = performance.now();
+    if (!syncing && !gameOver) {
+      roundStartRef.current = performance.now();
+      roundAwayRef.current  = 0;
+    }
   }, [pageIndex, syncing, gameOver]);
 
   function triggerMood(mood: 'happy' | 'confused' | 'playful', duration = 1400) {
@@ -354,10 +420,12 @@ export default function CatGame({
       // limit — a student who left the run open and came back — and the cap
       // above is what would otherwise hide that.
       elapsedSinceStartMs: elapsed,
+      awayMs:      Math.round(awayNow(sessionAwayRef.current)),
+      awayCount:   awayCountRef.current,
       timedOut:    timeUpRef.current,
       timeLimitMs,
       totalRounds: totalPages,
-      rounds,
+      rounds: rounds.map(storedRound),
     };
     setBehavior(summary);
     setGameOver(true);
@@ -371,6 +439,7 @@ export default function CatGame({
         await saveAttempt({
           playerUid,
           assessmentId,
+          batchId,
           nickname,
           chosenGameMode: gameMode,
           chosenAvatar:   avatar,
@@ -400,9 +469,7 @@ export default function CatGame({
       roundIndex: pageIndex,
       itemCount:  pages[pageIndex]?.length ?? 0,
       durationMs: Math.round(performance.now() - roundStartRef.current),
-      // The mode only stamps a solve time on the submit that came back clean,
-      // so this distinguishes "cleared it" from "the clock/skip ended it".
-      completed:  signals.solveDurationMs !== null,
+      awayMs:     Math.round(awayNow(roundAwayRef.current)),
     }];
 
     const isLastPage = pageIndex >= totalPages - 1;

@@ -342,23 +342,65 @@ def delete_game(game_id: str, lecturer_id: str) -> dict[str, Any]:
 ATTEMPTS_COLLECTION = "attempts"
 
 RESULT_COLUMNS = [
+    # Who
+    "batch_name",
     "email",
-    "name",
+    "roster_name",
+    "oauth_name",
     "nickname",
     "played",
-    "medal",
-    "score",
-    "total_pairs",
-    "accuracy_percent",
+    # What they picked
     "game_mode",
     "avatar",
-    "duration_seconds",
-    "active_play_seconds",
-    "submissions",
-    "wrong_submissions",
+    # Outcome
+    "medal",
+    "correct_count",
+    "total_questions",
+    # Final correctness. A round only clears when everything on it is right, so
+    # for anyone who finished this is 100 by construction — it measures whether
+    # they got there, not how well they played. Kept because it is what the
+    # medal reads and what the student was shown, and because it IS meaningful
+    # for a student who ran out of time.
+    "accuracy_percent",
+    # How many they had right on the FIRST attempt at each round, before the
+    # feedback told them anything. This is the "did they know it" number.
+    "first_try_accuracy_percent",
+    # Correct items against every item they ever submitted wrong. Punishes
+    # repeated guessing at the same pair, which first-try accuracy does not.
+    "trial_accuracy_percent",
+    # Effort, whole game
+    "total_trials",
+    "total_wrong_submits",
+    "total_wrong_pairs",
+    # Time, whole game. `wall_clock` is real start→finish time and is the only
+    # field that survives a student closing the page and returning later (the
+    # AFK counter dies with the page; the wall clock comes from the server).
+    "time_limit_seconds",
+    "wall_clock_seconds",
+    "play_seconds",
+    "total_afk_seconds",
+    "afk_count",
+    "planning_seconds",
+    "timed_out",
+    # Per round, in play order. Rounds vary from one game to seven, so these are
+    # ordered lists rather than seven sets of padded columns. Excel splits them
+    # with Text to Columns; the totals above mean nobody has to.
     "rounds_cleared",
     "rounds_total",
-    "timed_out",
+    "round_trials",
+    "round_wrong_submits",
+    "round_wrong_pairs",
+    "round_seconds",
+    "round_afk_seconds",
+    # Every gap between one submit and the next, whole game, in order. This is
+    # the planning-time signal the strategy work reads: a long gap is thinking
+    # or leaving, and `round_afk_seconds` says which.
+    "submit_gaps_seconds",
+    # How long after being told something was wrong before they touched anything.
+    # The gap above contains this plus the rework; separating them is what tells
+    # "read the feedback" apart from "immediately tried again".
+    "review_count",
+    "avg_review_seconds",
     "completed_at",
 ]
 
@@ -370,13 +412,30 @@ def _seconds(value: Any) -> str:
     return str(round(value / 1000))
 
 
+def _seconds_1dp(value: Any) -> str:
+    """For short durations where whole seconds would round away the signal —
+    a 0.4s reaction and a 1.4s one are not the same behaviour."""
+    if not isinstance(value, (int, float)):
+        return ""
+    return f"{value / 1000:.1f}"
+
+
+def _list(values: list[Any], to_text) -> str:
+    """Per-round values as one ordered cell: `52;37;41` is round 1, 2, 3."""
+    return ";".join(to_text(value) for value in values)
+
+
 def _result_row(
-    student: dict[str, Any], attempt: dict[str, Any] | None, total_pairs: int
+    student: dict[str, Any],
+    attempt: dict[str, Any] | None,
+    total_questions: int,
+    batch_name: str,
 ) -> dict[str, str]:
     row = {column: "" for column in RESULT_COLUMNS}
+    row["batch_name"] = batch_name
     row["email"] = str(student.get("email") or "")
-    row["name"] = str(student.get("name") or "")
-    row["total_pairs"] = str(total_pairs)
+    row["roster_name"] = str(student.get("name") or "")
+    row["total_questions"] = str(total_questions)
 
     if not attempt:
         # A blank row rather than no row: this is how the lecturer sees who to chase.
@@ -384,24 +443,88 @@ def _result_row(
         return row
 
     behavior = attempt.get("behavior") or {}
+    rounds = [entry for entry in (behavior.get("rounds") or []) if isinstance(entry, dict)]
     completed = attempt.get("completedAt")
 
     row["played"] = "yes"
     row["nickname"] = str(attempt.get("nickname") or "")
+    row["oauth_name"] = str(attempt.get("oauthName") or "")
     row["medal"] = str(attempt.get("medalTier") or "")
-    row["score"] = str(attempt.get("score") if attempt.get("score") is not None else "")
+    row["correct_count"] = str(attempt.get("score") if attempt.get("score") is not None else "")
     row["accuracy_percent"] = str(
         attempt.get("accuracy") if attempt.get("accuracy") is not None else ""
     )
     row["game_mode"] = str(attempt.get("chosenGameMode") or "")
     row["avatar"] = str(attempt.get("chosenAvatar") or "")
-    row["duration_seconds"] = _seconds(behavior.get("durationMs"))
-    row["active_play_seconds"] = _seconds(behavior.get("activePlayMs"))
-    row["submissions"] = str(behavior.get("submitCount", ""))
-    row["wrong_submissions"] = str(behavior.get("wrongSubmitCount", ""))
+
+    # First-attempt accuracy, over the rounds they actually reached. Rounds the
+    # clock cut off before a single submit are excluded rather than scored zero:
+    # never seeing a board is not the same as getting it wrong.
+    attempted_items = 0
+    first_try_wrong = 0
+    for entry in rounds:
+        submissions = entry.get("submissions") or []
+        if not submissions:
+            continue
+        attempted_items += int(entry.get("itemCount") or 0)
+        first_try_wrong += int(submissions[0].get("wrongCount") or 0)
+    if attempted_items:
+        row["first_try_accuracy_percent"] = str(
+            round((attempted_items - first_try_wrong) / attempted_items * 100)
+        )
+
+    # Every wrong item counts again each time it is resubmitted wrong, so a
+    # student who guesses at the same pair five times scores below one who missed
+    # five different pairs once.
+    wrong_pairs = behavior.get("totalWrongLinksOrPairs")
+    if isinstance(wrong_pairs, int) and total_questions:
+        row["trial_accuracy_percent"] = str(
+            round(total_questions / (total_questions + wrong_pairs) * 100)
+        )
+
+    row["total_trials"] = str(behavior.get("submitCount", ""))
+    row["total_wrong_submits"] = str(behavior.get("wrongSubmitCount", ""))
+    row["total_wrong_pairs"] = str(behavior.get("totalWrongLinksOrPairs", ""))
+
+    row["play_seconds"] = _seconds(behavior.get("activePlayMs"))
+    row["wall_clock_seconds"] = _seconds(behavior.get("elapsedSinceStartMs"))
+    row["total_afk_seconds"] = _seconds(behavior.get("awayMs"))
+    row["afk_count"] = str(behavior.get("awayCount", ""))
+    row["time_limit_seconds"] = _seconds(behavior.get("timeLimitMs"))
+    # Board shown → first touch. Null means they never acted, which is NOT
+    # "acted instantly", so it stays blank rather than becoming 0.
+    row["planning_seconds"] = _seconds_1dp(behavior.get("firstActionDelayMs"))
+    row["timed_out"] = "yes" if behavior.get("timedOut") else "no"
+
     row["rounds_cleared"] = str(behavior.get("roundsCompleted", ""))
     row["rounds_total"] = str(behavior.get("totalRounds", ""))
-    row["timed_out"] = "yes" if behavior.get("timedOut") else "no"
+    row["round_trials"] = _list(rounds, lambda r: str(r.get("submitCount", "")))
+    row["round_wrong_submits"] = _list(rounds, lambda r: str(r.get("wrongSubmitCount", "")))
+    row["round_wrong_pairs"] = _list(rounds, lambda r: str(r.get("totalWrongLinksOrPairs", "")))
+    row["round_seconds"] = _list(rounds, lambda r: _seconds(r.get("durationMs")))
+    row["round_afk_seconds"] = _list(rounds, lambda r: _seconds(r.get("awayMs")))
+
+    # Flattened across rounds in play order: the gap before each submit, which is
+    # the time spent working out that attempt.
+    gaps = [
+        submission.get("durationMs")
+        for entry in rounds
+        for submission in (entry.get("submissions") or [])
+        if isinstance(submission, dict)
+    ]
+    row["submit_gaps_seconds"] = _list(gaps, _seconds_1dp)
+
+    # An array cannot be a spreadsheet cell, so the review pauses become a count
+    # and a mean.
+    reviews = [
+        value
+        for value in (behavior.get("reviewTimesMs") or [])
+        if isinstance(value, (int, float))
+    ]
+    row["review_count"] = str(len(reviews))
+    if reviews:
+        row["avg_review_seconds"] = _seconds_1dp(sum(reviews) / len(reviews))
+
     row["completed_at"] = completed.isoformat() if hasattr(completed, "isoformat") else ""
     return row
 
@@ -416,11 +539,23 @@ def export_results_csv(game_id: str, lecturer_id: str) -> tuple[str, str]:
     import io
     import re
 
-    from services.batch_service import list_students
+    from services.batch_service import get_batch, list_students
 
     game = get_game(game_id, lecturer_id)
     batch_id = str(game.get("batchId") or "")
-    total_pairs = len(game.get("items") or [])
+    total_questions = len(game.get("items") or [])
+
+    # Named on every row so a file that leaves this app still says which class it
+    # came from — a bare "results.csv" in a downloads folder does not.
+    batch_name = ""
+    try:
+        batch = get_batch(batch_id, lecturer_id)
+        if batch is not None:
+            batch_name = " — ".join(
+                part for part in (batch.batch_name, batch.course_name) if part
+            )
+    except Exception:  # noqa: BLE001 — a missing name must not cost the lecturer the export
+        logger.warning("Could not read batch name for results export batch_id=%s", batch_id)
 
     attempts_by_email: dict[str, dict[str, Any]] = {}
     unmatched: list[dict[str, Any]] = []
@@ -440,14 +575,21 @@ def export_results_csv(game_id: str, lecturer_id: str) -> tuple[str, str]:
     rows: list[dict[str, str]] = []
     for student in list_students(batch_id, lecturer_id):
         email = str(student.get("email") or "").strip().lower()
-        rows.append(_result_row(student, attempts_by_email.pop(email, None), total_pairs))
+        rows.append(
+            _result_row(student, attempts_by_email.pop(email, None), total_questions, batch_name)
+        )
 
     # Anyone who played but is no longer on the roster (unenrolled, or signed in
     # with a different address) still earned a row — dropping them would silently
     # lose real results.
     for leftover in list(attempts_by_email.values()) + unmatched:
         rows.append(
-            _result_row({"email": leftover.get("email", ""), "name": ""}, leftover, total_pairs)
+            _result_row(
+                {"email": leftover.get("email", ""), "name": ""},
+                leftover,
+                total_questions,
+                batch_name,
+            )
         )
 
     buffer = io.StringIO()

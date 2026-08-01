@@ -66,10 +66,7 @@ export function useRoundSignals() {
     const from = lastSubmitAtRef.current ?? roundStartRef.current;
 
     submissionsRef.current.push({
-      index:               submissionsRef.current.length + 1,
-      atMsSinceRoundStart: Math.round(now - roundStartRef.current),
-      durationMs:          Math.round(now - from),
-      clean:               wrongCount === 0,
+      durationMs: Math.round(now - from),
       wrongCount,
     });
 
@@ -93,9 +90,7 @@ export function useRoundSignals() {
       wrongSubmitCount:       wrongSubmitsRef.current,
       totalWrongLinksOrPairs: totalWrongRef.current,
       reviewTimesMs:          [...reviewTimesRef.current],
-      solveDurationMs: clearedAtRef.current === null
-        ? null
-        : Math.round(clearedAtRef.current - roundStartRef.current),
+      completed:              clearedAtRef.current !== null,
       submissions:            [...submissionsRef.current],
     };
   }

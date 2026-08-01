@@ -28,6 +28,7 @@ type Props = Pick<
   | 'textareaRef'
   | 'handleSend'
   | 'handleApproveOutline'
+  | 'approvingOutlineMessageId'
   | 'applyPendingEmailEdit'
   | 'activeGenerateMode'
   | 'setActiveGenerateMode'
@@ -80,6 +81,7 @@ export function ChatLayout(props: Props) {
     textareaRef,
     handleSend,
     handleApproveOutline,
+    approvingOutlineMessageId,
     applyPendingEmailEdit,
     activeGenerateMode,
     setActiveGenerateMode,
@@ -284,6 +286,7 @@ export function ChatLayout(props: Props) {
             showWelcome={showWelcome}
             sending={sending}
             onApproveOutline={handleApproveOutline}
+            approvingOutlineMessageId={approvingOutlineMessageId}
             onPendingEmailEdited={applyPendingEmailEdit}
             onRetryMessage={handleRetryMessage}
             onQuoteReply={handleQuoteReply}

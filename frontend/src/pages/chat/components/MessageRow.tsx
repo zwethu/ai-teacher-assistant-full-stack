@@ -1,7 +1,6 @@
 import { memo, useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  BookOpen,
   CalendarClock,
   Check,
   CircleSlash,
@@ -9,12 +8,9 @@ import {
   CornerUpLeft,
   Download,
   ExternalLink,
-  FileQuestion,
   FileText,
-  FlaskConical,
   Gamepad2,
   Mail,
-  Map as MapIcon,
   Maximize2,
   Pencil,
   RefreshCw,
@@ -29,6 +25,7 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import 'katex/dist/katex.min.css'
 import { ThinkingRow, Spinner, Button } from '../../../design-system'
+import { artifactIcon } from '../../../utils/artifactIcons'
 import type { ChatMessage } from '../../../entity/Chat'
 import { startGoogleOAuth } from '../../../services/authService'
 import {
@@ -543,7 +540,9 @@ export function OutlineApprovalCard({
   const locked = completed || isSuperseded || approvalStatus === 'approved'
   const type = String(metadata.outline_artifact_type || metadata.artifact_type || '')
   const label = type === 'lab' ? 'Lab Outline' : type === 'quiz' ? 'Assessment Configuration' : type === 'course_blueprint' ? 'Course Plan Outline' : 'Lesson Plan Outline'
-  const Icon = type === 'lab' ? FlaskConical : type === 'quiz' ? FileQuestion : BookOpen
+  // Was a ternary that fell course_blueprint through to BookOpen — the lesson
+  // plan's icon — so the two outlines were indistinguishable at a glance.
+  const Icon = artifactIcon(type)
   return (
     <div className="overflow-hidden rounded-lg border border-violet-200/80 bg-white/75 shadow-sm backdrop-blur-sm">
       <div className="flex items-center gap-3 border-b border-violet-100 bg-violet-50/40 px-4 py-3.5">
@@ -642,7 +641,9 @@ export function ArtifactPreviewCard({
     ? `Week ${String(week)}`
     : ''
   const summary = extractPreviewSummary(content)
-  const Icon = isLab ? FlaskConical : isQuiz ? FileQuestion : isCourseBlueprint ? MapIcon : isGame ? Gamepad2 : BookOpen
+  // The preview card drew the course plan as a map pin while the approval card
+  // above drew it as a book and the composer chip drew a mortarboard. One mark.
+  const Icon = artifactIcon(artifactType)
 
   useEffect(() => {
     if (!open) return

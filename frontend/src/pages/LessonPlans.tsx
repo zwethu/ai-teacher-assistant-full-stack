@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { BookOpen, ChevronDown, Clock, ExternalLink, FileText, Plus, Sparkles } from 'lucide-react'
+import { ChevronDown, Clock, ExternalLink, Plus, Sparkles } from 'lucide-react'
 import type { ToastMessage } from '../types'
 import Toast from '../components/ui/Toast'
 import { getErrorMessage } from '../utils/errors'
@@ -10,7 +10,12 @@ import { GenerationAttachments } from '../components/generation/GenerationAttach
 import { PlanHintBanner } from '../components/generation/PlanHintBanner'
 import { listArtifacts, type Artifact } from '../services/artifactService'
 import { timeAgo } from '../utils/formatDate'
+import { artifactIcon } from '../utils/artifactIcons'
 import { Spinner } from '../design-system'
+
+// Read from the shared table rather than named twice: the empty state used to
+// draw a FileText while the card four lines below it drew a BookOpen.
+const LessonPlanIcon = artifactIcon('lesson_plan')
 
 const GRADES = ['Undergraduate Y1', 'Undergraduate Y2', 'Undergraduate Y3', 'Undergraduate Y4', 'Postgraduate']
 const DURATIONS = [30, 45, 60, 90, 120, 180]
@@ -303,7 +308,7 @@ export default function LessonPlans() {
               </div>
             ) : artifacts.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-10 text-center rounded-xl border border-slate-100 bg-white">
-                <FileText className="w-8 h-8 text-slate-300 mb-2" />
+                <LessonPlanIcon className="w-8 h-8 text-slate-300 mb-2" />
                 <p className="text-sm text-slate-500">No lesson plans yet for this space.</p>
               </div>
             ) : (
@@ -311,8 +316,11 @@ export default function LessonPlans() {
                 {artifacts.map((a) => (
                   <article key={a.id} className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
                     <div className="flex items-start gap-3 mb-2">
-                      <div className="h-9 w-9 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center border border-sky-100">
-                        <BookOpen className="w-4 h-4" />
+                      {/* Violet, matching the identical tile on Assessments and
+                          Games. Sky is MILA's info semantic — a saved lesson
+                          plan is the lecturer's work, not a notice. */}
+                      <div className="h-9 w-9 rounded-lg bg-violet-50 text-violet-600 flex items-center justify-center border border-violet-100">
+                        <LessonPlanIcon className="w-4 h-4" />
                       </div>
                       <div className="min-w-0 flex-1">
                         <h3 className="font-semibold text-slate-900 truncate">{a.title || 'Lesson plan'}</h3>

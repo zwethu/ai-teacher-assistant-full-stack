@@ -154,9 +154,9 @@ export function ArtifactsTab({ artifacts, summary, loading, onRefresh, onDelete 
 
       <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
         {loading ? (
-          <div className="p-8 text-center text-sm text-slate-500">Loading artifacts...</div>
+          <div className="p-8 text-center text-sm text-slate-500">Loading generated content...</div>
         ) : filtered.length === 0 ? (
-          <div className="p-8 text-center text-sm text-slate-500">No artifacts found.</div>
+          <div className="p-8 text-center text-sm text-slate-500">Nothing generated for this space yet.</div>
         ) : (
           <div className="divide-y divide-slate-100">
             {filtered.map((artifact) => {

@@ -128,9 +128,13 @@ export function GenerationRunView({
 
         {stage === 'outline_review' && activeMessage && (
           <div className="space-y-3">
+            {/* One card, one action: here "the run is in flight" and "this
+                approval is in flight" are the same fact, so `generating`
+                tracks `sending` directly. Chat has to be more careful. */}
             <OutlineApprovalCard
               msg={activeMessage}
               disabled={run.sending}
+              generating={run.sending}
               completed={
                 String(activeMessage.metadata?.outline_approval_status || '') === 'approved'
               }

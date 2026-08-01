@@ -4,7 +4,7 @@ import type { BatchFile } from '../../../entity/File'
 import Toast from '../../../components/ui/Toast'
 import type { ToastMessage } from '../../../types'
 import { formatDate } from '../../../utils/formatDate'
-import { ArrowLeft, BookOpenCheck, Clock, Trash2, Users } from 'lucide-react'
+import { ArrowLeft, BookOpenCheck, Clock, Sparkles, Trash2, Users } from 'lucide-react'
 import { BTN_SECONDARY } from '../constants'
 import type { DetailTab } from '../types'
 import { ArtifactsTab } from './ArtifactsTab'
@@ -116,16 +116,16 @@ export function BatchDetailView({
         </div>
       </div>
 
-      <div className="flex gap-1 mb-3 border-b border-slate-200 overflow-x-auto shrink-0">
+      <div className="mila-tabstrip flex gap-1 mb-3 overflow-x-auto shrink-0">
         <button
           type="button"
           onClick={() => setDetailTab('planning')}
-          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${detailTab === 'planning' ? 'border-violet-600 text-violet-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${detailTab === 'planning' ? 'border-violet-600 text-violet-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
         ><BookOpenCheck className="w-4 h-4" />Planning</button>
         <button
           type="button"
           onClick={() => setDetailTab('students')}
-          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
+          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
             detailTab === 'students'
               ? 'border-violet-600 text-violet-700'
               : 'border-transparent text-slate-500 hover:text-slate-700'
@@ -137,7 +137,7 @@ export function BatchDetailView({
         <button
           type="button"
           onClick={() => setDetailTab('materials')}
-          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
+          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
             detailTab === 'materials'
               ? 'border-violet-600 text-violet-700'
               : 'border-transparent text-slate-500 hover:text-slate-700'
@@ -154,14 +154,17 @@ export function BatchDetailView({
         <button
           type="button"
           onClick={() => setDetailTab('artifacts')}
-          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
+          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
             detailTab === 'artifacts'
               ? 'border-violet-600 text-violet-700'
               : 'border-transparent text-slate-500 hover:text-slate-700'
           }`}
         >
-          <Clock className="w-4 h-4" />
-          Artifacts
+          {/* Not Clock — that is the Sessions tab's mark, two tabs along in
+              the same row. Sparkles is what every Generate button in the app
+              already carries, which is exactly what this tab collects. */}
+          <Sparkles className="w-4 h-4" />
+          Generated content
           {artifacts.length > 0 && (
             <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600">
               {artifacts.length}

@@ -179,7 +179,7 @@ export function useBatchesPage() {
       setArtifactSummary(summary)
     } catch (err) {
       console.error(err)
-      showToast('error', getErrorMessage(err, 'Could not load artifacts.'))
+      showToast('error', getErrorMessage(err, 'Could not load generated content.'))
     } finally {
       setArtifactsLoading(false)
     }
@@ -470,7 +470,7 @@ export function useBatchesPage() {
     const labNote = artifact.type === 'lab' ? '\n\nThis will delete both Lecturer Guide and Student Instructions.' : ''
     if (
       !window.confirm(
-        `Delete ${label}?\n\nThis removes the artifact record from MILA and permanently deletes the Google Drive file. This cannot be undone.${labNote}`,
+        `Delete ${label}?\n\nThis removes it from MILA and permanently deletes the Google Drive file. This cannot be undone.${labNote}`,
       )
     ) {
       return
@@ -481,11 +481,11 @@ export function useBatchesPage() {
       await refreshArtifacts()
       showToast(
         'success',
-        metadata.student_doc_id ? 'Artifact and linked Drive files deleted.' : 'Artifact deleted.',
+        metadata.student_doc_id ? 'Deleted, along with its linked Drive files.' : 'Deleted.',
       )
     } catch (err) {
       console.error(err)
-      showToast('error', getErrorMessage(err, 'Could not delete artifact. Reconnect Google Workspace if Drive deletion failed.'))
+      showToast('error', getErrorMessage(err, 'Could not delete it. Reconnect Google Workspace if Drive deletion failed.'))
     }
   }
 

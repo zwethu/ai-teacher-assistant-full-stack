@@ -10,6 +10,7 @@ import type { ChatAttachmentListItem } from '../../../entity/Chat'
 import type { UpdatePendingEmailResult } from '../../../services/chatService'
 import { Spinner, IconButton } from '../../../design-system'
 import { useScrollbarGutter } from '../../../hooks/useScrollbarGutter'
+import { isAutoIssuedUserMessage } from '../utils/autoIssuedMessage'
 import type { PreviewableAttachment } from './AttachmentPreview'
 import { AttachmentCard, AttachmentViewer, attachmentStatusLabel } from './AttachmentPreview'
 import type { GenerateMode } from './ComposerSurface'
@@ -407,6 +408,8 @@ type MessagesPanelProps = {
   /** Quote a selected passage of a response into the composer. */
   onQuoteReply?: (excerpt: string) => void
   retryingMessageId?: string | null
+  /** Outline message whose approval run is in flight, if any. */
+  approvingOutlineMessageId?: string | null
 }
 
 export function ChatMessagesPanel({
@@ -424,6 +427,7 @@ export function ChatMessagesPanel({
   onRetryMessage,
   onQuoteReply,
   retryingMessageId,
+  approvingOutlineMessageId,
 }: MessagesPanelProps) {
   // This is the element the composer band overlays, so its scrollbar is the one
   // the band has to stay clear of.
@@ -452,11 +456,16 @@ export function ChatMessagesPanel({
         return []
       }
       const hasLaterFollowup = safeMessages.slice(index + 1).some(
-        (later) => later.role === 'user' && !isGeneratedOutlineApprovalText(later.content),
+        (later) => later.role === 'user' && !isAutoIssuedUserMessage(later),
       )
       return hasLaterFollowup ? [message.run_id] : []
     }),
   )
+
+  // The approval request itself is not part of the conversation — see
+  // `isAutoIssuedUserMessage`. Filtered here rather than upstream so the two
+  // derivations above still see the turn that actually happened.
+  const visibleMessages = safeMessages.filter((msg) => !isAutoIssuedUserMessage(msg))
 
   return (
     <main ref={scrollRef} className="flex-1 overflow-y-auto" style={{ paddingBottom: bottomInset }}>
@@ -469,7 +478,7 @@ export function ChatMessagesPanel({
           welcomeContent
         ) : (
           <div className="space-y-8 pb-4">
-            {safeMessages.map((msg) => (
+            {visibleMessages.map((msg) => (
               <MessageRow
                 key={msg.message_id}
                 msg={msg}
@@ -477,6 +486,7 @@ export function ChatMessagesPanel({
                 batchId={batchId}
                 onApproveOutline={onApproveOutline}
                 approvalDisabled={sending}
+                approvalGenerating={approvingOutlineMessageId === msg.message_id}
                 approvalCompleted={Boolean(msg.run_id && completedOutlineRunIds.has(msg.run_id))}
                 approvalSuperseded={Boolean(msg.run_id && supersededOutlineRunIds.has(msg.run_id))}
                 onPendingEmailEdited={onPendingEmailEdited}
@@ -496,8 +506,4 @@ export function ChatMessagesPanel({
       </div>
     </main>
   )
-}
-
-function isGeneratedOutlineApprovalText(content: string) {
-  return content.trim().toLowerCase().startsWith('approve this outline and generate the full ')
 }

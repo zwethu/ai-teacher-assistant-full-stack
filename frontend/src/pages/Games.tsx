@@ -1,14 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  BookOpen,
   CalendarClock,
   Check,
   ChevronDown,
   Copy,
   ExternalLink,
-  FileQuestion,
-  FlaskConical,
   Gamepad2,
   Lock,
   LockOpen,
@@ -26,6 +23,7 @@ import { useBatchSelection } from '../hooks/useBatchSelection'
 import { useGenerationRun } from '../hooks/useGenerationRun'
 import { listArtifacts, type Artifact } from '../services/artifactService'
 import { gameTimeLimitMinutes } from '../lib/gameTiming'
+import { artifactIcon } from '../utils/artifactIcons'
 import {
   deleteGame,
   gamePlayUrl,
@@ -71,12 +69,6 @@ function formatDeadline(value?: string | null): { text: string; passed: boolean 
     minute: '2-digit',
   })
   return { text, passed: date.getTime() <= Date.now() }
-}
-
-function artifactIcon(type: string) {
-  if (type === 'lab') return FlaskConical
-  if (type === 'quiz' || type === 'assessment') return FileQuestion
-  return BookOpen
 }
 
 function artifactTypeLabel(type: string): string {

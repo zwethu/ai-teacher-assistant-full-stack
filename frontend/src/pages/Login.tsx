@@ -1,11 +1,6 @@
 import { useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import {
-  BookOpen,
-  FileQuestion,
-  FlaskConical,
-  Gamepad2,
-  GraduationCap,
   Mail,
   type LucideIcon,
 } from 'lucide-react'
@@ -14,6 +9,7 @@ import { MilaLogo } from '../components/brand/MilaLogo'
 import { MilaWord } from '../components/brand/MilaWord'
 import { useAuth } from '../hooks/useAuth'
 import { Button, Modal } from '../design-system'
+import { ARTIFACT_ICONS } from '../utils/artifactIcons'
 import LoadingScreen from '../components/ui/LoadingScreen'
 
 /**
@@ -37,12 +33,12 @@ type Capability = { icon: LucideIcon; title: string; body: string }
 
 /** The generation workflows the composer actually offers (see GENERATE_MODES). */
 const CAPABILITIES: Capability[] = [
-  { icon: GraduationCap, title: 'Course plans', body: 'A term mapped out week by week.' },
-  { icon: BookOpen, title: 'Lesson plans', body: 'Structured sessions from your own materials.' },
-  { icon: FileQuestion, title: 'Assessments', body: 'Quizzes and tests, exported to Google Forms.' },
-  { icon: FlaskConical, title: 'Labs', body: 'Practical worksheets with setup and steps.' },
+  { icon: ARTIFACT_ICONS.course_blueprint, title: 'Course plans', body: 'A term mapped out week by week.' },
+  { icon: ARTIFACT_ICONS.lesson_plan, title: 'Lesson plans', body: 'Structured sessions from your own materials.' },
+  { icon: ARTIFACT_ICONS.assessment, title: 'Assessments', body: 'Quizzes and tests, exported to Google Forms.' },
+  { icon: ARTIFACT_ICONS.lab, title: 'Labs', body: 'Practical worksheets with setup and steps.' },
   { icon: Mail, title: 'Class email', body: 'Drafted, reviewed by you, then sent or scheduled.' },
-  { icon: Gamepad2, title: 'Study games', body: 'Revision activities built from your notes.' },
+  { icon: ARTIFACT_ICONS.game, title: 'Study games', body: 'Revision activities built from your notes.' },
 ]
 
 /**

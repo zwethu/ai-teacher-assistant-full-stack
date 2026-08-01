@@ -51,6 +51,7 @@ import { emitChatCreated } from '../../../utils/chatEvents'
 import type { RunUiState } from '../runTypes'
 import type { GenerateMode } from '../components/ChatConversation'
 import { buildGenerationRequest } from '../generationRequest'
+import { AUTO_ISSUED_METADATA } from '../utils/autoIssuedMessage'
 
 type ChatLocationState = {
   batchId?: string
@@ -257,6 +258,9 @@ export function useChatPage() {
   const [input, setInput] = useState('')
   const [activeGenerateMode, setActiveGenerateMode] = useState<GenerateMode | null>(null)
   const [sending, setSending] = useState(false)
+  // The outline card whose approval is currently generating, so only that card
+  // shows the spinner. Cleared below when the chat goes idle again.
+  const [approvingOutlineMessageId, setApprovingOutlineMessageId] = useState<string | null>(null)
   const [pendingAttachments, setPendingAttachments] = useState<PendingChatAttachment[]>([])
   // Prior-message attachments the user re-references. These CANNOT go through attachment_ids
   // (the backend rejects an already-sent attachment); they are conveyed to the agent as an
@@ -1082,6 +1086,13 @@ export function useChatPage() {
     removingAttachmentIdsRef.current.delete(attachmentId)
   }
 
+  // `sending` covers the whole run, from kickoff to settled — done, failed or
+  // stopped alike — so it is the signal that the approval finished, whatever the
+  // outcome. Nothing else has to remember to reset the card.
+  useEffect(() => {
+    if (!sending) setApprovingOutlineMessageId(null)
+  }, [sending])
+
   async function handleApproveOutline(message: ChatMessage) {
     if (!selectedBatch || !activeChat || sending || !message.run_id) return
     const metadata = message.metadata || {}
@@ -1090,10 +1101,15 @@ export function useChatPage() {
     if (!['lesson_plan', 'lab', 'assessment', 'course_blueprint'].includes(mode)) return
     const label = mode === 'assessment' ? 'assessment' : mode.replace('_', ' ')
     const text = `Approve this outline and generate the full ${label} preview.`
+    setApprovingOutlineMessageId(message.message_id)
     await startRunInChat({
       batchId: selectedBatch.id,
       chat: activeChat,
       message: text,
+      // Composed here, not typed — kept off the transcript. Set on the
+      // optimistic copy as well as by the backend so it never flashes into view
+      // for the moment before the persisted message replaces it.
+      messageMetadata: AUTO_ISSUED_METADATA,
       invoke: async () => {
         const payload = {
           batch_id: selectedBatch.id,
@@ -1129,6 +1145,7 @@ export function useChatPage() {
     updateTitleIfNew = false,
     workflowMode = null,
     attachmentSnapshots = [],
+    messageMetadata,
   }: {
     batchId: string
     chat: Chat
@@ -1137,6 +1154,9 @@ export function useChatPage() {
     updateTitleIfNew?: boolean
     workflowMode?: GenerateMode | null
     attachmentSnapshots?: PendingChatAttachment[]
+    /** Metadata for the optimistic user message; the backend stamps its own
+     *  copy on the persisted one. */
+    messageMetadata?: Record<string, unknown>
   }) {
     const chatId = chat.chat_id
     setSending(true)
@@ -1148,6 +1168,7 @@ export function useChatPage() {
       content: message,
       created_at: new Date().toISOString(),
       attachments: attachmentSnapshots,
+      ...(messageMetadata ? { metadata: messageMetadata } : {}),
     }
     setMessages((prev) => [...prev, optimisticUser])
 
@@ -1741,6 +1762,7 @@ export function useChatPage() {
     retryAssistantMessage,
     retryingMessageId,
     handleApproveOutline,
+    approvingOutlineMessageId,
     applyPendingEmailEdit,
     handleInputKeyDown,
     handleTextareaInput,

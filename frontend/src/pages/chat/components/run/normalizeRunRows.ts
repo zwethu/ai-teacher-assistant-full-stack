@@ -105,9 +105,28 @@ function eventTitle(event: AgentRunEvent): string {
   return event.title || event.summary || 'Working'
 }
 
+function isTerminalStatus(status: string): boolean {
+  const normalized = normalizeStatus(status)
+  return normalized === 'failed' || normalized === 'done' || normalized === 'success'
+}
+
+/**
+ * Events arrive in chronological order, so `next` is never older than
+ * `existing`. Two rules, in priority order:
+ *  - a LATER terminal status replaces an earlier one — the schema-retry loop
+ *    legitimately emits failed → started → done for one phase, and the row
+ *    must end on Done, not stick on the first Failed;
+ *  - a terminal status never downgrades to running/started on a stray
+ *    non-terminal event (the reason the old rank-only rule existed).
+ */
+function mergeStatus(existing: string, next: string): string {
+  if (isTerminalStatus(next)) return next
+  if (isTerminalStatus(existing)) return existing
+  return statusRank(next) >= statusRank(existing) ? next : existing
+}
+
 function mergeRow(existing: NormalizedRunRow, next: NormalizedRunRow): NormalizedRunRow {
-  const status =
-    statusRank(next.status) >= statusRank(existing.status) ? next.status : existing.status
+  const status = mergeStatus(existing.status, next.status)
   const latest =
     (next.updated_at || 0) >= (existing.updated_at || 0) ? next : existing
   return {

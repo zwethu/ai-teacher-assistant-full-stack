@@ -301,19 +301,47 @@ def upload_text_file(
     parent_id: str,
     mime_type: str = "text/plain",
 ) -> dict[str, str]:
-    """Upload a small text file (lab starter code) into a Drive folder."""
+    """Create or update a small text file (lab resources) in a Drive folder.
+
+    Upsert by name: a re-export must replace the folder's copy of each file,
+    not add a same-named duplicate next to it — resource files carry stable
+    names (docs dodge this with versioned names, resources cannot).
+    """
     from googleapiclient.http import MediaInMemoryUpload
 
     drive = _build_drive_service(uid)
+    clean_name = sanitize_drive_name(name)
     media = MediaInMemoryUpload(content.encode("utf-8"), mimetype=mime_type)
+
+    existing = drive.files().list(
+        q=(
+            f"name='{_quote_query_value(clean_name)}' and "
+            f"'{_quote_query_value(parent_id)}' in parents and trashed=false"
+        ),
+        fields="files(id)",
+        spaces="drive",
+        pageSize=1,
+    ).execute().get("files") or []
+    if existing:
+        updated = drive.files().update(
+            fileId=existing[0]["id"],
+            media_body=media,
+            fields="id,name,webViewLink",
+        ).execute()
+        return {
+            "id": str(updated.get("id") or ""),
+            "name": str(updated.get("name") or clean_name),
+            "url": str(updated.get("webViewLink") or ""),
+        }
+
     created = drive.files().create(
-        body={"name": sanitize_drive_name(name), "parents": [parent_id]},
+        body={"name": clean_name, "parents": [parent_id]},
         media_body=media,
         fields="id,name,webViewLink",
     ).execute()
     return {
         "id": str(created.get("id") or ""),
-        "name": str(created.get("name") or name),
+        "name": str(created.get("name") or clean_name),
         "url": str(created.get("webViewLink") or ""),
     }
 

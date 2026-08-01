@@ -332,38 +332,20 @@
     z-index: 2;
   }
 
-  /* Live-text pulse for in-progress agent labels ("Working…", the current
-     thinking note).
+  /* No ambient loop on the live working note — deliberately.
 
-     These are the design system's own values, not new ones: Thinking.jsx ships
-     `mt-fade` on `.maia-think-row span` — opacity .65 ⇄ 1 over 7.2s ease-in-out,
-     deliberately the same 7.2s as the garland's bead walk so text and mark
-     breathe on the same beat. Components that render a `Thinking`/`ThinkingRow`
-     get that class for free; this utility exists only so labels *outside* those
-     components (RunDetails' "Working…") can stay on the same beat.
+     It used to pulse its opacity between .65 and 1 on the garland's 7.2s beat,
+     borrowed from the design system's own `mt-fade`. Two things retired it.
+     Measured against the transcript's wash that trough is 2.36:1, so for half
+     of every cycle the sentence was below any legibility threshold. And notes
+     arrive often enough that `.mila-thought-swap` — which replays on every new
+     one — already carries the "still working" signal on its own. A loop on top
+     of a frequent transition is two motions answering the same question.
 
-     Do not replace this with a gradient sweep or similar — MILA's motion brief
-     is "quiet", and the pulse is what the system already uses. */
-  .mila-live-text {
-    animation: mila-live-text 7.2s ease-in-out infinite;
-  }
-
-  @keyframes mila-live-text {
-    0%,
-    100% {
-      opacity: 0.65;
-    }
-    50% {
-      opacity: 1;
-    }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .mila-live-text {
-      animation: none;
-      opacity: 1;
-    }
-  }
+     The garland beside it is the designated liveness mark and still walks its
+     bead. Components that render `Thinking`/`ThinkingRow` keep the design
+     system's own pulse; this only removes the utility that put it on labels
+     outside them. */
 
   /* Thinking notes easing in — on expand, and as each new note streams in.
      Keyed list items only animate when their DOM node is created, so existing
@@ -658,7 +640,7 @@
      control row — the web-search toggle — moves with the layout instead of
      teleporting when the chip finally unmounts at the end of its fade.
 
-     The horizontal twin of `.mila-step-out`'s row collapse, and chosen for the
+     The horizontal twin of `.mila-step-row`'s collapse, and chosen for the
      same reason: it needs no measurement. A JS approach here read the toggle's
      position every render to animate the difference, and `getBoundingClientRect`
      includes an in-flight transform — so a render mid-slide (typing counts)
@@ -689,57 +671,94 @@
      composer's for that reason: a settling step should read as work finishing,
      not as a card being dismissed. */
 
-  /* Rises into place. New steps append below the ones already running, so
-     entering from beneath is where they come from. Scale starts at 0.98, never
-     0 — nothing appears out of nothing. */
-  .mila-step-in {
-    animation: mila-step-in 300ms cubic-bezier(0.16, 1, 0.3, 1) both;
-    animation-delay: var(--mila-step-delay, 0ms);
+  /* A card that arrives after the answer has already settled.
+
+     There are two of these in every generation workflow — the outline waiting
+     for approval, and the export controls that turn an approved preview into
+     real Drive files — plus the preview card itself. All three land a beat
+     after the text, because their metadata does, so at full size and full
+     opacity they read as a glitch rather than an arrival.
+
+     Transform and opacity only: unlike a step row, a card is appended at the
+     end of a turn with nothing below it to displace, and the turn's floor
+     absorbs its height. So there is no layout jump to ease, and animating only
+     compositor properties keeps the card's shadow out of a clip.
+
+     Resting in the visible state, like the step rows — which is what lets
+     reduced motion simply switch the transition off. */
+  .mila-card-in {
+    opacity: 1;
+    transform: none;
+    transition:
+      opacity 260ms cubic-bezier(0.16, 1, 0.3, 1),
+      transform 260ms cubic-bezier(0.16, 1, 0.3, 1),
+      /* The preview card is clickable and tints on hover. That has to live in
+         this list rather than on a `transition-colors` utility, which sets
+         `transition-property` outright and would drop the two above it. */
+      background-color 160ms ease;
   }
 
-  @keyframes mila-step-in {
-    from {
+  @starting-style {
+    .mila-card-in {
       opacity: 0;
-      transform: translate3d(0, 8px, 0) scale(0.98);
-    }
-    to {
-      opacity: 1;
-      transform: none;
+      transform: translate3d(0, 8px, 0);
     }
   }
 
-  /* Collapses its own height on the way out, so the rows below slide up rather
-     than snapping when it is finally unmounted. Fading a row that keeps its
-     full height until removal is a jump dressed up as an animation.
+  /* Step rows: one element, one transition, two states.
+     ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
 
-     `grid-template-rows: 1fr → 0fr` is safe here in a way it was not for the
-     composer: this element's content is fixed for the whole exit, so there is
-     no in-between size for `1fr` to resolve wrongly. Faster than the entrance —
-     the user has already read this row. */
-  .mila-step-out {
-    pointer-events: none;
+     Transitions rather than keyframes, because these rows are the most
+     interruptible thing in the app: with parallel tool calls several arrive and
+     settle at once, and the run can end while one is still opening. A keyframe
+     restarts from its own `from` frame, so a row told to leave 100ms into a
+     240ms entrance snapped to full height before collapsing. A transition
+     retargets from wherever the value actually is, so that same row simply
+     reverses out of its current position.
+
+     The resting state is the *open* one, which is what makes reduced motion
+     safe: switch the transition off and a row is visible and full height, not
+     collapsed to nothing. The previous keyframe version rested at `0fr` — the
+     frame the entrance grew from — so removing its animation hid every step.
+
+     `@starting-style` supplies the entry's from-state. Where it is unsupported
+     the row appears instantly at its resting size: no animation, nothing
+     broken, which is the right way for this to degrade.
+
+     Animating `grid-template-rows` is layout work, not compositor work, and
+     that is deliberate. Nothing on the transform/opacity side can make a row
+     stop *occupying space*, and snapping the height is the jump this exists to
+     remove. It is a handful of rows, once each. */
+  .mila-step-row {
     display: grid;
     grid-template-rows: 1fr;
-    animation: mila-step-out 240ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    opacity: 1;
+    transition:
+      grid-template-rows 240ms cubic-bezier(0.16, 1, 0.3, 1) var(--mila-step-delay, 0ms),
+      opacity 240ms cubic-bezier(0.16, 1, 0.3, 1) var(--mila-step-delay, 0ms);
   }
 
-  @keyframes mila-step-out {
-    from {
-      grid-template-rows: 1fr;
-      opacity: 1;
-      transform: none;
-    }
-    to {
+  @starting-style {
+    .mila-step-row {
       grid-template-rows: 0fr;
       opacity: 0;
-      transform: translate3d(0, -2px, 0);
     }
+  }
+
+  /* Faster than the entrance — the lecturer has already read this row — and
+     with no stagger: a departure is not a cascade, and delaying it would hold
+     the space open after the row had visibly gone. */
+  .mila-step-row[data-leaving='true'] {
+    pointer-events: none;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    transition-duration: 180ms;
+    transition-delay: 0ms;
   }
 
   /* The row's spacing lives inside the collapsing box, so it collapses with it
      — spacing left on the parent would survive the row and leave a gap behind. */
-  .mila-step-out > *,
-  .mila-step-in > * {
+  .mila-step-row > * {
     min-height: 0;
     overflow: hidden;
   }
@@ -850,18 +869,26 @@
     }
 
     .mila-composer-in,
-    .mila-step-in,
     .mila-badge-swap,
     .mila-tile-in {
       animation: none;
+    }
+
+    /* Nothing to restore: `.mila-step-row` rests open, so switching the
+       transition off leaves a full-height, fully visible row. That is the
+       point of resting in the visible state — an earlier version rested
+       collapsed, and turning its animation off hid every step. */
+    .mila-step-row,
+    .mila-card-in {
+      transition: none;
     }
 
     /* An exit with no animation would be a tile sitting there for 200ms
        after it was removed, which reads as lag rather than as calm. Nothing
        that is on its way out should be visible at all. */
     .mila-composer-out,
-    .mila-step-out,
-    .mila-tile-out {
+    .mila-tile-out,
+    .mila-step-row[data-leaving='true'] {
       display: none;
     }
   }
@@ -956,4 +983,116 @@
   backdrop-filter: blur(18px) saturate(1.4);
   -webkit-mask-image: linear-gradient(to top, #000 0%, #000 90%, transparent 100%);
   mask-image: linear-gradient(to top, #000 0%, #000 90%, transparent 100%);
+}
+
+/* ---------------------------------------------------------------------------
+   Code syntax colours.
+
+   White surface, keeping the dark version's roles: brand violet for the
+   language's own vocabulary, the gold family for values the author typed,
+   neutrals for everything said about the code rather than in it.
+
+   The rule that makes a light block read is *how little* gets coloured. An
+   earlier pass tinted params, variables and properties too, and `hljs-params`
+   alone owns a whole signature — `self, name: str, data: dict, ...` — so most
+   of a Python block came out mid-tone and the whole thing looked washed out.
+   Colour is rationed here: the bulk of the code is near-black at 17.85:1, and
+   only keywords, definitions, literals and comments are tinted. Everything
+   unlisted inherits that near-black, which is the right answer for plain code.
+
+   The literal brand gold cannot appear on white — gold-400 measures 1.65:1 and
+   gold-600 2.16:1 against the 4.5:1 body text needs, invisible rather than
+   merely low. Strings take the nearest legible relative chosen by hue: MILA
+   gold sits at 44°, yellow-800 at 32°, versus the amber-700 (26°) an earlier
+   pass reached for, which read as burnt orange.
+
+   Measured on white, all AA:
+
+     base       17.85:1   violet-700  9.14:1   violet-600  7.26:1
+     yellow-800  6.85:1   yellow-700  4.92:1   slate-600   7.58:1
+     slate-500   4.76:1
+
+   Unlayered, like the other MILA rules in this file: `hljs-*` classes come from
+   the sanitizer's output, and a `@layer` would lose to any unlayered rule that
+   happened to match the same span.
+   --------------------------------------------------------------------------- */
+
+/* The language's own vocabulary — the strongest tint in the block, because
+   these are the words that are not the author's. */
+.hljs-keyword,
+.hljs-built_in,
+.hljs-literal,
+.hljs-selector-tag,
+.hljs-doctag {
+  color: var(--color-violet-700);
+}
+
+/* Names at the point of definition, and the keys of structured formats (JSON,
+   YAML, CSS). Deliberately NOT variables, properties or params: those are the
+   body of the code, and tinting them is what flattened the block. */
+.hljs-title,
+.hljs-title.class_,
+.hljs-title.function_,
+.hljs-section,
+.hljs-name,
+.hljs-attr,
+.hljs-attribute,
+.hljs-selector-id,
+.hljs-selector-class {
+  color: var(--color-violet-600);
+}
+
+/* Values typed literally — gold's role, at a weight white can carry. */
+.hljs-string,
+.hljs-regexp,
+.hljs-char.escape_,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-quote,
+.hljs-meta .hljs-string {
+  color: #854d0e; /* yellow-800 */
+}
+
+.hljs-number,
+.hljs-type {
+  color: #a16207; /* yellow-700 — lighter than strings, so the two read apart */
+}
+
+/* Said *about* the code, not in it — so it recedes. Italic because that is the
+   one typographic convention every editor already shares. */
+.hljs-comment {
+  color: #64748b; /* slate-500 */
+  font-style: italic;
+}
+
+.hljs-meta,
+.hljs-punctuation,
+.hljs-operator,
+.hljs-tag {
+  color: #475569; /* slate-600 */
+}
+
+/* Diffs keep the semantics they have everywhere else in the app. */
+.hljs-addition {
+  color: #065f46; /* emerald-800 — success, and nothing else */
+}
+
+.hljs-deletion {
+  color: #991b1b; /* red-800 */
+}
+
+.hljs-emphasis {
+  font-style: italic;
+}
+
+.hljs-strong {
+  font-weight: 600;
+}
+
+/* highlight.js themes normally set the block's own background and text here.
+   Ours are Tailwind utilities on the `pre`, so this must not repaint them — it
+   exists only to stop the class being unstyled. */
+.hljs {
+  background: transparent;
+  color: inherit;
 }

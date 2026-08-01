@@ -33,8 +33,24 @@ export async function createChat(
   return res.data
 }
 
-export async function listChats(batchId: string): Promise<Chat[]> {
-  const res = await api.get<Chat[]>(`/batches/${batchId}/chats`)
+/** Sidebar page size. The server clamps the parameter to 1..100. */
+export const CHAT_PAGE_SIZE = 30
+
+/**
+ * One page of chats, newest first.
+ *
+ * `before` is the `created_at` of the oldest chat already held. The server
+ * counts `limit` in chats you can actually see (it skips generation workspaces
+ * internally), so a short page means the list has ended — that is the only stop
+ * condition, since the response is a bare array with no total.
+ */
+export async function listChats(
+  batchId: string,
+  options?: { limit?: number; before?: string | null },
+): Promise<Chat[]> {
+  const res = await api.get<Chat[]>(`/batches/${batchId}/chats`, {
+    params: { limit: options?.limit, before: options?.before || undefined },
+  })
   return res.data
 }
 
@@ -59,8 +75,26 @@ export async function updateChatTitle(
 // Messages
 // ---------------------------------------------------------------------------
 
-export async function listMessages(batchId: string, chatId: string): Promise<ChatMessage[]> {
-  const res = await api.get<ChatMessage[]>(`/batches/${batchId}/chats/${chatId}/messages`)
+/** Server-side cap, and the page size we ask for. Mirrors DEFAULT_MESSAGE_LIMIT
+ *  in chat_service.py — asking for more is silently clamped to it. */
+export const MESSAGE_PAGE_SIZE = 50
+
+/**
+ * One page of messages, oldest first *within the page*.
+ *
+ * The server takes the newest `limit` messages older than `before`, then flips
+ * them back into reading order — so `page[0]` is the oldest of the page and its
+ * `created_at` is the cursor for the page before it. A page shorter than
+ * `limit` means the start of the conversation.
+ */
+export async function listMessages(
+  batchId: string,
+  chatId: string,
+  options?: { limit?: number; before?: string | null },
+): Promise<ChatMessage[]> {
+  const res = await api.get<ChatMessage[]>(`/batches/${batchId}/chats/${chatId}/messages`, {
+    params: { limit: options?.limit, before: options?.before || undefined },
+  })
   return res.data
 }
 

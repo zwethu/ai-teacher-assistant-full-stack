@@ -21,13 +21,27 @@ type CacheEntry = {
 
 let sessionsCache: CacheEntry | null = null
 
+/**
+ * Chats fetched per batch.
+ *
+ * The endpoint defaults to 30, which this list must not inherit: it merges
+ * every batch into one timeline, so a lecturer with four spaces would see
+ * their four most recent conversations each truncated at a different depth,
+ * with no way to reach past it. 100 is the server's ceiling for one request.
+ *
+ * This is a cap, not paging. Paging here means merging a cursor per batch into
+ * one `updated_at` ordering, which is a different design from the single-batch
+ * case and deliberately not attempted inside this fan-out.
+ */
+const PER_BATCH_LIMIT = 100
+
 async function buildSessions(): Promise<SessionItem[]> {
   const batches = await listBatches()
   const results: SessionItem[] = []
 
   await Promise.all(
     batches.map(async (batch) => {
-      const chats = await listChats(batch.id)
+      const chats = await listChats(batch.id, { limit: PER_BATCH_LIMIT })
       for (const chat of chats) {
         results.push({
           chat_id: chat.chat_id,

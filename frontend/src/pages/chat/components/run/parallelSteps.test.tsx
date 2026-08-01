@@ -119,9 +119,15 @@ describe('parallel tool calls', () => {
       expect(screen.getByText('Done')).toBeTruthy()
       expect(screen.getByText('Checking saved materials')).toBeTruthy()
 
-      // Then, and only then, it goes — grace window plus its exit animation.
+      // Then, and only then, it goes — grace window, *then* its exit. Two
+      // advances, not one: the exit timer is scheduled by the effect that runs
+      // when the grace window drops the row, so it does not exist yet at the
+      // start of a single combined jump.
       await act(async () => {
-        vi.advanceTimersByTime(STEP_SETTLE_MS + 400)
+        vi.advanceTimersByTime(STEP_SETTLE_MS + 20)
+      })
+      await act(async () => {
+        vi.advanceTimersByTime(400)
       })
       expect(screen.queryByText('Checking saved materials')).toBeNull()
     } finally {
@@ -154,7 +160,7 @@ describe('parallel tool calls', () => {
       status: 'running',
     })
     const delays = (container: HTMLElement) =>
-      [...container.querySelectorAll('.mila-step-in')].map((node) =>
+      [...container.querySelectorAll('.mila-step-row:not([data-leaving])')].map((node) =>
         (node as HTMLElement).style.getPropertyValue('--mila-step-delay'),
       )
 
@@ -231,7 +237,7 @@ describe('ThinkingPanel', () => {
       rerender(<ThinkingPanel events={thinking} runStatus="done" />)
 
       // Still on screen for its exit, still saying what it last said.
-      expect(container.querySelector('.mila-step-out')).toBeTruthy()
+      expect(container.querySelector('.mila-step-row[data-leaving="true"]')).toBeTruthy()
       expect(container.textContent).toContain('Consulting the course plan...')
 
       await act(async () => {

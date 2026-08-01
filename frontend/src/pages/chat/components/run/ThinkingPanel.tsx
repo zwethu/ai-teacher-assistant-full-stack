@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { AgentRunEvent, AgentRunStatus } from '../../../../services/agentRunStream'
 import { Spinner, Thinking } from '../../../../design-system'
 import { useExitDelay } from '../../../../hooks/useExitDelay'
+import { STEP_EXIT_MS } from './StepsPanel'
 
 type Props = {
   events: AgentRunEvent[]
@@ -62,43 +63,60 @@ export function ThinkingPanel({ events, runStatus }: Props) {
     if (isRunning && liveLabel) setLastLabel(liveLabel)
   }, [isRunning, liveLabel])
 
-  const mounted = useExitDelay(isRunning)
+  const mounted = useExitDelay(isRunning, STEP_EXIT_MS)
   if (!mounted) return null
 
   const label = isRunning ? liveLabel : lastLabel
 
-  if (!label) {
-    // Pre-agent phase: nothing is thinking yet — loading animation, no text.
-    return (
-      <div
-        className={`-mx-1.5 mt-2 inline-flex items-center px-1.5 py-1 ${
-          isRunning ? '' : 'mila-step-out'
-        }`}
-      >
-        <Spinner size={18} tone="muted" />
-      </div>
-    )
-  }
-
   return (
-    /* The garland carries the "agent is thinking" signal and the live note
-       streams beside it. Both leave together when the run settles. */
-    <div
-      className={`-mx-1.5 mt-2 inline-flex max-w-full items-center gap-2 rounded-md px-1.5 py-1 text-left text-xs font-medium text-slate-500 ${
-        isRunning ? '' : 'mila-step-out'
-      }`}
-    >
-      <Thinking size={32} className="flex-shrink-0" />
-      {/* Two nested spans because two animations are in play and a single
-          element can only carry one `animation` declaration: the outer one
-          breathes on the garland's 7.2s beat, the inner one replays its
-          roll-up each time the text changes. The `key` is what makes that
-          replay happen — React remounts the node, restarting the animation. */}
-      <span className="mila-live-text min-w-0 truncate font-normal">
-        <span key={label} className="mila-thought-swap block truncate">
-          {label}
+    /* One row for both phases, so the pre-agent loader and the thinking line
+       are the same box in the same place at the same size — 32px mark, same
+       padding, same baseline. They used to be an 18px spinner in a narrower
+       row and a 32px garland in a wider one, so the moment the agent's first
+       note arrived the whole row jumped and changed shape.
+
+       Wrapped rather than carrying the collapse itself: `.mila-step-row` sets
+       `display: grid`, which would fight the row's own `inline-flex`. Same
+       construction the step rows use, so the thinking line and the steps under
+       it leave on identical terms. */
+    <div className="mila-step-row" data-leaving={isRunning ? undefined : 'true'}>
+      <div className="-mx-1.5 mt-2 inline-flex max-w-full items-center gap-2 rounded-md px-1.5 py-1 text-left text-[13px] font-medium text-slate-600">
+        {/* Both marks are mounted and crossfaded rather than swapped. They are
+            different animations on purpose — the Spinner's garland strings
+            itself for *loading*, the Thinking mark walks its gold bead for
+            *agent work*, and MILA never interchanges them — so the handover has
+            to read as one becoming the other rather than one being replaced.
+            Stacked absolutely in a fixed 32px box, so neither can shift the
+            row while the other fades. */}
+        <span className="relative inline-flex h-8 w-8 flex-shrink-0 items-center justify-center">
+          <span
+            className="absolute inset-0 inline-flex items-center justify-center transition-opacity duration-300 ease-out"
+            style={{ opacity: label ? 0 : 1 }}
+            aria-hidden={label ? true : undefined}
+          >
+            <Spinner size={32} tone="muted" />
+          </span>
+          <span
+            className="absolute inset-0 inline-flex items-center justify-center transition-opacity duration-300 ease-out"
+            style={{ opacity: label ? 1 : 0 }}
+            aria-hidden={label ? undefined : true}
+          >
+            <Thinking size={32} />
+          </span>
         </span>
-      </span>
+        {/* One span now. There were two because two animations were in play
+            and an element can only carry one `animation` declaration — the
+            outer breathing on the garland's beat, the inner replaying its
+            roll-up. The ambient breathe is gone (notes arrive often enough that
+            the roll-up already says "still working"), so the nesting went with
+            it. The `key` is what replays the roll-up: React remounts the node,
+            restarting the animation. */}
+        {label && (
+          <span key={label} className="mila-thought-swap min-w-0 truncate font-normal">
+            {label}
+          </span>
+        )}
+      </div>
     </div>
   )
 }

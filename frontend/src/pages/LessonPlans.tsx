@@ -1,17 +1,19 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { ChevronDown, Clock, ExternalLink, Plus, Sparkles } from 'lucide-react'
 import type { ToastMessage } from '../types'
 import Toast from '../components/ui/Toast'
 import { getErrorMessage } from '../utils/errors'
 import { useBatchSelection } from '../hooks/useBatchSelection'
+import { useWorkflowPrefill } from '../hooks/useWorkflowPrefill'
 import { useGenerationRun } from '../hooks/useGenerationRun'
 import { GenerationRunView } from '../components/generation/GenerationRunView'
+import { deriveGenerationStage, isWorkflowSettled } from '../components/generation/generationStage'
 import { GenerationAttachments } from '../components/generation/GenerationAttachments'
 import { PlanHintBanner } from '../components/generation/PlanHintBanner'
 import { listArtifacts, type Artifact } from '../services/artifactService'
 import { timeAgo } from '../utils/formatDate'
 import { artifactIcon } from '../utils/artifactIcons'
-import { Spinner } from '../design-system'
+import { Button, Spinner } from '../design-system'
 
 // Read from the shared table rather than named twice: the empty state used to
 // draw a FileText while the card four lines below it drew a BookOpen.
@@ -97,8 +99,26 @@ export default function LessonPlans() {
   const [form, setForm] = useState(INITIAL_FORM)
   const [toast, setToast] = useState<ToastMessage | null>(null)
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
-  const [listLoading, setListLoading] = useState(false)
+  // Starts true: nothing has been fetched yet, and `false` here reads as
+  // "loaded, and there is nothing" — which is what raced the prefill.
+  const [listLoading, setListLoading] = useState(true)
   const [showOptional, setShowOptional] = useState(false)
+  const prefill = useWorkflowPrefill(selectedBatchId, listLoading ? null : artifacts)
+  // Applied once per space, so re-selecting the same batch never overwrites
+  // what the lecturer has typed since — and clearing a field on purpose is not
+  // undone the moment anything else re-renders.
+  const prefilledFor = useRef('')
+
+  useEffect(() => {
+    if (!prefill || !selectedBatchId || prefilledFor.current === selectedBatchId) return
+    prefilledFor.current = selectedBatchId
+    setForm((current) => ({
+      ...current,
+      week: prefill.week,
+      topic: current.topic || prefill.topic,
+      priorKnowledge: current.priorKnowledge || prefill.priorKnowledge,
+    }))
+  }, [prefill, selectedBatchId])
 
   const showToast = useCallback((type: ToastMessage['type'], message: string) => {
     setToast({ type, message })
@@ -119,8 +139,12 @@ export default function LessonPlans() {
   }, [showToast])
 
   useEffect(() => {
-    if (selectedBatchId) void refreshArtifacts(selectedBatchId)
-    else setArtifacts([])
+    if (selectedBatchId) {
+      void refreshArtifacts(selectedBatchId)
+      return
+    }
+    setArtifacts([])
+    setListLoading(false)
   }, [selectedBatchId, refreshArtifacts])
 
   async function handleGenerate(e: FormEvent) {
@@ -158,14 +182,29 @@ export default function LessonPlans() {
 
       {started && selectedBatch ? (
         <div>
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-slate-700">Lesson plan generation</h2>
-            <button type="button" onClick={() => run.reset()}
-              className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
-              <Plus className="h-4 w-4" /> Generate another
-            </button>
+          {/* No heading: the page title above already names the workflow, and
+              repeating it in smaller type says nothing the reader did not just
+              read. The row exists only to hang the reset control off. */}
+          <div className="mb-3 flex items-center justify-end">
+            {/* Only once the workflow has finished. It used to appear the moment
+                a run started, so a tap mid-generation — or mid-approval —
+                discarded work in progress with no warning and no undo. */}
+            {isWorkflowSettled(deriveGenerationStage(run).stage) && (
+              <Button type="button" variant="secondary" size="sm" onClick={() => run.reset()}
+                leadingIcon={<Plus className="h-4 w-4" />}>
+                Generate another
+              </Button>
+            )}
           </div>
-          <div className="rounded-xl border border-slate-200 bg-white shadow-sm min-h-[24rem]">
+          {/* The floor is for the *working* stages, where thinking and a step
+              list need somewhere to grow without the card resizing under them.
+              Once there is a result it only leaves dead space: a short preview
+              card and two buttons sat in 384px with a third of it empty. */}
+          <div
+            className={`flex flex-col rounded-xl border border-slate-200 bg-white shadow-sm ${
+              isWorkflowSettled(deriveGenerationStage(run).stage) ? '' : 'min-h-[24rem]'
+            }`}
+          >
             <GenerationRunView batch={selectedBatch} run={run} accent="primary" />
           </div>
         </div>
@@ -187,6 +226,15 @@ export default function LessonPlans() {
               </select>
             </div>
 
+            {/* Filling a required field without saying so is the kind of help
+                that reads as a bug the first time someone notices it. One line,
+                and every value stays editable. */}
+            {prefill?.source === 'course-plan' && (
+              <p className="text-xs text-slate-500">
+                Prefilled from your Course Plan for week {prefill.week} — topic and what students already know.
+                Change anything that does not fit.
+              </p>
+            )}
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1">Week</label>

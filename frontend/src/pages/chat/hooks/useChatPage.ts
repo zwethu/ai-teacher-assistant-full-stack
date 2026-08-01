@@ -21,8 +21,10 @@ import {
   getChat,
   getChatRun,
   getChatAttachmentRagStatus,
+  CHAT_PAGE_SIZE,
   listChats,
   listMessages,
+  MESSAGE_PAGE_SIZE,
   sendMessage,
   uploadChatAttachment,
   deleteChatAttachment,
@@ -52,6 +54,7 @@ import type { RunUiState } from '../runTypes'
 import type { GenerateMode } from '../components/ChatConversation'
 import { buildGenerationRequest } from '../generationRequest'
 import { AUTO_ISSUED_METADATA } from '../utils/autoIssuedMessage'
+import { findRefinableOutline, refineModeForOutline } from '../utils/refinableOutline'
 
 type ChatLocationState = {
   batchId?: string
@@ -160,6 +163,25 @@ export function localOnlyMessages(previous: ChatMessage[], fetched: ChatMessage[
 }
 
 /**
+ * History the lecturer paged back to that a fetch of the *newest* page cannot
+ * contain, and which therefore must survive it.
+ *
+ * A poll or a re-hydrate asks for one page from the top. Left to itself it
+ * replaces the list wholesale, so scrolling back through six months of a
+ * conversation and then having a fallback poll fire would snap the transcript
+ * back to the last 50 messages with no warning. Anything strictly older than
+ * the oldest message in the incoming page is still true, and still ours.
+ */
+export function earlierThanPage(previous: ChatMessage[], fetched: ChatMessage[]): ChatMessage[] {
+  const oldestFetched = fetched[0]?.created_at
+  if (!oldestFetched) return []
+  const fetchedIds = new Set(fetched.map((item) => item.message_id))
+  return previous.filter(
+    (msg) => msg.created_at !== null && msg.created_at < oldestFetched && !fetchedIds.has(msg.message_id),
+  )
+}
+
+/**
  * Assemble what actually gets sent.
  *
  * Message `content` is the only channel the agent reads — `agent_gateway`
@@ -202,7 +224,7 @@ export function runHasAssistantMessage(messages: ChatMessage[], runId: string): 
   )
 }
 
-function collectRunIds(messages: ChatMessage[], activeChat: Chat | null): string[] {
+export function collectRunIds(messages: ChatMessage[], activeChat: Chat | null): string[] {
   const runIds = new Set<string>()
   const assistantMsgs = messages.filter((msg) => msg.role === 'assistant')
 
@@ -236,6 +258,12 @@ export function useChatPage() {
   // Per-run silence detector for the live channel. Previously a single shared
   // timeout, so two concurrent runs fought over one slot.
   const stallWatchdogRef = useRef(createStallWatchdog())
+  // Mirror of the RTDB connection flag, readable inside the stall callback.
+  // `.info/connected` fires promptly on subscribe, so by the time the watchdog
+  // trips, `true` here means the channel is healthy and the run is just quiet
+  // (schema-bound generation writes nothing for a minute or more) — poll
+  // silently. Anything else means the channel itself is in doubt — say so.
+  const runLiveConnectedRef = useRef<Record<string, boolean>>({})
   const runPollIntervalRef = useRef<Record<string, number>>({})
   const workflowModeRunIdsRef = useRef<Record<string, GenerateMode>>({})
   const scrollFrameRef = useRef<number | null>(null)
@@ -248,12 +276,35 @@ export function useChatPage() {
 
   const [chats, setChats] = useState<Chat[]>([])
   const [chatsLoading, setChatsLoading] = useState(false)
+  // Sidebar paging. Mirrors the message side: optimistic `true`, falsified only
+  // by a page shorter than asked for. The ref is the in-flight guard — the
+  // sidebar can fire several scroll events before React re-renders.
+  const [hasMoreChats, setHasMoreChats] = useState(true)
+  const [loadingMoreChats, setLoadingMoreChats] = useState(false)
+  const loadingMoreChatsRef = useRef(false)
+  // Read for the paging cursor, so `loadMoreChats` stays stable across the
+  // list growing. See `messagesRef`.
+  const chatsRef = useRef<Chat[]>([])
+  chatsRef.current = chats
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
 
   const [activeChat, setActiveChat] = useState<Chat | null>(null)
+  // Read for the paging cursor. `loadEarlierMessages` is handed to the
+  // transcript as a stable callback, so it must not close over `messages` —
+  // depending on the array would rebuild it on every streamed token.
+  const messagesRef = useRef<ChatMessage[]>([])
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  messagesRef.current = messages
   const [messagesLoading, setMessagesLoading] = useState(false)
+  // Paging backwards through a long conversation. `hasEarlierMessages` starts
+  // true and is only ever falsified by a short page — we cannot know whether
+  // there is more until we ask.
+  const [hasEarlierMessages, setHasEarlierMessages] = useState(true)
+  const [loadingEarlierMessages, setLoadingEarlierMessages] = useState(false)
+  // Guards against the scroll handler firing again mid-flight. State would not
+  // do: the transcript can fire several scroll events before React re-renders.
+  const loadingEarlierRef = useRef(false)
 
   const [input, setInput] = useState('')
   const [activeGenerateMode, setActiveGenerateMode] = useState<GenerateMode | null>(null)
@@ -347,8 +398,9 @@ export function useChatPage() {
   const loadChats = useCallback(async (batchId: string) => {
     setChatsLoading(true)
     try {
-      const data = await listChats(batchId)
+      const data = await listChats(batchId, { limit: CHAT_PAGE_SIZE })
       setChats(data)
+      setHasMoreChats(data.length >= CHAT_PAGE_SIZE)
       return data
     } catch (err) {
       console.error(err)
@@ -357,6 +409,40 @@ export function useChatPage() {
       setChatsLoading(false)
     }
   }, [])
+
+  /**
+   * The next page of the sidebar, oldest-first from where the list ends.
+   *
+   * The server counts `limit` in chats the lecturer can see — it skips the
+   * hidden workspace chat every generation run leaves behind — so a short page
+   * genuinely means the end. Deduped on arrival anyway, because a chat created
+   * while the request was in flight shifts nothing here but could in principle
+   * arrive twice.
+   */
+  const loadMoreChats = useCallback(async () => {
+    if (loadingMoreChatsRef.current || !hasMoreChats || !selectedBatch) return
+    const cursor = chatsRef.current.at(-1)?.created_at
+    if (!cursor) return
+
+    loadingMoreChatsRef.current = true
+    setLoadingMoreChats(true)
+    try {
+      const page = await listChats(selectedBatch.id, { limit: CHAT_PAGE_SIZE, before: cursor })
+      if (page.length < CHAT_PAGE_SIZE) setHasMoreChats(false)
+      if (page.length > 0) {
+        setChats((prev) => {
+          const known = new Set(prev.map((chat) => chat.chat_id))
+          const fresh = page.filter((chat) => !known.has(chat.chat_id))
+          return fresh.length > 0 ? [...prev, ...fresh] : prev
+        })
+      }
+    } catch (err) {
+      console.error(err)
+    } finally {
+      loadingMoreChatsRef.current = false
+      setLoadingMoreChats(false)
+    }
+  }, [hasMoreChats, selectedBatch])
 
   const selectChat = useCallback(
     (chat: Chat) => {
@@ -429,9 +515,13 @@ export function useChatPage() {
           return [chat, ...prev]
         })
 
-        const data = await listMessages(routeBatchId!, routeChatId!)
+        const data = await listMessages(routeBatchId!, routeChatId!, { limit: MESSAGE_PAGE_SIZE })
         if (cancelled) return
 
+        // A full page means there is probably more above it; a short one is the
+        // whole conversation. Set before the messages so the transcript never
+        // renders a page it thinks is complete and then changes its mind.
+        setHasEarlierMessages(data.length >= MESSAGE_PAGE_SIZE)
         setMessages((prev) => {
           if (prev.length > 0 && prev.every((msg) => msg.chat_id === chat.chat_id)) {
             return prev
@@ -465,6 +555,56 @@ export function useChatPage() {
     setMessages([])
     setRouteHydration('idle')
   }, [routeBatchId, routeChatId])
+
+  // A different conversation is a different history. Reset before its first
+  // page lands, so the previous chat's "no more above" never carries over.
+  useEffect(() => {
+    setHasEarlierMessages(true)
+    setLoadingEarlierMessages(false)
+    loadingEarlierRef.current = false
+  }, [routeChatId])
+
+  /**
+   * Fetch the page above the one on screen.
+   *
+   * The cursor is the oldest loaded message's timestamp, so it is derived from
+   * what is rendered rather than from a page counter — a message arriving at
+   * the bottom mid-scroll cannot shift it. Returns nothing; the transcript
+   * keeps the lecturer's reading position itself, since only it knows where
+   * that is on screen.
+   */
+  const loadEarlierMessages = useCallback(async () => {
+    if (loadingEarlierRef.current || !hasEarlierMessages) return
+    if (!routeBatchId || !routeChatId) return
+    const cursor = messagesRef.current.find((msg) => msg.created_at)?.created_at
+    if (!cursor) return
+
+    loadingEarlierRef.current = true
+    setLoadingEarlierMessages(true)
+    try {
+      const page = await listMessages(routeBatchId, routeChatId, {
+        limit: MESSAGE_PAGE_SIZE,
+        before: cursor,
+      })
+      if (page.length < MESSAGE_PAGE_SIZE) setHasEarlierMessages(false)
+      if (page.length > 0) {
+        setMessages((prev) => {
+          // The cursor is exclusive server-side, but a re-entrant call could
+          // still race one in. Cheap to be sure.
+          const known = new Set(prev.map((msg) => msg.message_id))
+          const fresh = page.filter((msg) => !known.has(msg.message_id))
+          return fresh.length > 0 ? [...fresh, ...prev] : prev
+        })
+      }
+    } catch (err) {
+      console.error(err)
+      // Left loadable: a failed page is a network blip, not the top of the
+      // conversation, and marking it done would strand the history for good.
+    } finally {
+      loadingEarlierRef.current = false
+      setLoadingEarlierMessages(false)
+    }
+  }, [hasEarlierMessages, routeBatchId, routeChatId])
 
   useEffect(() => {
     if (!selectedBatch) {
@@ -704,10 +844,22 @@ export function useChatPage() {
     }
   }, [])
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages.length, sending])
-
+  /**
+   * Take the lecturer to the bottom, deliberately.
+   *
+   * Following along is no longer this hook's job — `useStickToBottom` in the
+   * transcript watches the content's size and keeps it pinned frame by frame,
+   * which is the only way a step row easing its height open stays smooth. Two
+   * scrolls that used to live here are gone with it: one on every run event,
+   * which grew the page and then snapped after the animation rather than
+   * during it, and one on `messages.length`, which since paging landed would
+   * have fired on a *prepend* and thrown the lecturer to the end of the
+   * conversation they had just scrolled back through.
+   *
+   * What is left is the case the observer cannot infer: sending. They may be
+   * reading history when they send, and they still expect to be shown what
+   * they just wrote.
+   */
   function scrollToBottom(behavior: ScrollBehavior = 'smooth') {
     if (scrollFrameRef.current !== null) {
       window.cancelAnimationFrame(scrollFrameRef.current)
@@ -716,10 +868,6 @@ export function useChatPage() {
       scrollFrameRef.current = null
       messagesEndRef.current?.scrollIntoView({ behavior, block: 'end' })
     })
-  }
-
-  function anchorToBottomDuringLiveUpdate() {
-    scrollToBottom('auto')
   }
 
   async function handleNewChat(title = 'New Chat') {
@@ -769,11 +917,46 @@ export function useChatPage() {
     setQuotedReply('')
     setAttachmentErrors([])
     const generateMode = activeGenerateMode
+    // A reply while an outline awaits approval is an edit request for that
+    // outline — route it as refine_outline so the agent revises the current
+    // outline in one formatter call instead of restarting the whole workflow.
+    const refineTarget = findRefinableOutline(messages)
+    const refineMode = refineTarget ? refineModeForOutline(refineTarget) : ''
+    const refineApplies = Boolean(
+      refineTarget?.run_id &&
+        refineMode &&
+        (!generateMode || generateMode === refineMode),
+    )
     const started = await startRunInChat({
       batchId,
       chat,
       message: content,
       invoke: async () => {
+        if (refineApplies && refineTarget?.run_id && refineMode) {
+          const refineMeta = refineTarget.metadata || {}
+          const payload = {
+            batch_id: batchId,
+            chat_id: chatId,
+            workflow_type: `${refineMode}.generate`,
+            workflow_stage: 'outline' as const,
+            approval_action: 'refine_outline' as const,
+            approved_outline_run_id: refineTarget.run_id,
+            week: typeof refineMeta.week === 'number' ? refineMeta.week : undefined,
+            pending_artifact: true,
+            save_draft: false,
+            message: content,
+            connectors,
+            attachment_ids: attachmentIds,
+          }
+          const result = refineMode === 'course_blueprint'
+            ? await invokeAgent(payload)
+            : refineMode === 'lab'
+            ? await generateLab('', payload)
+            : refineMode === 'assessment'
+              ? await generateAssessment('', payload)
+              : await generateLessonPlan('', payload)
+          return result as StartRunResult
+        }
         // Email has no outline/preview stage: it routes through plain chat so the
         // backend's pending-email staging (which only runs when pending_artifact is
         // unset) can stage the draft for the Send/Schedule buttons.
@@ -797,7 +980,7 @@ export function useChatPage() {
         return result as StartRunResult
       },
       updateTitleIfNew: true,
-      workflowMode: generateMode,
+      workflowMode: refineApplies ? (refineMode as GenerateMode) : generateMode,
       attachmentSnapshots: attachmentsForMessage,
     })
     if (started) {
@@ -885,6 +1068,33 @@ export function useChatPage() {
           item.message_id !== originalUser.message_id,
       ),
     )
+
+    // The discarded run must not come back. Its chat record still names it as
+    // `active_run_id` — the backend deliberately does not clear that when a run
+    // ends (see the resubscribe effect) — and with its assistant message now
+    // deleted, `ensurePendingAssistantMessage` sees no message for the run and
+    // appends a fresh pending placeholder for it. That placeholder renders a
+    // thinking line and a step panel for a run nothing is listening to any
+    // more, so it hangs above the retry forever. `settledRunIdsRef` is the
+    // guard, and it is empty after a reload — which is exactly when someone
+    // reads a bad answer and retries it.
+    const discardedRunId = assistantMessage.run_id
+    if (discardedRunId) {
+      settledRunIdsRef.current.add(discardedRunId)
+      setRunStates((prev) => {
+        if (!(discardedRunId in prev)) return prev
+        const next = { ...prev }
+        delete next[discardedRunId]
+        return next
+      })
+      const forgetRun = (chat: Chat): Chat => ({
+        ...chat,
+        active_run_id: chat.active_run_id === discardedRunId ? '' : chat.active_run_id,
+        last_run_id: chat.last_run_id === discardedRunId ? '' : chat.last_run_id,
+      })
+      setActiveChat((prev) => (prev ? forgetRun(prev) : prev))
+      setChats((prev) => prev.map((item) => (item.chat_id === chatId ? forgetRun(item) : item)))
+    }
 
     // Stopped while the old turn was being deleted. The deletes have already
     // landed, so the turn stays gone — but no new run is started.
@@ -1171,6 +1381,10 @@ export function useChatPage() {
       ...(messageMetadata ? { metadata: messageMetadata } : {}),
     }
     setMessages((prev) => [...prev, optimisticUser])
+    // The one scroll the content observer cannot infer: they may have been
+    // reading back through the conversation when they sent, which leaves the
+    // transcript unpinned — and they still expect to be shown what they wrote.
+    scrollToBottom('smooth')
 
     try {
       const result = await invoke()
@@ -1243,7 +1457,6 @@ export function useChatPage() {
         },
       }
     })
-    anchorToBottomDuringLiveUpdate()
   }
 
   function appendRunEvent(runId: string, event: AgentRunEvent) {
@@ -1260,7 +1473,6 @@ export function useChatPage() {
         : [...current.events, event].sort((a, b) => (a.created_at || 0) - (b.created_at || 0))
       return { ...prev, [runId]: { ...current, events } }
     })
-    anchorToBottomDuringLiveUpdate()
   }
 
   function appendRunDelta(
@@ -1330,7 +1542,6 @@ export function useChatPage() {
         },
       ]
     })
-    anchorToBottomDuringLiveUpdate()
   }
 
   function updateRunStreamMeta(runId: string, meta: AgentRunStreamMeta) {
@@ -1365,7 +1576,6 @@ export function useChatPage() {
         },
       }
     })
-    anchorToBottomDuringLiveUpdate()
   }
 
   function updateRunStreamError(runId: string, streamError: string) {
@@ -1383,6 +1593,7 @@ export function useChatPage() {
   }
 
   function updateRunConnection(runId: string, liveConnected: boolean) {
+    runLiveConnectedRef.current[runId] = liveConnected
     setRunStates((prev) => {
       const current = prev[runId] || { status: 'running' as AgentRunStatus, events: [], steps: {} }
       return { ...prev, [runId]: { ...current, liveConnected } }
@@ -1429,7 +1640,6 @@ export function useChatPage() {
             : msg,
         )
     })
-    anchorToBottomDuringLiveUpdate()
   }
 
   /** Merge a saved email edit into the rendered message.
@@ -1499,7 +1709,11 @@ export function useChatPage() {
   ) {
     stallWatchdogRef.current.alive(runId, {
       onStall: () => {
-        updateRunStreamError(runId, STREAM_DELAY_MESSAGE)
+        // Quiet ≠ broken: only warn when the RTDB channel itself is down.
+        // The polling backstop engages either way.
+        if (runLiveConnectedRef.current[runId] !== true) {
+          updateRunStreamError(runId, STREAM_DELAY_MESSAGE)
+        }
         startFallbackPolling(batchId, chatId, runId, pendingId)
       },
       onRecover: () => {
@@ -1577,8 +1791,9 @@ export function useChatPage() {
           ? { ...msg, status: msg.role === 'assistant' ? 'done' : msg.status, pending: false }
           : msg,
       )
-      // A poll for THIS run must not wipe a message the server cannot know about.
-      return [...settled, ...localOnlyMessages(previous, fetched)]
+      // A poll for THIS run must not wipe a message the server cannot know
+      // about, nor the history the lecturer paged back to above this window.
+      return [...earlierThanPage(previous, fetched), ...settled, ...localOnlyMessages(previous, fetched)]
     }
 
     const latestAssistant = fetchedAssistant.at(-1)
@@ -1588,7 +1803,9 @@ export function useChatPage() {
         run_id: latestAssistant.run_id || runId,
       })
     }
-    return fetched.map((msg) => {
+    // Same as the branch above: this replaces the list with one page, so any
+    // history paged back to has to be carried across it.
+    return [...earlierThanPage(previous, fetched), ...fetched.map((msg): ChatMessage => {
       if (msg.message_id === latestAssistant?.message_id) {
         return {
           ...msg,
@@ -1601,7 +1818,7 @@ export function useChatPage() {
         return { ...msg, status: msg.role === 'assistant' ? 'done' : msg.status, pending: false }
       }
       return msg
-    })
+    })]
   }
 
   useEffect(() => {
@@ -1725,6 +1942,9 @@ export function useChatPage() {
     },
     chats,
     chatsLoading,
+    hasMoreChats,
+    loadingMoreChats,
+    loadMoreChats,
     renamingId,
     setRenamingId,
     renameValue,
@@ -1733,6 +1953,9 @@ export function useChatPage() {
     selectChat,
     messages,
     messagesLoading,
+    hasEarlierMessages,
+    loadingEarlierMessages,
+    loadEarlierMessages,
     input,
     setInput,
     activeGenerateMode,

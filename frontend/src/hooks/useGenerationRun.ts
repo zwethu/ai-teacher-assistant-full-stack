@@ -99,6 +99,12 @@ export function useGenerationRun(batch: Batch | null, persistKey?: string) {
   const runDeltaIndexesRef = useRef<Record<string, Set<number>>>({})
   // Per-run silence detector for the live RTDB channel; see streamStallWatchdog.
   const stallWatchdogRef = useRef(createStallWatchdog())
+  // Mirror of the RTDB connection flag, readable inside the stall callback.
+  // `.info/connected` fires promptly on subscribe, so by the time the watchdog
+  // trips, `true` here means the channel is healthy and the run is just quiet
+  // (schema-bound generation writes nothing for a minute or more) — poll
+  // silently. Anything else means the channel itself is in doubt — say so.
+  const runLiveConnectedRef = useRef<Record<string, boolean>>({})
   const pollIntervalRef = useRef<Record<string, number>>({})
   const chatRef = useRef<Chat | null>(null)
   useEffect(() => { chatRef.current = chat }, [chat])
@@ -295,6 +301,7 @@ export function useGenerationRun(batch: Batch | null, persistKey?: string) {
   }, [])
 
   const updateRunConnection = useCallback((runId: string, liveConnected: boolean) => {
+    runLiveConnectedRef.current[runId] = liveConnected
     setRunStates((prev) => {
       const current = prev[runId] || { status: 'running' as AgentRunStatus, events: [], steps: {} }
       return { ...prev, [runId]: { ...current, liveConnected } }
@@ -421,7 +428,11 @@ export function useGenerationRun(batch: Batch | null, persistKey?: string) {
     (chatId: string, runId: string, pendingId: string) => {
       stallWatchdogRef.current.alive(runId, {
         onStall: () => {
-          updateRunStreamError(runId, STREAM_DELAY_MESSAGE)
+          // Quiet ≠ broken: only warn when the RTDB channel itself is down.
+          // The polling backstop engages either way.
+          if (runLiveConnectedRef.current[runId] !== true) {
+            updateRunStreamError(runId, STREAM_DELAY_MESSAGE)
+          }
           startPolling(chatId, runId, pendingId)
         },
         onRecover: () => {

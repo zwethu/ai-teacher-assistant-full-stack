@@ -5,10 +5,16 @@ import { normalizeRunRows } from './normalizeRunRows'
 import { formatDuration, runDurationSeconds, runSummaryLabel } from './runDuration'
 import { StepsPanel } from './StepsPanel'
 import { useSettlingRows } from './useSettlingRows'
+import { useExitDelay } from '../../../../hooks/useExitDelay'
+import { STEP_EXIT_MS } from './StepsPanel'
 
 type Props = {
   run?: RunUiState
   isFinal: boolean
+  /** Start the settled list expanded. For surfaces whose own control already
+   *  promised the steps — a drawer labelled "View steps" that then asks for a
+   *  second tap is asking twice for one decision. */
+  defaultOpen?: boolean
 }
 
 /**
@@ -24,7 +30,7 @@ type Props = {
  * Once the run finishes, the full stored list becomes available behind the
  * "Completed N steps" toggle, collapsed by default.
  */
-export function RunDetails({ run, isFinal }: Props) {
+export function RunDetails({ run, isFinal, defaultOpen = false }: Props) {
   const status = run?.status || 'running'
   const rows = useMemo(
     () => (run ? normalizeRunRows(run.steps, run.events, status) : []),
@@ -34,12 +40,13 @@ export function RunDetails({ run, isFinal }: Props) {
   // Everything in flight, plus whatever just finished — a step dropped on the
   // frame its status flips never gets to show the "Done" it earned.
   const liveRows = useSettlingRows(rows)
-  const [open, setOpen] = useState(false)
+  const liveMounted = useExitDelay(isRunning, STEP_EXIT_MS)
+  const [open, setOpen] = useState(defaultOpen)
 
-  // Re-collapse whenever a run goes live again (a retry on the same row).
+  // Back to its default whenever a run goes live again (a retry on the same row).
   useEffect(() => {
-    if (isRunning) setOpen(false)
-  }, [isRunning])
+    if (isRunning) setOpen(defaultOpen)
+  }, [isRunning, defaultOpen])
 
   if (!run) return null
 
@@ -71,15 +78,30 @@ export function RunDetails({ run, isFinal }: Props) {
 
   const hasBanner = Boolean(run.runError) || (showStallNotice && Boolean(stallNotice))
 
-  if (isRunning) {
+  // The live panel outlives `isRunning` by one exit window. Swapping straight
+  // to the summary destroyed the presence list mid-flight, so every visible row
+  // vanished on the frame the run settled — the same defect as returning null
+  // between steps, at the other boundary. Handing it an empty list instead lets
+  // the rows collapse, and the summary waits for them.
+  if (isRunning || liveMounted) {
     // No header. The rows name themselves, and the thinking line directly below
     // already carries the "still working" signal — a count above steps that
     // disappear as they finish would only invite reading it as a total.
-    if (liveRows.length === 0 && !hasBanner) return null
     return (
-      <div className="space-y-2">
+      /* Deliberately NOT `liveRows.length === 0 && !hasBanner → null`.
+         The exit animation lives in `StepsPanel`'s presence list, which is
+         state inside that component — so returning null the moment the last
+         row settles destroyed the ghost before it could animate, and the row
+         popped instead of collapsing. That happens constantly: between two
+         sequential steps, and at the end of every fan-out. The panel decides
+         for itself when it has nothing left to show, ghosts included.
+
+         `empty:hidden` is what keeps that honest — while the panel renders
+         nothing this div has no child nodes at all, and would otherwise push
+         its own `mt-2` into the message for the whole gap between steps. */
+      <div className="mt-2 space-y-2 empty:hidden">
         {banners}
-        <StepsPanel rows={liveRows} live />
+        <StepsPanel rows={isRunning ? liveRows : []} live />
       </div>
     )
   }
@@ -97,7 +119,7 @@ export function RunDetails({ run, isFinal }: Props) {
   if (stepCount === 0 && !hasBanner) return null
 
   return (
-    <div className="space-y-2">
+    <div className="mt-2 space-y-2">
       {banners}
 
       {stepCount > 0 && (
@@ -120,7 +142,10 @@ export function RunDetails({ run, isFinal }: Props) {
           </button>
 
           <div
-            className="grid transition-all duration-200 ease-in-out"
+            /* Named property, and ease-out: this is a disclosure opening, and
+               `transition-all` puts every property that happens to change on
+               the same curve. Matches the composer's panel and the inspector. */
+            className="grid transition-[grid-template-rows] duration-300 ease-out"
             style={{ gridTemplateRows: open ? '1fr' : '0fr' }}
           >
             <div className="overflow-hidden">

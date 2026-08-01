@@ -46,6 +46,8 @@ import {
 } from '../../../services/artifactService'
 import type { RunUiState } from '../runTypes'
 import { splitSourcesSection } from '../utils/splitSourcesSection'
+import { codeLanguageLabel } from '../utils/codeLanguages'
+import { rehypeCodeHighlight } from '../utils/rehypeCodeHighlight'
 import { SourceFavicon } from './SourceFavicon'
 import {
   citationRemarkPlugin,
@@ -325,7 +327,7 @@ export const MessageRow = memo(function MessageRow({
                      it is legible as *quoted from the other side*.
                  Clamped to two lines: it is a pointer, not the content. */
               <div className="flex justify-end">
-                <div className="flex max-w-[75%] items-start gap-2.5 rounded-2xl rounded-br-md border border-white/75 bg-white/65 px-2.5 py-2 shadow-[0_4px_12px_rgba(63,47,107,0.07)] backdrop-blur-sm">
+                <div className="flex max-w-[75%] items-start gap-2.5 rounded-2xl rounded-br-md border border-violet-100 bg-white px-2.5 py-2 shadow-[0_4px_12px_rgba(63,47,107,0.07)]">
                   <span className="mt-0.5 inline-flex h-5 w-5 flex-none items-center justify-center rounded-md bg-violet-100 text-violet-700">
                     <CornerUpLeft className="h-3 w-3" />
                   </span>
@@ -374,13 +376,24 @@ export const MessageRow = memo(function MessageRow({
             {onQuoteReply && (
               <QuoteReplyOverlay sourceRef={quoteSourceRef} onQuote={onQuoteReply} />
             )}
-            {!isAwaitingAttachments && <RunDetails run={run} isFinal={isFinal} />}
-            {/* No wrapper: the panel renders nothing for a run it never saw
+            {/* Thinking first, steps under it.
+                The thinking line is a fixed-height, always-present liveness
+                signal; the step list changes height on every arrival and
+                departure. With the steps on top, the garland — the one thing
+                the eye rests on during a run — was shoved up and down by every
+                step that came or went. Stable anchor first, volatile detail
+                growing downward from it, and it reads in the order it happens:
+                thinking, then doing. After the run the line leaves and
+                RunDetails' "Worked for … · N steps" summary takes the same
+                slot, with the list hanging below it.
+
+                No wrapper: the panel renders nothing for a run it never saw
                 running, and a spacer div around it would leave that message
                 carrying a gap where a thinking line used to be. */}
             {run && !isAwaitingAttachments && (
               <ThinkingPanel events={run.events} runStatus={run.status} />
             )}
+            {!isAwaitingAttachments && <RunDetails run={run} isFinal={isFinal} />}
             <div className={run ? 'mt-3' : ''}>
               {isCancelled ? (
                 <div className="flex items-start gap-2 text-sm text-slate-600">
@@ -480,7 +493,7 @@ function MessageAttachments({
           key={attachment.attachment_id}
           type="button"
           onClick={() => setPreview(attachment)}
-          className="overflow-hidden rounded-xl border border-white/70 bg-white/70 shadow-sm transition-transform hover:scale-[1.03]"
+          className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition-transform hover:scale-[1.03]"
           aria-label={`Preview ${attachment.file_name}`}
           title={attachment.file_name}
         >
@@ -544,8 +557,8 @@ export function OutlineApprovalCard({
   // plan's icon — so the two outlines were indistinguishable at a glance.
   const Icon = artifactIcon(type)
   return (
-    <div className="overflow-hidden rounded-lg border border-violet-200/80 bg-white/75 shadow-sm backdrop-blur-sm">
-      <div className="flex items-center gap-3 border-b border-violet-100 bg-violet-50/40 px-4 py-3.5">
+    <div className="mila-card-in overflow-hidden rounded-lg border border-violet-200 bg-white shadow-sm">
+      <div className="flex items-center gap-3 border-b border-violet-100 bg-violet-50 px-4 py-3.5">
         <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-violet-100 text-violet-700">
           <Icon className="h-5 w-5" />
         </div>
@@ -557,14 +570,25 @@ export function OutlineApprovalCard({
       {/* metadata carries web_sources — without it every citation in the
           outline would be unresolvable and get dropped. */}
       <div className="px-5 py-4"><ResponseMarkdown content={msg.content} streaming={false} metadata={msg.metadata} /></div>
-      <div className="flex flex-col gap-2 border-t border-slate-200/80 bg-slate-50/50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-2 border-t border-slate-200 bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-xs leading-5 text-slate-500">Reply with changes to revise the outline before generation.</p>
         <Button
           type="button"
           disabled={disabled || locked}
-          /* The garland, not a bare label change: the button is the thing that
-             was pressed, so it is the thing that has to look busy. */
-          loading={generating && !locked}
+          /* Our own Spinner, not the Button's `loading` prop. That prop draws
+             the mark with `.maia-btn__spin` — `animation: maia-spin 1.1s
+             linear` — which is the logo rotating, not the brand's loader. The
+             design system ships `Spinner` precisely to override that: the
+             thread draws itself and the beads land in order over 3.2s, at any
+             size, so loading looks like one thing throughout the app.
+             `tone="inverse"` because this is a solid violet button, where a
+             violet garland would be invisible.
+
+             `disabled` still covers it — `generating` only ever happens while
+             the surface is sending, which is what sets `disabled`. */
+          leadingIcon={
+            generating && !locked ? <Spinner size={16} tone="inverse" /> : undefined
+          }
           onClick={onApprove}
           className="flex-shrink-0"
         >
@@ -575,7 +599,7 @@ export function OutlineApprovalCard({
             : approvalStatus === 'approved'
               ? 'Outline approved'
               : generating
-                ? type === 'course_blueprint' ? 'Generating course plan...' : 'Generating full preview...'
+                ? type === 'course_blueprint' ? 'Generating course plan' : 'Generating full preview'
                 : type === 'course_blueprint' ? 'Approve and generate course plan' : 'Approve and generate full preview'}
         </Button>
       </div>
@@ -661,7 +685,7 @@ export function ArtifactPreviewCard({
 
   return (
     <>
-      <div className="overflow-hidden rounded-xl border border-violet-200 bg-white/70 shadow-sm transition-colors hover:bg-white/80">
+      <div className="mila-card-in overflow-hidden rounded-xl border border-violet-200 bg-white shadow-sm hover:bg-slate-50">
         <button type="button" onClick={() => setOpen(true)} aria-haspopup="dialog" className="w-full px-4 py-4 text-left">
           <div className="flex items-start gap-3">
             <div className="mt-0.5 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-violet-100 text-violet-700">
@@ -1002,14 +1026,14 @@ export function WebSourcesList({
           const supportText = source.supports || citedText || ''
           const isGroundedLink = source.link_type === 'google_grounding_redirect'
           return (
-            <li key={source.url} className="flex gap-2 rounded-xl border border-white/50 bg-white/40 p-2.5 text-xs leading-5 shadow-sm backdrop-blur-md">
+            <li key={source.url} className="flex gap-2 rounded-xl border border-slate-200 bg-white p-2.5 text-xs leading-5 shadow-sm">
               <span className="font-semibold text-slate-400">[{source.index}]</span>
               <SourceFavicon domain={visibleDomain} url={source.url} className="mt-0.5 h-4 w-4 flex-shrink-0 rounded-sm" />
               <div className="min-w-0">
                 <div className="font-medium text-slate-800">{source.title}</div>
                 {visibleDomain && <div className="truncate text-slate-500">{visibleDomain}{isGroundedLink && <span className="ml-1 text-slate-400">· Google grounded link</span>}</div>}
                 {supportText && <div className="text-slate-600 line-clamp-2">{supportText}</div>}
-                <a href={source.url} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 rounded-md border border-white/60 bg-white/40 px-2 py-1 font-medium text-slate-600 shadow-sm backdrop-blur-md transition-colors hover:bg-white/70"><ExternalLink className="h-3 w-3" />Open source</a>
+                <a href={source.url} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 font-medium text-slate-600 shadow-sm transition-colors hover:bg-slate-50"><ExternalLink className="h-3 w-3" />Open source</a>
               </div>
             </li>
           )
@@ -1073,7 +1097,15 @@ export function MarkdownBlock({ content, webSources = [], onCitationSelect }: { 
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm, remarkMath, citationRemarkPlugin(sourceByIndex)]}
-      rehypePlugins={[rehypeKatex, [rehypeSanitize, katexSanitizeSchema]]}
+      /* Highlight before sanitize, never after: the tokeniser's output is
+         markup like any other and has to be validated, not trusted because we
+         generated it. It survives because `katexSanitizeSchema` already allows
+         `className` on every element — KaTeX needed that first. */
+      rehypePlugins={[
+        rehypeKatex,
+        rehypeCodeHighlight,
+        [rehypeSanitize, katexSanitizeSchema],
+      ]}
       components={{
         h1: ({ ...props }) => <h1 className="mb-4 mt-2 border-b border-slate-200 pb-2 text-2xl font-bold text-slate-950" {...props} />,
         h2: ({ ...props }) => <h2 className="mb-2 mt-7 text-xl font-semibold text-slate-900" {...props} />,
@@ -1091,7 +1123,7 @@ export function MarkdownBlock({ content, webSources = [], onCitationSelect }: { 
               <button
                 type="button"
                 onClick={() => onCitationSelect?.(source)}
-                className="mx-0.5 inline-flex max-w-[14rem] items-center gap-1 rounded-full border border-white/60 bg-white/40 px-1.5 py-0.5 align-baseline text-xs font-medium text-slate-700 no-underline shadow-sm backdrop-blur-md transition-colors hover:bg-white/70"
+                className="mx-0.5 inline-flex max-w-[14rem] items-center gap-1 rounded-full border border-violet-100 bg-white px-1.5 py-0.5 align-baseline text-xs font-medium text-slate-700 no-underline shadow-sm transition-colors hover:bg-violet-50"
                 title={`${source.title} — ${source.display_domain || source.domain}`}
               >
                 <SourceFavicon domain={source.display_domain || source.domain} url={source.url} className="h-3 w-3 flex-shrink-0 rounded-sm" />
@@ -1110,13 +1142,20 @@ export function MarkdownBlock({ content, webSources = [], onCitationSelect }: { 
           )
         },
         table: ({ ...props }) => (
-          <div className="my-3 max-w-full overflow-x-auto rounded-lg border border-slate-200">
+          /* Opaque, like every other block in a response. The transcript sits
+             on the academic canvas' colour wash, so a table with no fill let
+             that wash show straight through its body and left the header
+             reading as a gradient rather than a filled band. */
+          <div className="my-3 max-w-full overflow-x-auto rounded-lg border border-slate-200 bg-white">
             <table className="min-w-full border-collapse divide-y divide-slate-200 text-sm" {...props} />
           </div>
         ),
         th: ({ ...props }) => <th className="bg-violet-50 px-3 py-2.5 text-left font-semibold text-violet-900" {...props} />,
         td: ({ ...props }) => <td className="border-t border-slate-100 px-3 py-2.5 align-top leading-6" {...props} />,
-        code: ({ className, children, ...props }) => {
+        // `node` is destructured off, not spread: react-markdown passes the
+        // hast node to every component, and forwarding it put a literal
+        // node="[object Object]" attribute on the rendered <code>.
+        code: ({ node: _node, className, children, ...props }) => {
           if (!String(children).trim()) return null
           const isBlock = /language-/.test(className || '') || String(children).includes('\n')
           return isBlock ? (
@@ -1129,11 +1168,51 @@ export function MarkdownBlock({ content, webSources = [], onCitationSelect }: { 
             </code>
           )
         },
-        pre: ({ ...props }) => (
-          <pre className="my-4 max-w-full overflow-x-auto whitespace-pre rounded-xl border border-slate-800 bg-slate-950 px-4 py-4 font-mono text-slate-100 shadow-sm" {...props} />
-        ),
+        pre: ({ node, children, ...props }) => {
+          // The language lives on the inner `code`, which is where the fence
+          // put it and where rehype-highlight reads it from. `pre` is the only
+          // element that can carry a label, so it has to look down one level.
+          const child = (node?.children ?? []).find(
+            (item): item is typeof item & { properties?: Record<string, unknown> } =>
+              'tagName' in item && item.tagName === 'code',
+          )
+          const label = codeLanguageLabel(
+            [child?.properties?.className].flat().filter(Boolean).join(' '),
+          )
+          return (
+            /* Light, like the rest of the app. Code is a different material
+               from prose, but a black rectangle in a page of pale violet glass
+               is not a different material — it is a hole. The tint, the border
+               and the monospace face carry that distinction without changing
+               mode. The label sits inside the block so it travels with the code
+               when the page scrolls, and it is the only chrome: the message
+               already has its own copy control, and a second one here would be
+               two answers to the same question. */
+            <div className="relative my-4">
+              {label && (
+                <span className="pointer-events-none absolute right-3 top-2.5 select-none font-mono text-[11px] font-medium uppercase tracking-[0.08em] text-slate-500">
+                  {label}
+                </span>
+              )}
+              <pre
+                /* White with a violet-tinted edge, the same card language as
+                   the outline and artifact cards — a flat slate-50 slab read
+                   as cold and dull against the page's violet wash. Solid, not
+                   the glass used elsewhere: code has to stay legible, and
+                   translucency over a scrolling transcript is noise behind the
+                   one thing here that must be read exactly. */
+                className={`max-w-full overflow-x-auto whitespace-pre rounded-xl border border-violet-100 bg-white px-4 font-mono text-slate-900 shadow-sm ${
+                  label ? 'pb-4 pt-9' : 'py-4'
+                }`}
+                {...props}
+              >
+                {children}
+              </pre>
+            </div>
+          )
+        },
         blockquote: ({ ...props }) => (
-          <blockquote className="my-4 border-l-2 border-violet-300 bg-violet-50/60 px-4 py-2 text-violet-900" {...props} />
+          <blockquote className="my-4 border-l-2 border-violet-300 bg-violet-50 px-4 py-2 text-violet-900" {...props} />
         ),
       }}
     >
@@ -1185,7 +1264,7 @@ export function BlueprintSaveButton({
   }
 
   return (
-    <div className="mt-2">
+    <div className="mila-card-in mt-2">
       {isSaved ? (
         <span className="inline-flex items-center gap-1.5 text-sm font-medium text-violet-700">
           <Save className="h-4 w-4" /> Saved as course plan{savedVersion ? ` (v${savedVersion})` : ''}
@@ -1255,7 +1334,7 @@ export function GameCreateButton({
   }
 
   return (
-    <div className="mt-2">
+    <div className="mila-card-in mt-2">
       {created ? (
         <div className="space-y-2">
           <span className="inline-flex items-center gap-1.5 text-sm font-medium text-violet-700">
@@ -1539,7 +1618,7 @@ export function EmailActionButtons({
         )}
       </div>
       {showEdit && (
-        <div className="flex flex-col gap-2 rounded-lg border border-violet-100 bg-violet-50/60 p-3">
+        <div className="flex flex-col gap-2 rounded-lg border border-violet-100 bg-violet-50 p-3">
           <label className="text-xs font-semibold text-slate-600">
             Subject
             <input
@@ -1642,6 +1721,10 @@ export function ArtifactExportButton({
     typeof metadata.lecturer_doc_url === 'string' ? metadata.lecturer_doc_url : ''
   const initialStudentDocUrl =
     typeof metadata.student_doc_url === 'string' ? metadata.student_doc_url : ''
+  const initialLecturerFolderUrl =
+    typeof metadata.lecturer_drive_folder_url === 'string' ? metadata.lecturer_drive_folder_url : ''
+  const initialStudentFolderUrl =
+    typeof metadata.student_drive_folder_url === 'string' ? metadata.student_drive_folder_url : ''
   const [exporting, setExporting] = useState(false)
   const [result, setResult] = useState<LessonPlanExportResult | null>(
     initialDocUrl || initialFormUrl || initialLecturerDocUrl || initialStudentDocUrl
@@ -1652,6 +1735,8 @@ export function ArtifactExportButton({
           form_url: initialFormUrl,
           lecturer_doc_url: initialLecturerDocUrl,
           student_doc_url: initialStudentDocUrl,
+          lecturer_drive_folder_url: initialLecturerFolderUrl,
+          student_drive_folder_url: initialStudentFolderUrl,
           version: typeof metadata.version === 'number' ? metadata.version : undefined,
           drive_file_name:
             typeof metadata.drive_file_name === 'string' ? metadata.drive_file_name : undefined,
@@ -1692,7 +1777,12 @@ export function ArtifactExportButton({
   }, [artifactId, artifactType, batchId])
 
   const hasConfirmedLink = Boolean(
-    result?.doc_url || result?.form_url || result?.lecturer_doc_url || result?.student_doc_url,
+    result?.doc_url ||
+      result?.form_url ||
+      result?.lecturer_doc_url ||
+      result?.student_doc_url ||
+      result?.lecturer_drive_folder_url ||
+      result?.student_drive_folder_url,
   )
   const canExportPending = Boolean(
     pendingExportable &&
@@ -1701,9 +1791,14 @@ export function ArtifactExportButton({
       (pendingArtifactType === 'lesson_plan' || pendingArtifactType === 'lab' || pendingArtifactType === 'quiz'),
   )
 
+  // A confirmed link is always worth showing, whatever else is or is not set.
+  // `hasConfirmedLink` used to sit behind `!artifactId`, so a finished workflow
+  // whose message carried `doc_url` in its metadata but no `draft_artifact_id`
+  // rendered nothing at all — the run reached Done and the Google Doc it had
+  // just written was nowhere on the page.
   if (
     !isExportableArtifactType(artifactType) ||
-    (!canExportPending && (!artifactId || (!exportable && !hasConfirmedLink)))
+    (!hasConfirmedLink && !canExportPending && (!artifactId || !exportable))
   ) {
     return null
   }
@@ -1735,6 +1830,10 @@ export function ArtifactExportButton({
             student_doc_id: exported.student_doc_id || refreshed.student_doc_id,
             student_drive_file_name:
               exported.student_drive_file_name || refreshed.student_drive_file_name,
+            lecturer_drive_folder_url:
+              exported.lecturer_drive_folder_url || refreshed.lecturer_drive_folder_url,
+            student_drive_folder_url:
+              exported.student_drive_folder_url || refreshed.student_drive_folder_url,
           }
         } catch {
           // The export succeeded; keep the direct response if the follow-up read is unavailable.
@@ -1746,6 +1845,8 @@ export function ArtifactExportButton({
         form_url: delivered.form_url || '',
         lecturer_doc_url: delivered.lecturer_doc_url || '',
         student_doc_url: delivered.student_doc_url || '',
+        lecturer_drive_folder_url: delivered.lecturer_drive_folder_url || '',
+        student_drive_folder_url: delivered.student_drive_folder_url || '',
         pending_exportable: false,
         exportable: false,
       })
@@ -1783,16 +1884,26 @@ export function ArtifactExportButton({
         : 'Export to Google Docs'
 
   return (
-    <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3">
+    <div className="mila-card-in mt-4 flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3">
       {hasConfirmedLink ? (
         <>
           {artifactType === 'lab' ? (
-            <>
-              <ExportLink href={result?.lecturer_doc_url || result?.doc_url} label="Open Lecturer Guide" />
-              <ExportLink href={result?.student_doc_url} label="Open Student Instructions" />
-              <ExportLink href={result?.lab_files_folder_url} label="Open Lab Files" />
-              <ExportLink href={result?.lab_solutions_folder_url} label="Open Solutions (lecturer)" />
-            </>
+            result?.student_drive_folder_url || result?.lecturer_drive_folder_url ? (
+              // The week's folders hold the doc AND its materials — link there,
+              // not at individual docs (one share = the whole lab).
+              <>
+                <ExportLink href={result?.student_drive_folder_url} label="Open Student Lab Folder" />
+                <ExportLink href={result?.lecturer_drive_folder_url} label="Open Lecturer Lab Folder" />
+              </>
+            ) : (
+              // Labs exported before week folders existed only have doc links.
+              <>
+                <ExportLink href={result?.lecturer_doc_url || result?.doc_url} label="Open Lecturer Guide" />
+                <ExportLink href={result?.student_doc_url} label="Open Student Instructions" />
+                <ExportLink href={result?.lab_files_folder_url} label="Open Lab Files" />
+                <ExportLink href={result?.lab_solutions_folder_url} label="Open Solutions (lecturer)" />
+              </>
+            )
           ) : artifactType === 'quiz' ? (
             <ExportLink href={result?.form_url || result?.doc_url} label="Open Google Form" />
           ) : (
@@ -1854,9 +1965,11 @@ function artifactToExportResult(artifact: Artifact): LessonPlanExportResult {
     lecturer_doc_url: metadataString(artifact, 'lecturer_doc_url') || artifact.doc_url,
     lecturer_doc_id: metadataString(artifact, 'lecturer_doc_id') || artifact.doc_id,
     lecturer_drive_file_name: metadataString(artifact, 'lecturer_drive_file_name') || artifact.drive_file_name,
+    lecturer_drive_folder_url: metadataString(artifact, 'lecturer_drive_folder_url'),
     student_doc_url: metadataString(artifact, 'student_doc_url'),
     student_doc_id: metadataString(artifact, 'student_doc_id'),
     student_drive_file_name: metadataString(artifact, 'student_drive_file_name'),
+    student_drive_folder_url: metadataString(artifact, 'student_drive_folder_url'),
   }
 }
 
@@ -1893,9 +2006,16 @@ export function ThinkingIndicator() {
   // Pre-agent phase: the request was just sent — nothing is thinking yet, so no
   // garland and no text. The thinking mark is reserved for actual agent thoughts
   // (ThinkingPanel takes over once real thinking events stream in).
+  //
+  // Deliberately the same box as ThinkingPanel's row: same 32px mark, same
+  // padding, same negative inset. This is the first frame of a three-part
+  // handover — no run yet, then a run with no notes, then the notes — and it
+  // used to change size and position at every step of it.
   return (
-    <div className="py-1 pl-1">
-      <Spinner size={18} tone="muted" />
+    <div className="-mx-1.5 mt-2 inline-flex items-center px-1.5 py-1">
+      <span className="inline-flex h-8 w-8 items-center justify-center">
+        <Spinner size={32} tone="muted" />
+      </span>
     </div>
   )
 }

@@ -170,7 +170,10 @@ export function ChatSidePanel({
       return () => cancelAnimationFrame(frame)
     }
     setVisible(false)
-    const timeout = window.setTimeout(() => setRendered(false), 300)
+    // Matches the 200ms exit above, not the 300ms entrance — holding the
+    // portal for the longer figure left an invisible panel mounted over the
+    // page for 100ms after it had finished leaving.
+    const timeout = window.setTimeout(() => setRendered(false), 200)
     return () => window.clearTimeout(timeout)
   }, [open, initialSection])
 
@@ -535,8 +538,10 @@ export function ChatSidePanel({
       // readable while resources are open. Width animates from 0, so the
       // conversation gives up space rather than being covered.
       <aside
-        className={`shrink-0 overflow-hidden transition-[width] duration-300 ease-out ${
-          open ? 'w-[360px]' : 'w-0'
+        /* Asymmetric, per index.css: 300ms ease-out in, 200ms ease-in out. A
+           column giving space back should not take as long as one claiming it. */
+        className={`shrink-0 overflow-hidden transition-[width] ${
+          open ? 'w-[360px] duration-300 ease-out' : 'w-0 duration-200 ease-in'
         }`}
         aria-hidden={!open}
         aria-label="Chat links, files, and games"
@@ -557,16 +562,18 @@ export function ChatSidePanel({
       {rendered &&
         createPortal(
           <div
-            className={`fixed inset-0 z-[200] flex justify-end transition-colors duration-300 ${
-              visible ? 'bg-slate-950/40 backdrop-blur-sm' : 'bg-transparent'
+            className={`fixed inset-0 z-[200] flex justify-end transition-colors ${
+              visible ? 'bg-slate-950/40 backdrop-blur-sm duration-300' : 'bg-transparent duration-200'
             }`}
             onMouseDown={(event) => {
               if (event.target === event.currentTarget) onClose()
             }}
           >
             <aside
-              className={`flex h-full w-full max-w-md flex-col overflow-hidden bg-white shadow-2xl transition-transform duration-300 ease-out ${
-                visible ? 'translate-x-0' : 'translate-x-full'
+              className={`flex h-full w-full max-w-md flex-col overflow-hidden bg-white shadow-2xl transition-transform ${
+                visible
+                  ? 'translate-x-0 duration-300 ease-out'
+                  : 'translate-x-full duration-200 ease-in'
               }`}
               role="dialog"
               aria-modal="true"

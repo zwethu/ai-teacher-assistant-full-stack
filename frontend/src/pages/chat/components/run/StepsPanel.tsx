@@ -9,11 +9,12 @@ const STAGGER_MS = 45
 /** Past this the tail of a wide fan-out would feel like lag, not cascade. */
 const MAX_STAGGER_STEPS = 3
 /**
- * Must equal `.mila-step-out`'s duration in index.css. On the presence hook's
- * 200ms default the row was unmounted while its collapse still had 40ms to
- * run, so the last of the height vanished in one frame instead of easing shut.
+ * Must equal `.mila-step-row[data-leaving]`'s transition duration in index.css.
+ * On the presence hook's 200ms default the row was unmounted while its collapse
+ * still had time to run, so the last of the height vanished in one frame
+ * instead of easing shut.
  */
-const STEP_EXIT_MS = 240
+export const STEP_EXIT_MS = 180
 
 type Props = {
   rows: NormalizedRunRow[]
@@ -79,7 +80,12 @@ function LiveStepsPanel({ rows }: { rows: NormalizedRunRow[] }) {
       {entries.map(({ key, item, leaving }) => (
         <div
           key={key}
-          className={leaving ? 'mila-step-out' : 'mila-step-in'}
+          // One class in both states, flipped by an attribute. Swapping classes
+          // would work too, but this keeps a single transition definition on the
+          // element — which is what lets a row that is told to leave mid-entry
+          // reverse from where it actually is instead of jumping.
+          className="mila-step-row"
+          data-leaving={leaving ? 'true' : undefined}
           style={leaving ? undefined : { '--mila-step-delay': `${staggerOf(key)}ms` } as React.CSSProperties}
         >
           <div className="pb-1.5">

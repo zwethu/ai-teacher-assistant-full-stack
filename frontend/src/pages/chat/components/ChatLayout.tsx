@@ -19,6 +19,9 @@ type Props = Pick<
   | 'activeChat'
   | 'messages'
   | 'messagesLoading'
+  | 'hasEarlierMessages'
+  | 'loadingEarlierMessages'
+  | 'loadEarlierMessages'
   | 'runStates'
   | 'input'
   | 'setInput'
@@ -72,6 +75,9 @@ export function ChatLayout(props: Props) {
     activeChat,
     messages,
     messagesLoading,
+    hasEarlierMessages,
+    loadingEarlierMessages,
+    loadEarlierMessages,
     runStates,
     input,
     setInput,
@@ -282,6 +288,9 @@ export function ChatLayout(props: Props) {
             batchId={selectedBatch?.id}
             messages={messages}
             messagesLoading={messagesLoading}
+            hasEarlierMessages={hasEarlierMessages}
+            loadingEarlierMessages={loadingEarlierMessages}
+            onLoadEarlierMessages={loadEarlierMessages}
             runStates={runStates}
             showWelcome={showWelcome}
             sending={sending}

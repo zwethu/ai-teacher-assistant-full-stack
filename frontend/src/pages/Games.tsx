@@ -25,6 +25,7 @@ import { useBatchSelection } from '../hooks/useBatchSelection'
 import { useGenerationRun } from '../hooks/useGenerationRun'
 import { listArtifacts, type Artifact } from '../services/artifactService'
 import { gameTimeLimitMinutes } from '../lib/gameTiming'
+import { deriveGenerationStage, isWorkflowSettled } from '../components/generation/generationStage'
 import { artifactIcon } from '../utils/artifactIcons'
 import {
   deleteGame,
@@ -808,21 +809,26 @@ function GameGenerator({
       // Same width as the form it replaces, so hitting Generate doesn't snap the
       // panel to a different size mid-flow.
       <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
-          <h2 className="text-sm font-semibold text-slate-700">Game generation</h2>
-          <button
-            type="button"
-            onClick={() => {
-              run.reset()
-              setSelectedArtifactId(null)
-              setHasDeadline(false)
-              setDeadline('')
-              onCreated()
-            }}
-            className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
-            <Plus className="h-4 w-4" /> Build another
-          </button>
+        {/* No heading: the "Games" page title already names this, and repeating
+            it in smaller type says nothing the reader did not just read. */}
+        <div className="flex items-center justify-end border-b border-slate-200 px-5 py-3">
+          {isWorkflowSettled(deriveGenerationStage(run).stage) && (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                run.reset()
+                setSelectedArtifactId(null)
+                setHasDeadline(false)
+                setDeadline('')
+                onCreated()
+              }}
+              leadingIcon={<Plus className="h-4 w-4" />}
+            >
+              Build another
+            </Button>
+          )}
         </div>
         <div className="max-h-[70vh] min-h-[20rem] overflow-y-auto">
           <GenerationRunView

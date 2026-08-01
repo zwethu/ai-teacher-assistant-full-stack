@@ -17,6 +17,19 @@ export type GenerationStage =
   | 'failed'
   | 'cancelled'
 
+/**
+ * The workflow has produced its result, or stopped trying. Nothing is in
+ * flight and nothing is waiting on the lecturer.
+ *
+ * `outline_review` is deliberately not settled: the run has paused *on* the
+ * lecturer, and offering "Generate another" beside a card asking them to
+ * approve or refine invites throwing the outline away by reflex. The escape
+ * from that state is Request changes, which is right there.
+ */
+export function isWorkflowSettled(stage: GenerationStage): boolean {
+  return stage === 'preview' || stage === 'done' || stage === 'failed' || stage === 'cancelled'
+}
+
 export type DerivedStage = {
   stage: GenerationStage
   activeMessage: ChatMessage | null

@@ -15,6 +15,9 @@ export default function Chat() {
         activeChat={state.activeChat}
         messages={state.messages}
         messagesLoading={state.messagesLoading}
+        hasEarlierMessages={state.hasEarlierMessages}
+        loadingEarlierMessages={state.loadingEarlierMessages}
+        loadEarlierMessages={state.loadEarlierMessages}
         runStates={state.runStates}
         input={state.input}
         setInput={state.setInput}

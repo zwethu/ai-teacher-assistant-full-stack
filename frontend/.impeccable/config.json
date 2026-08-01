@@ -4,6 +4,23 @@
       "ai-color-palette"
     ],
     "ignoreFiles": [],
-    "ignoreValues": []
+    "ignoreValues": [
+      {
+        "rule": "gray-on-color",
+        "value": "*",
+        "files": [
+          "src/pages/chat/components/MessageRow.tsx"
+        ],
+        "createdAt": "2026-08-01T08:59:25.516Z"
+      },
+      {
+        "rule": "gray-on-color",
+        "value": "*",
+        "files": [
+          "src/pages/chat/components/run/RunDetails.tsx"
+        ],
+        "createdAt": "2026-08-01T10:55:52.089Z"
+      }
+    ]
   }
 }

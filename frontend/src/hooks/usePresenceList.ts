@@ -27,11 +27,17 @@ export function usePresenceList<T>(
   // the exit timer of something unrelated that is genuinely on its way out.
   const signature = live.map((entry) => entry.key).join(' ')
   const previous = useRef(live)
-  const [leaving, setLeaving] = useState<{ key: string; item: T; index: number }[]>([])
+  // `after` is the key of whatever sat directly above this item when it left.
+  // See the reinsertion below for why the index alone is not enough.
+  const [leaving, setLeaving] = useState<{ key: string; item: T; index: number; after: string | null }[]>([])
 
   useEffect(() => {
     const present = new Set(live.map((entry) => entry.key))
-    const gone = previous.current.filter((entry) => !present.has(entry.key))
+    const departing = previous.current.filter((entry) => !present.has(entry.key))
+    const gone = departing.map((entry) => ({
+      ...entry,
+      after: previous.current[entry.index - 1]?.key ?? null,
+    }))
     previous.current = live
     if (gone.length === 0) return
     setLeaving((current) => [
@@ -67,7 +73,14 @@ export function usePresenceList<T>(
   for (const entry of leaving) {
     // Re-attaching the same file before its ghost expires: the live one wins.
     if (present.has(entry.key)) continue
-    entries.splice(Math.min(entry.index, entries.length), 0, {
+    // Anchored to the neighbour it left behind, not to the index it used to
+    // hold. Those stop agreeing the moment anything else in the list moves —
+    // and with parallel agent steps, several rows come and go while one is
+    // still animating out, so a ghost pinned to a stale index visibly jumped
+    // to a different position on its way off screen.
+    const anchor = entry.after ? entries.findIndex((item) => item.key === entry.after) : -1
+    const at = anchor >= 0 ? anchor + 1 : Math.min(entry.index, entries.length)
+    entries.splice(at, 0, {
       key: entry.key,
       item: entry.item,
       leaving: true,

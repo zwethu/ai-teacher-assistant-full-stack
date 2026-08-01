@@ -10,6 +10,9 @@ import type { ChatAttachmentListItem } from '../../../entity/Chat'
 import type { UpdatePendingEmailResult } from '../../../services/chatService'
 import { Spinner, IconButton } from '../../../design-system'
 import { useScrollbarGutter } from '../../../hooks/useScrollbarGutter'
+import { useLoadEarlierOnScrollTop, useScrollAnchor } from '../../../hooks/useEarlierPaging'
+import { useStickToBottom } from '../../../hooks/useStickToBottom'
+import { useTurnMinHeight } from '../../../hooks/useTurnMinHeight'
 import { isAutoIssuedUserMessage } from '../utils/autoIssuedMessage'
 import type { PreviewableAttachment } from './AttachmentPreview'
 import { AttachmentCard, AttachmentViewer, attachmentStatusLabel } from './AttachmentPreview'
@@ -410,6 +413,10 @@ type MessagesPanelProps = {
   retryingMessageId?: string | null
   /** Outline message whose approval run is in flight, if any. */
   approvingOutlineMessageId?: string | null
+  /** Paging backwards. Absent on surfaces that show a whole short run. */
+  hasEarlierMessages?: boolean
+  loadingEarlierMessages?: boolean
+  onLoadEarlierMessages?: () => void
 }
 
 export function ChatMessagesPanel({
@@ -428,11 +435,31 @@ export function ChatMessagesPanel({
   onQuoteReply,
   retryingMessageId,
   approvingOutlineMessageId,
+  hasEarlierMessages = false,
+  loadingEarlierMessages = false,
+  onLoadEarlierMessages,
 }: MessagesPanelProps) {
   // This is the element the composer band overlays, so its scrollbar is the one
   // the band has to stay clear of.
   const scrollRef = useRef<HTMLElement | null>(null)
   useScrollbarGutter(scrollRef)
+  useLoadEarlierOnScrollTop(scrollRef, {
+    enabled: hasEarlierMessages && Boolean(onLoadEarlierMessages),
+    busy: loadingEarlierMessages,
+    onLoad: onLoadEarlierMessages,
+  })
+  useScrollAnchor(scrollRef, messages[0]?.message_id)
+  const contentRef = useRef<HTMLDivElement | null>(null)
+  useStickToBottom(scrollRef, contentRef)
+  // The newest turn starts at the lecturer's last message; everything after it
+  // — thinking, steps, the answer — grows into the space reserved below.
+  const turnRef = useRef<HTMLDivElement | null>(null)
+  const turnMinHeight = useTurnMinHeight({
+    scrollRef,
+    contentRef,
+    turnRef,
+    bottomInset: bottomInset ?? 0,
+  })
 
   const safeMessages = messages.filter(Boolean)
   const completedOutlineRunIds = new Set(
@@ -467,9 +494,27 @@ export function ChatMessagesPanel({
   // derivations above still see the turn that actually happened.
   const visibleMessages = safeMessages.filter((msg) => !isAutoIssuedUserMessage(msg))
 
+  // The newest turn is the lecturer's last message and everything after it.
+  // Given a floor of one viewport, thinking, steps and the answer all change
+  // size inside a box whose own height does not — so nothing above them moves.
+  //
+  // The boundary is found in `safeMessages`, not `visibleMessages`, because
+  // approving an outline starts a turn whose request is deliberately not
+  // rendered (see `isAutoIssuedUserMessage`). Looking only at what is on screen
+  // would put the boundary back at the *previous* question, making the turn
+  // include the whole outline card — reliably taller than a viewport, so the
+  // floor would go inert during full-preview generation. That is the longest
+  // step stream in the app and precisely the case this exists for.
+  const boundary = safeMessages.map((msg) => msg.role).lastIndexOf('user')
+  const turnIds = new Set(
+    boundary < 0 ? [] : safeMessages.slice(boundary).map((msg) => msg.message_id),
+  )
+  const history = visibleMessages.filter((msg) => !turnIds.has(msg.message_id))
+  const currentTurn = visibleMessages.filter((msg) => turnIds.has(msg.message_id))
+
   return (
     <main ref={scrollRef} className="flex-1 overflow-y-auto" style={{ paddingBottom: bottomInset }}>
-      <div className="max-w-3xl mx-auto px-4 py-8 min-h-full flex flex-col">
+      <div ref={contentRef} className="max-w-3xl mx-auto px-4 py-8 min-h-full flex flex-col">
         {messagesLoading ? (
           <div className="flex-1 flex items-center justify-center">
             <Spinner size={24} />
@@ -478,7 +523,60 @@ export function ChatMessagesPanel({
           welcomeContent
         ) : (
           <div className="space-y-8 pb-4">
-            {visibleMessages.map((msg) => (
+            {/* Reserved for as long as there is history above, not just while a
+                page is in flight: a row that appears when loading starts would
+                push the whole transcript down by its own height at the exact
+                moment the lecturer is reading it. Empty, it is a 40px gap at
+                the top of a conversation that continues above — which is what
+                it means. It leaves in the same commit the last page arrives in,
+                so `useScrollAnchor` absorbs both together. */}
+            {hasEarlierMessages && (
+              <div className="flex h-10 items-center justify-center" aria-live="polite">
+                {loadingEarlierMessages && (
+                  <span className="flex items-center gap-2 text-xs text-slate-400">
+                    <Spinner size={14} tone="muted" />
+                    Loading earlier messages
+                  </span>
+                )}
+              </div>
+            )}
+            {history.map(renderRow)}
+            {/* The newest turn, floored at one viewport. Everything the agent
+                does happens inside this box, so its contents can grow and
+                collapse without the document's height — and therefore the
+                bottom pin, and therefore the whole conversation — moving. */}
+            {/* Gated on the turn *existing*, not on it having anything visible
+                in it. Approving an outline sends a request the transcript
+                deliberately does not render, so keying this off `currentTurn`
+                left the box — and its floor — unrendered for the whole network
+                round trip. The reserved space then appeared at the same moment
+                the loading mark did, and the pin hauled the conversation up
+                underneath it. Reserving at the tap means the scroll happens
+                immediately and the mark arrives already in place. */}
+            {turnIds.size > 0 ? (
+              <div
+                ref={turnRef}
+                data-current-turn=""
+                className="space-y-8"
+                style={{ minHeight: turnMinHeight || undefined }}
+              >
+                {currentTurn.map(renderRow)}
+                {sending && !safeMessages.some((msg) => msg.pending) && <ThinkingIndicator />}
+              </div>
+            ) : (
+              // No turn at all — a chat with nothing in it yet. The indicator
+              // still has to show while the first request is on its way.
+              sending && !safeMessages.some((msg) => msg.pending) && <ThinkingIndicator />
+            )}
+          </div>
+        )}
+        <div ref={messagesEndRef} style={{ scrollMarginBottom: bottomInset }} />
+      </div>
+    </main>
+  )
+
+  function renderRow(msg: ChatMessage) {
+    return (
               <MessageRow
                 key={msg.message_id}
                 msg={msg}
@@ -494,16 +592,6 @@ export function ChatMessagesPanel({
                 onQuoteReply={onQuoteReply}
                 retrying={retryingMessageId === msg.message_id}
               />
-            ))}
-            {sending && !safeMessages.some((msg) => msg.pending) && <ThinkingIndicator />}
-          </div>
-        )}
-        {/* scroll-margin keeps `scrollIntoView({ block: 'end' })` from parking
-            the marker under the floating composer: it stops the same distance
-            up that the padding reserves, so auto-scroll and the re-pin below
-            settle on the identical resting position. */}
-        <div ref={messagesEndRef} style={{ scrollMarginBottom: bottomInset }} />
-      </div>
-    </main>
-  )
+    )
+  }
 }

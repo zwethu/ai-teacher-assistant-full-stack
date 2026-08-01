@@ -104,8 +104,12 @@ describe('the approve button while its run is in flight', () => {
   it('spins and says what it is doing', () => {
     const { container } = card(true)
 
-    expect(screen.getByText('Generating full preview...')).toBeTruthy()
-    expect(container.querySelector('.maia-btn__spin')).toBeTruthy()
+    expect(screen.getByText('Generating full preview')).toBeTruthy()
+    // `.maia-beadspin` is the designed loader — thread drawing itself, beads
+    // landing in order. `.maia-btn__spin` is the Button's own fallback, a plain
+    // 1.1s rotation of the logo, and must not be what a lecturer sees here.
+    expect(container.querySelector('.maia-beadspin')).toBeTruthy()
+    expect(container.querySelector('.maia-btn__spin')).toBeNull()
   })
 
   it('does not spin merely because the chat is busy with something else', () => {
@@ -114,6 +118,6 @@ describe('the approve button while its run is in flight', () => {
     const { container } = card(false, true)
 
     expect(screen.getByText('Approve and generate full preview')).toBeTruthy()
-    expect(container.querySelector('.maia-btn__spin')).toBeNull()
+    expect(container.querySelector('.maia-beadspin')).toBeNull()
   })
 })

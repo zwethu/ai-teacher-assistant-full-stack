@@ -28,6 +28,7 @@ import {
 import {
   createChat,
   deleteChat,
+  CHAT_PAGE_SIZE,
   listChats,
   updateChatTitle,
   uploadChatAttachment,
@@ -133,6 +134,10 @@ export function MaterialsTab({
   const navigate = useNavigate()
   const [chats, setChats] = useState<Chat[]>([])
   const [chatsLoading, setChatsLoading] = useState(true)
+  // Optimistic until a page comes back shorter than asked for — the endpoint
+  // returns a bare array, so a short page is the only end-of-list signal.
+  const [hasMoreChats, setHasMoreChats] = useState(true)
+  const [loadingMoreChats, setLoadingMoreChats] = useState(false)
   const [input, setInput] = useState('')
   const [creating, setCreating] = useState(false)
   // Matches the chat page's default so the toggle means the same thing here.
@@ -163,7 +168,9 @@ export function MaterialsTab({
     try {
       // One request. The preview rides along on each chat document, so this no
       // longer fans out into a messages fetch per chat on every visit.
-      setChats(await listChats(batchId))
+      const page = await listChats(batchId, { limit: CHAT_PAGE_SIZE })
+      setChats(page)
+      setHasMoreChats(page.length >= CHAT_PAGE_SIZE)
     } catch (err) {
       console.error(err)
       setChats([])
@@ -171,6 +178,27 @@ export function MaterialsTab({
       setChatsLoading(false)
     }
   }, [batchId])
+
+  /** The page below the one shown. Explicit rather than scroll-triggered: this
+   *  is a section of a scrolling page, not a pane with a bottom of its own. */
+  const loadOlderChats = useCallback(async () => {
+    const cursor = chats.at(-1)?.created_at
+    if (loadingMoreChats || !hasMoreChats || !cursor) return
+    setLoadingMoreChats(true)
+    try {
+      const page = await listChats(batchId, { limit: CHAT_PAGE_SIZE, before: cursor })
+      if (page.length < CHAT_PAGE_SIZE) setHasMoreChats(false)
+      setChats((prev) => {
+        const known = new Set(prev.map((chat) => chat.chat_id))
+        const fresh = page.filter((chat) => !known.has(chat.chat_id))
+        return fresh.length > 0 ? [...prev, ...fresh] : prev
+      })
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setLoadingMoreChats(false)
+    }
+  }, [batchId, chats, hasMoreChats, loadingMoreChats])
 
   useEffect(() => {
     void loadChats()
@@ -473,6 +501,17 @@ export function MaterialsTab({
                   </li>
                 ))}
               </ul>
+            )}
+            {hasMoreChats && !chatsLoading && chats.length > 0 && (
+              <button
+                type="button"
+                onClick={() => void loadOlderChats()}
+                disabled={loadingMoreChats}
+                className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {loadingMoreChats && <Spinner size={14} tone="muted" />}
+                {loadingMoreChats ? 'Loading...' : 'Show older sessions'}
+              </button>
             )}
           </div>
         </section>

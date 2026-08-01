@@ -11,6 +11,9 @@ const listChats = vi.fn()
 const listMessages = vi.fn()
 
 vi.mock('../../../services/chatService', () => ({
+  // The component reads the page size from the service module, so the mock has
+  // to carry it too — without it `listChats` is asked for `limit: undefined`.
+  CHAT_PAGE_SIZE: 30,
   listChats: (...args: unknown[]) => listChats(...args),
   listMessages: (...args: unknown[]) => listMessages(...args),
   createChat: vi.fn(),

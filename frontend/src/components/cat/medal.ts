@@ -1,6 +1,6 @@
-import type { BehaviorSummary } from '../../types/catGame.types';
+import type { BehaviorSummary, MedalTier } from '../../types/catGame.types';
 
-export type MedalTier = 'gold' | 'silver' | 'bronze';
+export type { MedalTier };
 
 export type Medal = {
   tier: MedalTier;

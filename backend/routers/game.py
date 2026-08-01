@@ -4,7 +4,7 @@ POST /batches/{batch_id}/games/from-run is the "Create game" button's target: it
 the game the agent staged on that run's pending artifact and writes the gameSessions doc.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from entity.GameSession import CreateGameRequest, UpdateGameRequest
 from services.game_service import (
@@ -13,6 +13,7 @@ from services.game_service import (
     GameNotFoundError,
     create_game_from_pending,
     delete_game,
+    export_results_csv,
     get_game,
     list_games,
     update_game,
@@ -66,6 +67,26 @@ async def get_batch_game(
     except Exception as exc:
         _raise_service_error(exc)
         raise
+
+
+@router.get("/{game_id}/results.csv")
+async def export_game_results(
+    batch_id: str, game_id: str, user: CurrentUser = Depends(get_current_user)
+) -> Response:
+    """One row per enrolled student, played or not. Generated here rather than in
+    the browser: the lecturer is not the owner of any attempt document, so doing
+    this client-side would mean rules exposing every student's attempt."""
+    del batch_id
+    try:
+        filename, csv_text = export_results_csv(game_id, user["uid"])
+    except Exception as exc:
+        _raise_service_error(exc)
+        raise
+    return Response(
+        content=csv_text,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.patch("/{game_id}", response_model=dict)

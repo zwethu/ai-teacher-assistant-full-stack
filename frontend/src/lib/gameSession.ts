@@ -1,4 +1,4 @@
-import { db } from './firebase';
+import { auth, db } from './firebase';
 import {
   doc,
   getDoc,
@@ -137,10 +137,15 @@ export async function getAttempt(
   return { id: snap.id, ...snap.data() } as StoredAttempt;
 }
 
-export async function saveAttempt(result: AttemptResult): Promise<void> {
+export async function saveAttempt(result: Omit<AttemptResult, 'email'>): Promise<void> {
   const attemptId = `${result.assessmentId}_${result.playerUid}`;
   const ref = doc(db, 'attempts', attemptId);
-  await setDoc(ref, { ...result, completedAt: serverTimestamp() });
+  // Email is taken from the session rather than passed down: an attempt is by
+  // definition the signed-in player's, and threading the address through the
+  // avatar picker, the mode picker, the route state and the game engine to
+  // reach this line would be four files of plumbing for a value already here.
+  const email = auth.currentUser?.email ?? '';
+  await setDoc(ref, { ...result, email, completedAt: serverTimestamp() });
 }
 
 // ─── Game Mode Choice Stats ──────────────────────────────────────

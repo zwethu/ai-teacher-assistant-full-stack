@@ -67,6 +67,9 @@ beforeEach(() => {
   generate.mockReset()
   removePendingAttachment.mockReset()
   pendingAttachments = []
+  // The chosen deadline is persisted per space so it survives leaving the page
+  // mid-run. That means it also survives between tests unless cleared.
+  sessionStorage.clear()
   useBatchSelection.mockReturnValue({
     batches: [batch],
     loading: false,
@@ -92,6 +95,14 @@ function renderPage() {
   )
 }
 
+/**
+ * Saved work lives behind a dialog, so the form asks one question — what is this
+ * built from — instead of making the lecturer pick a mechanism first.
+ */
+async function openSavedWork() {
+  await userEvent.click(screen.getByRole('button', { name: /Use saved work/ }))
+}
+
 describe('Games — source picker', () => {
   it('refuses to generate until a source is chosen', async () => {
     renderPage()
@@ -110,6 +121,7 @@ describe('Games — source picker', () => {
       { id: 'art-3', type: 'course_blueprint', title: 'Course Plan', batch_id: 'batch-1' },
     ])
     renderPage()
+    await openSavedWork()
 
     await waitFor(() => expect(screen.getByText('Week 3 — Test Doubles')).toBeTruthy())
     expect(screen.getByText('Week 4 Lab')).toBeTruthy()
@@ -119,9 +131,10 @@ describe('Games — source picker', () => {
   it('sends the artifact type and week so the agent reads the right saved work', async () => {
     listArtifacts.mockResolvedValue([lessonPlan])
     renderPage()
+    await openSavedWork()
 
     await waitFor(() => expect(screen.getByText('Week 3 — Test Doubles')).toBeTruthy())
-    await userEvent.click(screen.getByRole('button', { name: /Week 3 — Test Doubles/ }))
+    await userEvent.click(screen.getByRole('radio', { name: /Week 3 — Test Doubles/ }))
     await userEvent.click(screen.getByRole('button', { name: /Generate game/ }))
 
     await waitFor(() => expect(generate).toHaveBeenCalled())
@@ -136,6 +149,7 @@ describe('Games — source picker', () => {
   it('asks for 30 pairs by default and sends the chosen count', async () => {
     listArtifacts.mockResolvedValue([lessonPlan])
     renderPage()
+    await openSavedWork()
 
     await waitFor(() => expect(screen.getByText('Week 3 — Test Doubles')).toBeTruthy())
     const field = screen.getByLabelText('Number of pairs') as HTMLInputElement
@@ -145,7 +159,7 @@ describe('Games — source picker', () => {
 
     await userEvent.clear(field)
     await userEvent.type(field, '12')
-    await userEvent.click(screen.getByRole('button', { name: /Week 3 — Test Doubles/ }))
+    await userEvent.click(screen.getByRole('radio', { name: /Week 3 — Test Doubles/ }))
     await userEvent.click(screen.getByRole('button', { name: /Generate game/ }))
 
     await waitFor(() => expect(generate).toHaveBeenCalled())
@@ -155,9 +169,10 @@ describe('Games — source picker', () => {
   it('refuses a pair count the backend would reject', async () => {
     listArtifacts.mockResolvedValue([lessonPlan])
     renderPage()
+    await openSavedWork()
 
     await waitFor(() => expect(screen.getByText('Week 3 — Test Doubles')).toBeTruthy())
-    await userEvent.click(screen.getByRole('button', { name: /Week 3 — Test Doubles/ }))
+    await userEvent.click(screen.getByRole('radio', { name: /Week 3 — Test Doubles/ }))
     const field = screen.getByLabelText('Number of pairs')
     await userEvent.clear(field)
     await userEvent.type(field, '99')
@@ -189,9 +204,10 @@ describe('Games — source picker', () => {
   it('refuses a deadline that has already passed', async () => {
     listArtifacts.mockResolvedValue([lessonPlan])
     renderPage()
+    await openSavedWork()
 
     await waitFor(() => expect(screen.getByText('Week 3 — Test Doubles')).toBeTruthy())
-    await userEvent.click(screen.getByRole('button', { name: /Week 3 — Test Doubles/ }))
+    await userEvent.click(screen.getByRole('radio', { name: /Week 3 — Test Doubles/ }))
     await userEvent.click(screen.getByLabelText('Set a deadline'))
     // A valid future default must not be what makes the button clickable in the
     // negative case, so prove it is enabled first.
@@ -203,7 +219,7 @@ describe('Games — source picker', () => {
     expect(screen.getByRole('button', { name: /Generate game/ }).hasAttribute('disabled')).toBe(true)
   })
 
-  it('drops an uploaded file when saved work is picked instead', async () => {
+  it('drops an uploaded file when saved work is chosen instead', async () => {
     pendingAttachments = [
       {
         attachment_id: 'att-1',
@@ -218,9 +234,46 @@ describe('Games — source picker', () => {
     listArtifacts.mockResolvedValue([lessonPlan])
     renderPage()
 
-    await waitFor(() => expect(screen.getByText('Week 3 — Test Doubles')).toBeTruthy())
-    await userEvent.click(screen.getByRole('button', { name: /Week 3 — Test Doubles/ }))
+    // A pending upload still rides along with the generate call, so leaving it
+    // attached would send the agent both sources at once — the exact mix this
+    // form exists to prevent.
+    await openSavedWork()
+    await userEvent.click(screen.getByRole('radio', { name: /Week 3 — Test Doubles/ }))
 
     expect(removePendingAttachment).toHaveBeenCalledWith('att-1')
+  })
+
+  it('keeps the saved-work list out of the form until it is asked for', async () => {
+    listArtifacts.mockResolvedValue([lessonPlan])
+    renderPage()
+
+    await waitFor(() => expect(listArtifacts).toHaveBeenCalled())
+    expect(screen.queryByText('Week 3 — Test Doubles')).toBeNull()
+
+    await openSavedWork()
+    expect(screen.getByRole('radio', { name: /Week 3 — Test Doubles/ })).toBeTruthy()
+  })
+
+  it('closes the dialog on a pick and shows the chosen source on the form', async () => {
+    listArtifacts.mockResolvedValue([lessonPlan])
+    renderPage()
+    await openSavedWork()
+    await userEvent.click(screen.getByRole('radio', { name: /Week 3 — Test Doubles/ }))
+
+    // Dialog gone, choice visible where the lecturer left off.
+    expect(screen.queryByRole('radio')).toBeNull()
+    expect(screen.getByText('Week 3 — Test Doubles')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Generate game/ }).hasAttribute('disabled')).toBe(false)
+  })
+
+  it('lets the lecturer take the source back off', async () => {
+    listArtifacts.mockResolvedValue([lessonPlan])
+    renderPage()
+    await openSavedWork()
+    await userEvent.click(screen.getByRole('radio', { name: /Week 3 — Test Doubles/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Remove' }))
+
+    expect(screen.getByRole('button', { name: /Generate game/ }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('button', { name: /Use saved work/ })).toBeTruthy()
   })
 })

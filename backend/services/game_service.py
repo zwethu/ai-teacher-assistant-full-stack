@@ -325,3 +325,140 @@ def delete_game(game_id: str, lecturer_id: str) -> dict[str, Any]:
     game = get_game(game_id, lecturer_id)
     _games_col().document(game_id).delete()
     return {"gameId": game["gameId"], "deleted": True}
+
+
+# ─── Results export ─────────────────────────────────────────────────────────
+# One CSV per game session, for a lecturer who wants the marks in a spreadsheet.
+#
+# The join is deliberately shallow: an attempt carries the student's email,
+# nickname and medal because the player app copies them in at write time. The
+# alternative — reading players/{uid} per student on every export — costs a read
+# per student and needs rules letting a lecturer read every player profile, a
+# far wider door than a download button is worth.
+#
+# Rows come from the ROSTER, not from the attempts. A lecturer's real question
+# is "who still has not played", and an attempts-only export cannot answer it.
+
+ATTEMPTS_COLLECTION = "attempts"
+
+RESULT_COLUMNS = [
+    "email",
+    "name",
+    "nickname",
+    "played",
+    "medal",
+    "score",
+    "total_pairs",
+    "accuracy_percent",
+    "game_mode",
+    "avatar",
+    "duration_seconds",
+    "active_play_seconds",
+    "submissions",
+    "wrong_submissions",
+    "rounds_cleared",
+    "rounds_total",
+    "timed_out",
+    "completed_at",
+]
+
+
+def _seconds(value: Any) -> str:
+    """Milliseconds to whole seconds. Spreadsheets sort numbers, not '3m 20s'."""
+    if not isinstance(value, (int, float)):
+        return ""
+    return str(round(value / 1000))
+
+
+def _result_row(
+    student: dict[str, Any], attempt: dict[str, Any] | None, total_pairs: int
+) -> dict[str, str]:
+    row = {column: "" for column in RESULT_COLUMNS}
+    row["email"] = str(student.get("email") or "")
+    row["name"] = str(student.get("name") or "")
+    row["total_pairs"] = str(total_pairs)
+
+    if not attempt:
+        # A blank row rather than no row: this is how the lecturer sees who to chase.
+        row["played"] = "no"
+        return row
+
+    behavior = attempt.get("behavior") or {}
+    completed = attempt.get("completedAt")
+
+    row["played"] = "yes"
+    row["nickname"] = str(attempt.get("nickname") or "")
+    row["medal"] = str(attempt.get("medalTier") or "")
+    row["score"] = str(attempt.get("score") if attempt.get("score") is not None else "")
+    row["accuracy_percent"] = str(
+        attempt.get("accuracy") if attempt.get("accuracy") is not None else ""
+    )
+    row["game_mode"] = str(attempt.get("chosenGameMode") or "")
+    row["avatar"] = str(attempt.get("chosenAvatar") or "")
+    row["duration_seconds"] = _seconds(behavior.get("durationMs"))
+    row["active_play_seconds"] = _seconds(behavior.get("activePlayMs"))
+    row["submissions"] = str(behavior.get("submitCount", ""))
+    row["wrong_submissions"] = str(behavior.get("wrongSubmitCount", ""))
+    row["rounds_cleared"] = str(behavior.get("roundsCompleted", ""))
+    row["rounds_total"] = str(behavior.get("totalRounds", ""))
+    row["timed_out"] = "yes" if behavior.get("timedOut") else "no"
+    row["completed_at"] = completed.isoformat() if hasattr(completed, "isoformat") else ""
+    return row
+
+
+def export_results_csv(game_id: str, lecturer_id: str) -> tuple[str, str]:
+    """Return ``(filename, csv_text)`` for one game session's results.
+
+    Raises GameNotFoundError when the game is missing or belongs to someone else —
+    ownership is checked by ``get_game``, so this never widens access.
+    """
+    import csv
+    import io
+    import re
+
+    from services.batch_service import list_students
+
+    game = get_game(game_id, lecturer_id)
+    batch_id = str(game.get("batchId") or "")
+    total_pairs = len(game.get("items") or [])
+
+    attempts_by_email: dict[str, dict[str, Any]] = {}
+    unmatched: list[dict[str, Any]] = []
+    for doc in (
+        get_firestore()
+        .collection(ATTEMPTS_COLLECTION)
+        .where("assessmentId", "==", game_id)
+        .stream()
+    ):
+        data = doc.to_dict() or {}
+        email = str(data.get("email") or "").strip().lower()
+        if email:
+            attempts_by_email[email] = data
+        else:
+            unmatched.append(data)
+
+    rows: list[dict[str, str]] = []
+    for student in list_students(batch_id, lecturer_id):
+        email = str(student.get("email") or "").strip().lower()
+        rows.append(_result_row(student, attempts_by_email.pop(email, None), total_pairs))
+
+    # Anyone who played but is no longer on the roster (unenrolled, or signed in
+    # with a different address) still earned a row — dropping them would silently
+    # lose real results.
+    for leftover in list(attempts_by_email.values()) + unmatched:
+        rows.append(
+            _result_row({"email": leftover.get("email", ""), "name": ""}, leftover, total_pairs)
+        )
+
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=RESULT_COLUMNS, extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(rows)
+
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", str(game.get("title") or "game")).strip("-").lower()
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    filename = f"{slug or 'game'}-results-{stamp}.csv"
+
+    # Excel reads a BOM-less UTF-8 CSV as the local ANSI codepage, which turns Thai
+    # names into mojibake on the machine this is most likely to be opened on.
+    return filename, "\ufeff" + buffer.getvalue()

@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { CheckCircle, Confetti } from '@phosphor-icons/react';
 import type { GameItem, AnswerRecord, BehaviorSignals } from '../../../types/catGame.types';
 import CardBird from '../CardBird';
+import { useRoundSignals } from '../useRoundSignals';
 import { playSnap, playUnsnap } from '../juice';
 
 type Props = {
@@ -40,41 +41,17 @@ export default function BucketFill({ items, timeUp, countUnplaced = true, sideba
   const containerRef = useRef<HTMLDivElement>(null);
   const bucketRefs   = useRef<(HTMLDivElement | null)[]>([]);
 
-  // ─── Behavior tracking refs (identical signals to the other modes) ──────
-  const startTimeRef        = useRef<number>(Date.now());
-  const firstActionRef      = useRef<number | null>(null);
-  const submitCountRef      = useRef(0);
-  const wrongSubmitCountRef = useRef(0);
-  const totalWrongRef       = useRef(0);
-  const lastFeedbackTimeRef = useRef<number | null>(null);
-  const reviewTimesRef      = useRef<number[]>([]);
-  const finishedRef         = useRef(false);
-
-  function buildSignals(): BehaviorSignals {
-    return {
-      firstActionDelayMs:     firstActionRef.current ? firstActionRef.current - startTimeRef.current : 0,
-      submitCount:            submitCountRef.current,
-      wrongSubmitCount:       wrongSubmitCountRef.current,
-      totalWrongLinksOrPairs: totalWrongRef.current,
-      reviewTimesMs:          reviewTimesRef.current,
-    };
-  }
+  // ─── Behavior tracking (shared with the other modes) ────────────────────
+  const finishedRef = useRef(false);
+  const { resetRound, recordFirstAction, recordSubmit, buildSignals } = useRoundSignals();
 
   useEffect(() => {
     setPlacements([]);
     setDragChip(null);
     setDragPos(null);
-    startTimeRef.current = Date.now();
-    firstActionRef.current = null;
+    resetRound();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items]);
-
-  function recordFirstAction() {
-    if (firstActionRef.current === null) firstActionRef.current = Date.now();
-    if (lastFeedbackTimeRef.current !== null) {
-      reviewTimesRef.current.push(Date.now() - lastFeedbackTimeRef.current);
-      lastFeedbackTimeRef.current = null;
-    }
-  }
 
   const chipPlacement   = (chipId: string) => placements.find(p => p.chipId === chipId);
   const bucketPlacement = (bi: number)     => placements.find(p => p.bucketIndex === bi);
@@ -138,7 +115,6 @@ export default function BucketFill({ items, timeUp, countUnplaced = true, sideba
     if (!allFilled) return;
     recordFirstAction();
 
-    submitCountRef.current += 1;
     let wrongCount = 0;
     const answers: AnswerRecord[] = [];
     const updated: Placement[] = [];
@@ -161,10 +137,9 @@ export default function BucketFill({ items, timeUp, countUnplaced = true, sideba
       setCelebrating(new Set(items.map(i => i.id)));
       setTimeout(() => setCelebrating(new Set()), 2000);
     }
-    totalWrongRef.current += wrongCount;
+    recordSubmit(wrongCount);
 
     if (wrongCount > 0) {
-      wrongSubmitCountRef.current += 1;
       onWrong();
       // Wrong chips bounce back to the tray; correct ones stay locked.
       setPlacements(updated.filter(p => p.state === 'correct'));
@@ -172,8 +147,6 @@ export default function BucketFill({ items, timeUp, countUnplaced = true, sideba
       onCorrect();
       setPlacements(updated);
     }
-
-    lastFeedbackTimeRef.current = Date.now();
 
     if (wrongCount === 0) {
       finishedRef.current = true;

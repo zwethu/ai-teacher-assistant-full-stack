@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { CheckCircle } from '@phosphor-icons/react';
 import type { GameItem, AnswerRecord, BehaviorSignals, AvatarType } from '../../../types/catGame.types';
 import CardBird from '../CardBird';
+import { useRoundSignals } from '../useRoundSignals';
 import { playSnap, playUnsnap } from '../juice';
 
 type Props = {
@@ -44,35 +45,19 @@ export default function RopeAndLink({ items, timeUp, countUnplaced = true, sideb
   const svgRef = useRef<SVGSVGElement>(null);
   const [svgSize, setSvgSize] = useState({ w: 0, h: 0 });
 
-  // ─── Behavior tracking refs ─────────────────────────────────────────────
-  const startTimeRef = useRef<number>(Date.now());
-  const firstActionRef = useRef<number | null>(null);
-  const submitCountRef = useRef(0);
-  const wrongSubmitCountRef = useRef(0);
-  const totalWrongLinksRef = useRef(0);
-  const lastFeedbackTimeRef = useRef<number | null>(null);
-  const reviewTimesRef = useRef<number[]>([]);
+  // ─── Behavior tracking ──────────────────────────────────────────────────
   const finishedRef = useRef(false);
-
-  function buildSignals(): BehaviorSignals {
-    return {
-      firstActionDelayMs: firstActionRef.current ? firstActionRef.current - startTimeRef.current : 0,
-      submitCount: submitCountRef.current,
-      wrongSubmitCount: wrongSubmitCountRef.current,
-      totalWrongLinksOrPairs: totalWrongLinksRef.current,
-      reviewTimesMs: reviewTimesRef.current,
-    };
-  }
+  const { resetRound, recordFirstAction, recordSubmit, buildSignals } = useRoundSignals();
 
   useEffect(() => {
-    startTimeRef.current = Date.now();
-    firstActionRef.current = null;
+    resetRound();
     const el = containerRef.current;
     if (!el) return;
     const ro = new ResizeObserver(() => setSvgSize({ w: el.offsetWidth, h: el.offsetHeight }));
     ro.observe(el);
     setSvgSize({ w: el.offsetWidth, h: el.offsetHeight });
     return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const getCenter = useCallback((el: HTMLDivElement | null) => {
@@ -81,16 +66,6 @@ export default function RopeAndLink({ items, timeUp, countUnplaced = true, sideb
     const r = el.getBoundingClientRect();
     return { x: r.left + r.width / 2 - cr.left, y: r.top + r.height / 2 - cr.top };
   }, []);
-
-  function recordFirstAction() {
-    if (firstActionRef.current === null) {
-      firstActionRef.current = Date.now();
-    }
-    if (lastFeedbackTimeRef.current !== null) {
-      reviewTimesRef.current.push(Date.now() - lastFeedbackTimeRef.current);
-      lastFeedbackTimeRef.current = null;
-    }
-  }
 
   function isRightConnected(idx: number) {
     return connections.some(c => c.rightIndex === idx && c.state !== 'wrong');
@@ -159,7 +134,6 @@ export default function RopeAndLink({ items, timeUp, countUnplaced = true, sideb
     if (!allConnected) return;
     recordFirstAction();
 
-    submitCountRef.current += 1;
     let wrongCount = 0;
     const answers: AnswerRecord[] = [];
     const updatedConns: Connection[] = [];
@@ -183,17 +157,14 @@ export default function RopeAndLink({ items, timeUp, countUnplaced = true, sideb
       setCelebrating(new Set(items.map(i => i.id)));
       setTimeout(() => setCelebrating(new Set()), 2000);
     }
-    totalWrongLinksRef.current += wrongCount;
+    recordSubmit(wrongCount);
     if (wrongCount > 0) {
-      wrongSubmitCountRef.current += 1;
       onWrong();
       setConnections(updatedConns.filter(c => c.state === 'correct'));
     } else {
       onCorrect();
       setConnections(updatedConns);
     }
-
-    lastFeedbackTimeRef.current = Date.now();
 
     if (wrongCount === 0) {
       finishedRef.current = true;

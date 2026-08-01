@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { CheckCircle, Question, Lightbulb } from '@phosphor-icons/react';
 import type { GameItem, AnswerRecord, BehaviorSignals } from '../../../types/catGame.types';
 import CardBird from '../CardBird';
+import { useRoundSignals } from '../useRoundSignals';
 import { playSnap, playUnsnap } from '../juice';
 
 type Card = {
@@ -39,24 +40,8 @@ export default function MatchAndTreat({ items, timeUp, countUnplaced = true, sid
   const [playerPairs, setPlayerPairs] = useState<Record<string, string>>({}); // bidirectional: cardId -> cardId
   const [celebrating, setCelebrating] = useState<Set<string>>(new Set());     // pairIds that just turned correct
 
-  const startTimeRef        = useRef<number>(Date.now());
-  const firstActionRef      = useRef<number | null>(null);
-  const submitCountRef      = useRef(0);
-  const wrongSubmitCountRef = useRef(0);
-  const totalWrongPairsRef  = useRef(0);
-  const lastFeedbackTimeRef = useRef<number | null>(null);
-  const reviewTimesRef      = useRef<number[]>([]);
-  const finishedRef         = useRef(false);
-
-  function buildSignals(): BehaviorSignals {
-    return {
-      firstActionDelayMs:     firstActionRef.current ? firstActionRef.current - startTimeRef.current : 0,
-      submitCount:            submitCountRef.current,
-      wrongSubmitCount:       wrongSubmitCountRef.current,
-      totalWrongLinksOrPairs: totalWrongPairsRef.current,
-      reviewTimesMs:          reviewTimesRef.current,
-    };
-  }
+  const finishedRef = useRef(false);
+  const { resetRound, recordFirstAction, recordSubmit, buildSignals } = useRoundSignals();
 
   useEffect(() => {
     const allCards: Card[] = [];
@@ -68,17 +53,9 @@ export default function MatchAndTreat({ items, timeUp, countUnplaced = true, sid
     setSelected(null);
     setMatchStates({});
     setPlayerPairs({});
-    startTimeRef.current = Date.now();
-    firstActionRef.current = null;
+    resetRound();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items]);
-
-  function recordFirstAction() {
-    if (firstActionRef.current === null) firstActionRef.current = Date.now();
-    if (lastFeedbackTimeRef.current !== null) {
-      reviewTimesRef.current.push(Date.now() - lastFeedbackTimeRef.current);
-      lastFeedbackTimeRef.current = null;
-    }
-  }
 
   function handleCardClick(card: Card) {
     recordFirstAction();
@@ -149,7 +126,6 @@ export default function MatchAndTreat({ items, timeUp, countUnplaced = true, sid
     if (!allPaired) return;
     recordFirstAction();
 
-    submitCountRef.current += 1;
     let wrongCount = 0;
     const newMatchStates: Record<string, MatchState> = {};
     const answers: AnswerRecord[] = [];
@@ -164,7 +140,7 @@ export default function MatchAndTreat({ items, timeUp, countUnplaced = true, sid
       if (!isCorrect) wrongCount++;
     });
 
-    totalWrongPairsRef.current += wrongCount;
+    recordSubmit(wrongCount);
 
     // The flock flies only when the WHOLE round comes back clean — birds on
     // each newly-matched pair made a half-right board feel like a win.
@@ -174,7 +150,6 @@ export default function MatchAndTreat({ items, timeUp, countUnplaced = true, sid
     }
 
     if (wrongCount > 0) {
-      wrongSubmitCountRef.current += 1;
       onWrong();
       setPlayerPairs(prev => {
         const next = { ...prev };
@@ -192,7 +167,6 @@ export default function MatchAndTreat({ items, timeUp, countUnplaced = true, sid
     }
 
     setMatchStates(newMatchStates);
-    lastFeedbackTimeRef.current = Date.now();
 
     if (wrongCount === 0) {
       finishedRef.current = true;

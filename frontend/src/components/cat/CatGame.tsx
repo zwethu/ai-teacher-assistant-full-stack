@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { FastForward } from '@phosphor-icons/react';
+import { FastForward, ArrowsClockwise } from '@phosphor-icons/react';
 import type {
   AnswerRecord, GameMode, GameItem, AvatarType,
-  CatMood, BehaviorSignals, BehaviorSummary,
+  CatMood, BehaviorSignals, BehaviorSummary, RoundSummary, TimedRun,
 } from '../../types/catGame.types';
 import { MOCK_ITEMS } from './mockData';
 import CatSprite from './CatSprite';
@@ -15,10 +15,16 @@ import MusicToggle from './MusicToggle';
 import GameGuide from './GameGuide';
 import PageSpinner from '../ui/PageSpinner';
 import { playRoundClear, playWrong } from './juice';
+import { computeMedal } from './medal';
 import { useMusic } from './useMusic';
 import { saveAttempt, startTimedRun } from '../../lib/gameSession';
 import { gameTimeLimitMs } from '../../lib/gameTiming';
 import './CatGame.css';
+// The can't-reach-the-server card below is the same family as the entry page's
+// gates (invalid link, not enrolled, past deadline), so it wears their clothes.
+// Imported explicitly rather than leaning on the entry page having loaded first
+// — this component also renders from the standalone preview route.
+import '../../pages/PlayEntryPage.css';
 
 // Static gameplay parameters (methodology: defined in the engine, not by AI).
 // Shared with the lecturer's generator form so the round length it quotes and
@@ -43,22 +49,86 @@ function useDemoMode() {
   );
 }
 
+// ─── Anchoring the run to the server clock ─────────────────────────────────
+// This used to fail OPEN: if the anchor call threw, the error was logged and
+// the player kept a fresh full-length clock. That was a working cheat — block
+// Firestore's write channel in devtools, reload, and the countdown resets every
+// time, which is exactly the "go look the answers up and come back" case the
+// server anchor exists to stop.
+//
+// So an UNREACHABLE server now fails CLOSED. Real network blips are absorbed by
+// retrying first; only a persistent failure reaches the student, and then as a
+// retryable screen rather than a lockout — the run doc lives on the server, so a
+// later retry resumes the genuine remaining time rather than handing out a new one.
+//
+// A REJECTED write is a different animal and must not be treated the same way.
+// `permission-denied` means the project has no rules for `gameRuns`, i.e. the
+// timed-run feature was never provisioned. A student cannot manufacture that by
+// pulling their network — going offline raises `unavailable`, never
+// `permission-denied` — so the cheat this guard exists to stop is unaffected,
+// while treating it as fatal would lock every honest student out of an exam
+// because of an ops gap they cannot see or fix. So: play on a local clock, and
+// make enough noise in the console that whoever deploys sees why.
+const ANCHOR_RETRY_DELAYS_MS = [400, 1200];
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+type AnchorResult =
+  | { kind: 'anchored'; run: TimedRun }
+  /** Rules rejected the write — the server has no timed-run support configured. */
+  | { kind: 'unconfigured' }
+  /** Server could not be reached. Retrying may genuinely help. */
+  | { kind: 'unreachable' };
+
+function isPermissionDenied(error: unknown): boolean {
+  const code = (error as { code?: unknown })?.code;
+  return code === 'permission-denied';
+}
+
+async function anchorRun(assessmentId: string, playerUid: string): Promise<AnchorResult> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const run = await startTimedRun(assessmentId, playerUid);
+      if (run) return { kind: 'anchored', run };
+      // A null run is the same problem wearing a different hat: the read-back
+      // found no doc, so we have no idea when this run started.
+    } catch (e) {
+      if (isPermissionDenied(e)) {
+        console.error(
+          'Timed runs are not provisioned: Firestore rejected the write to `gameRuns`. ' +
+            'Deploy a `/gameRuns/{runId}` rule (see docs/firestore.rules) or the countdown ' +
+            'cannot be anchored to the server clock and students play on a local timer.',
+          e,
+        );
+        return { kind: 'unconfigured' };
+      }
+      console.error('Could not anchor the timer to the server clock:', e);
+    }
+    if (attempt >= ANCHOR_RETRY_DELAYS_MS.length) return { kind: 'unreachable' };
+    await sleep(ANCHOR_RETRY_DELAYS_MS[attempt]);
+  }
+}
+
 function chunk<T>(arr: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
   return out;
 }
 
-/** Per-page signals → one summary. Sums the counters, keeps the FIRST page's
- *  planning delay (that's the "puzzle shown → first move" beat; later pages
- *  measure a warmed-up player and would dilute it). */
-function mergeSignals(pages: BehaviorSignals[]): BehaviorSignals {
+/** Per-round data → session totals. Sums the counters, keeps the FIRST round's
+ *  planning delay (that's the "puzzle shown → first move" beat; later rounds
+ *  measure a warmed-up player and would dilute it). The rounds themselves are
+ *  carried through untouched — summing them was the old behaviour, and it threw
+ *  away every per-round timing before anything reached storage. */
+function sessionTotals(rounds: RoundSummary[]) {
   return {
-    firstActionDelayMs:     pages[0]?.firstActionDelayMs ?? 0,
-    submitCount:            pages.reduce((n, p) => n + p.submitCount, 0),
-    wrongSubmitCount:       pages.reduce((n, p) => n + p.wrongSubmitCount, 0),
-    totalWrongLinksOrPairs: pages.reduce((n, p) => n + p.totalWrongLinksOrPairs, 0),
-    reviewTimesMs:          pages.flatMap(p => p.reviewTimesMs),
+    firstActionDelayMs:     rounds[0]?.firstActionDelayMs ?? null,
+    submitCount:            rounds.reduce((n, r) => n + r.submitCount, 0),
+    wrongSubmitCount:       rounds.reduce((n, r) => n + r.wrongSubmitCount, 0),
+    totalWrongLinksOrPairs: rounds.reduce((n, r) => n + r.totalWrongLinksOrPairs, 0),
+    reviewTimesMs:          rounds.flatMap(r => r.reviewTimesMs),
+    activePlayMs:           rounds.reduce((n, r) => n + r.durationMs, 0),
+    roundsCompleted:        rounds.filter(r => r.completed).length,
   };
 }
 
@@ -107,7 +177,14 @@ export default function CatGame({
   // completion handler needs the running totals synchronously to decide
   // whether it's finalizing, and a state update wouldn't have landed yet.
   const pageAnswersRef = useRef<AnswerRecord[]>([]);
-  const pageSignalsRef = useRef<BehaviorSignals[]>([]);
+  const roundsRef      = useRef<RoundSummary[]>([]);
+
+  // When the current round's board went up. The engine owns this rather than
+  // the mode: it's the only place that sees both ends of a round, so it can
+  // time a round the mode never got to finish, and it measures right through
+  // the post-clear celebration — which keeps consecutive rounds tiling the
+  // session instead of leaving a 1.8s hole between each one.
+  const roundStartRef = useRef(performance.now());
 
   // ─── Countdown timer (owned by the shared engine, spans ALL pages) ───────
   // Anchored to the server, not this device. `startTimedRun` stamps the run's
@@ -124,7 +201,10 @@ export default function CatGame({
   // reading at that moment. Everything else is derived from these two.
   const anchorRef = useRef<{ remainingAtSyncMs: number; perfAtSyncMs: number } | null>(null);
   const isTimedRun = Boolean(assessmentId && playerUid);
-  const [syncing, setSyncing] = useState(isTimedRun);
+  const [syncing,     setSyncing]     = useState(isTimedRun);
+  const [syncFailed,  setSyncFailed]  = useState(false);
+  // Bumped by the Try Again button; re-runs the effect below.
+  const [syncAttempt, setSyncAttempt] = useState(0);
 
   function remainingNow() {
     const anchor = anchorRef.current;
@@ -142,21 +222,35 @@ export default function CatGame({
     async function sync() {
       // Practice runs (no assessment) have nothing to cheat — no attempt is
       // ever written — so they just start the clock locally.
-      let remaining = timeLimitMs;
-
-      if (assessmentId && playerUid) {
-        try {
-          const run = await startTimedRun(assessmentId, playerUid);
-          if (run) remaining = timeLimitMs - (run.serverNowMs - run.startedAtMs);
-        } catch (e) {
-          // Fails open: a network blip or a rules mistake shouldn't lock a
-          // student out of an assessment they're entitled to sit. They get a
-          // fresh local clock, which is the behaviour we had before this.
-          console.error('Could not anchor the timer to the server clock:', e);
-        }
+      if (!assessmentId || !playerUid) {
+        setAnchor(timeLimitMs);
+        setRemainingMs(timeLimitMs);
+        setSyncing(false);
+        return;
       }
 
+      const result = await anchorRun(assessmentId, playerUid);
       if (cancelled) return;
+
+      // Unreachable: no anchor, no game. See anchorRun for why.
+      if (result.kind === 'unreachable') {
+        setSyncFailed(true);
+        setSyncing(false);
+        return;
+      }
+
+      // Unconfigured: the feature isn't provisioned server-side. Blocking the
+      // student would punish them for that, so they get a local clock — which is
+      // exactly the behaviour this whole flow had before the anchor existed.
+      if (result.kind === 'unconfigured') {
+        setAnchor(timeLimitMs);
+        setRemainingMs(timeLimitMs);
+        setSyncing(false);
+        return;
+      }
+
+      const { run } = result;
+      const remaining = timeLimitMs - (run.serverNowMs - run.startedAtMs);
       setAnchor(remaining);
       setRemainingMs(Math.max(0, remaining));
       // Already spent: they ran the clock out and came back for another go.
@@ -169,10 +263,16 @@ export default function CatGame({
 
     sync();
     return () => { cancelled = true; };
-  }, [assessmentId, playerUid, timeLimitMs]);
+  }, [assessmentId, playerUid, timeLimitMs, syncAttempt]);
+
+  function handleRetrySync() {
+    setSyncFailed(false);
+    setSyncing(true);
+    setSyncAttempt(n => n + 1);
+  }
 
   useEffect(() => {
-    if (gameOver || syncing) return;
+    if (gameOver || syncing || syncFailed) return;
     const id = setInterval(() => {
       const left = remainingNow();
       if (left <= 0) {
@@ -186,7 +286,13 @@ export default function CatGame({
     }, 200);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gameOver, syncing]);
+  }, [gameOver, syncing, syncFailed]);
+
+  // A board becomes visible on the first render after the clock syncs, and
+  // again on every page turn. Both are the same event as far as timing goes.
+  useEffect(() => {
+    if (!syncing && !gameOver) roundStartRef.current = performance.now();
+  }, [pageIndex, syncing, gameOver]);
 
   function triggerMood(mood: 'happy' | 'confused' | 'playful', duration = 1400) {
     setCatMood(mood);
@@ -237,11 +343,21 @@ export default function CatGame({
     // Derived from the same server-anchored clock the countdown runs on, so
     // duration — a signal the assessment reads — can't be shortened by a
     // refresh either.
+    const elapsed = Math.max(0, timeLimitMs - remainingNow());
+    const rounds  = roundsRef.current;
+
     const summary: BehaviorSummary = {
-      ...mergeSignals(pageSignalsRef.current),
-      durationMs:  Math.min(timeLimitMs, Math.max(0, timeLimitMs - remainingNow())),
+      ...sessionTotals(rounds),
+      // Capped: this is the number the player is shown and the medal reads.
+      durationMs: Math.min(timeLimitMs, elapsed),
+      // Uncapped. The two only differ when the player was away longer than the
+      // limit — a student who left the run open and came back — and the cap
+      // above is what would otherwise hide that.
+      elapsedSinceStartMs: elapsed,
       timedOut:    timeUpRef.current,
       timeLimitMs,
+      totalRounds: totalPages,
+      rounds,
     };
     setBehavior(summary);
     setGameOver(true);
@@ -255,10 +371,15 @@ export default function CatGame({
         await saveAttempt({
           playerUid,
           assessmentId,
+          nickname,
           chosenGameMode: gameMode,
           chosenAvatar:   avatar,
           score:          correct,
           accuracy,
+          // Stored, not recomputed later: the lecturer's export should report
+          // the medal this student was actually shown. Deriving it again in
+          // another language is how a report starts disagreeing with the app.
+          medalTier:      computeMedal(accuracy, summary).tier,
           completedAt:    new Date(),
           behavior:       summary,
         });
@@ -274,7 +395,15 @@ export default function CatGame({
     if (doneRef.current) return;   // guard against double-finish (complete vs timeout race)
 
     pageAnswersRef.current = [...pageAnswersRef.current, ...newAnswers];
-    pageSignalsRef.current = [...pageSignalsRef.current, signals];
+    roundsRef.current = [...roundsRef.current, {
+      ...signals,
+      roundIndex: pageIndex,
+      itemCount:  pages[pageIndex]?.length ?? 0,
+      durationMs: Math.round(performance.now() - roundStartRef.current),
+      // The mode only stamps a solve time on the submit that came back clean,
+      // so this distinguishes "cleared it" from "the clock/skip ended it".
+      completed:  signals.solveDurationMs !== null,
+    }];
 
     const isLastPage = pageIndex >= totalPages - 1;
     if (timeUpRef.current || skipRef.current || isLastPage) {
@@ -305,7 +434,8 @@ export default function CatGame({
     skipRef.current   = false;
     setSkipped(false);
     pageAnswersRef.current = [];
-    pageSignalsRef.current = [];
+    roundsRef.current      = [];
+    roundStartRef.current  = performance.now();
     setPageIndex(0);
     setGameOver(false);
     setAnswers([]);
@@ -321,6 +451,27 @@ export default function CatGame({
   // start measuring their planning delay against a puzzle they can't submit yet.
   if (syncing) {
     return <PageSpinner label="Starting your round…" tips={[]} />;
+  }
+
+  // The closed door. Deliberately NOT a playable board with a local clock —
+  // that was the cheat. Retrying is safe and cheap: the run is already stamped
+  // server-side, so a successful retry picks up the real remaining time.
+  if (syncFailed) {
+    return (
+      <div className={`play-entry-bg theme-${avatar}`}>
+        <div className="play-card">
+          <CatSprite mood="confused" species={avatar} />
+          <h2 className="play-title">Can't Reach the Server</h2>
+          <p className="play-subtitle">
+            Your round can't start until we check how much time you have left.
+          </p>
+          <p className="play-hint">Check your connection and try again 🐾</p>
+          <button className="play-primary-btn" onClick={handleRetrySync}>
+            <ArrowsClockwise size={18} weight="bold" /> Try Again
+          </button>
+        </div>
+      </div>
+    );
   }
 
   if (gameOver) {

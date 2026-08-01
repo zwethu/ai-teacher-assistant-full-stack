@@ -165,67 +165,100 @@ async def start_chat_run(
 
     # --- 2. Create run id before persisting messages ---
     run_id = f"run_{uuid.uuid4().hex[:16]}"
-    try:
-        artifact_sync_preflight = preflight_sync_artifacts_for_agent_run(
+
+    # --- 3. Independent Firestore legs, concurrently ---
+    # Artifact preflight, message persistence, and the chat's session-id
+    # backfill share no data — running them in sequence just stacked their
+    # round-trips onto the time the lecturer waits before a run exists.
+    # Failure semantics are unchanged: each result is unwrapped below exactly
+    # where the sequential call used to raise.
+    sync_result, msg_result, session_result = await asyncio.gather(
+        asyncio.to_thread(
+            preflight_sync_artifacts_for_agent_run,
             batch_id=batch_id,
             lecturer_id=lecturer_id,
             workflow_type=workflow_type,
             week=week,
             user_message=user_message,
-        )
-    except Exception as exc:
-        logger.exception("artifact sync preflight failed run_id=%s", run_id)
+        ),
+        asyncio.to_thread(
+            add_user_message_with_attachments,
+            batch_id=batch_id, chat_id=chat_id, content=user_message,
+            lecturer_id=lecturer_id, run_id=run_id, attachment_ids=attachment_ids,
+            # "approve_outline" is only ever reachable by pressing the approval
+            # button, so the sentence that arrives with it was composed by the
+            # client, not typed by the lecturer. Mark it here — the one place
+            # that knows — so the transcript can skip it. "refine_outline" is
+            # the lecturer's own words and is deliberately left unmarked.
+            metadata=(
+                {"auto_generated": True} if approval_action == "approve_outline" else None
+            ),
+        ),
+        asyncio.to_thread(
+            ensure_chat_agent_session,
+            batch_id=batch_id,
+            chat_id=chat_id,
+            lecturer_id=lecturer_id,
+        ),
+        return_exceptions=True,
+    )
+    if isinstance(sync_result, Exception):
+        logger.error("artifact sync preflight failed run_id=%s: %s", run_id, sync_result)
         artifact_sync_preflight = {
             "status": "failed",
             "summary": "Artifact sync preflight failed; using saved Firestore content.",
-            "items": [{"status": "sync_failed", "error": str(exc)[:1000]}],
+            "items": [{"status": "sync_failed", "error": str(sync_result)[:1000]}],
         }
-
-    # --- 3. Persist user message with run_id ---
-    try:
-        user_msg, attachment_records = add_user_message_with_attachments(
-            batch_id=batch_id, chat_id=chat_id, content=user_message,
-            lecturer_id=lecturer_id, run_id=run_id, attachment_ids=attachment_ids,
-        )
-    except PermissionError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    agent_session_id, session_existed = ensure_chat_agent_session(
-        batch_id=batch_id,
-        chat_id=chat_id,
-        lecturer_id=lecturer_id,
-    )
+    else:
+        artifact_sync_preflight = sync_result
+    if isinstance(msg_result, PermissionError):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(msg_result)) from msg_result
+    if isinstance(msg_result, ValueError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(msg_result)) from msg_result
+    if isinstance(msg_result, Exception):
+        raise msg_result
+    user_msg, attachment_records = msg_result
+    if isinstance(session_result, Exception):
+        raise session_result
+    agent_session_id, session_existed = session_result
     rtdb_run_path = f"agentRuns/{run_id}"
 
-    # --- 4. Write RTDB lifecycle nodes ---
-    create_run_meta(
-        run_id=run_id,
-        chat_id=chat_id,
-        batch_id=batch_id,
-        lecturer_id=lecturer_id,
-        message_preview=user_message[:200],
-        artifact_sync_preflight=artifact_sync_preflight,
+    # --- 4. Write RTDB + Firestore lifecycle nodes, concurrently ---
+    meta_result, record_result = await asyncio.gather(
+        asyncio.to_thread(
+            create_run_meta,
+            run_id=run_id,
+            chat_id=chat_id,
+            batch_id=batch_id,
+            lecturer_id=lecturer_id,
+            message_preview=user_message[:200],
+            artifact_sync_preflight=artifact_sync_preflight,
+        ),
+        asyncio.to_thread(
+            create_agent_run_record,
+            run_id=run_id,
+            batch_id=batch_id,
+            chat_id=chat_id,
+            lecturer_id=lecturer_id,
+            agent_session_id=agent_session_id,
+            rtdb_run_path=rtdb_run_path,
+            message_preview=user_message,
+            agent_engine_resource_name=agent_engine_resource_name,
+            connectors=connectors,
+            workflow_type=workflow_type,
+            week=week,
+            save_draft=save_draft,
+            pending_artifact=pending_artifact,
+            workflow_stage=workflow_stage,
+            approval_action=approval_action,
+            approved_outline_run_id=approved_outline_run_id,
+            artifact_sync_preflight=artifact_sync_preflight,
+        ),
+        return_exceptions=True,
     )
-    create_agent_run_record(
-        run_id=run_id,
-        batch_id=batch_id,
-        chat_id=chat_id,
-        lecturer_id=lecturer_id,
-        agent_session_id=agent_session_id,
-        rtdb_run_path=rtdb_run_path,
-        message_preview=user_message,
-        agent_engine_resource_name=agent_engine_resource_name,
-        connectors=connectors,
-        workflow_type=workflow_type,
-        week=week,
-        save_draft=save_draft,
-        pending_artifact=pending_artifact,
-        workflow_stage=workflow_stage,
-        approval_action=approval_action,
-        approved_outline_run_id=approved_outline_run_id,
-        artifact_sync_preflight=artifact_sync_preflight,
-    )
+    for result in (meta_result, record_result):
+        if isinstance(result, Exception):
+            raise result
 
     # --- 5. Build trusted session state and stash it for the agent-run task ---
     session_state = _build_session_state(
@@ -669,6 +702,17 @@ def _build_session_state(
 def safe_run_error_message(exc: Exception) -> str:
     """Map backend/stream exceptions to short user-safe messages."""
     text = str(exc).lower()
+    # Quota/availability first: these are the retry-in-a-minute failures, and
+    # the raw 429 dump (with mitigation URLs) must never reach the chat.
+    if "429" in text or "resource_exhausted" in text or "resource exhausted" in text or "quota" in text:
+        return (
+            "The AI service is at capacity right now. This usually clears in a "
+            "minute — please try again."
+        )
+    if "503" in text or "unavailable" in text or "overloaded" in text:
+        return (
+            "The AI service is temporarily unavailable. Please try again shortly."
+        )
     if "oauth" in text or "google workspace" in text:
         return "Google Workspace needs to be connected before this action can continue."
     if "no assistant text" in text or "no final" in text:
@@ -1799,11 +1843,15 @@ async def _run_agent_background(
                         title="Waiting for lecturer approval",
                     )
                 else:
+                    # Benign: the agent answered conversationally (a clarifying
+                    # question, a status report) instead of staging an outline
+                    # this run. The turn succeeded — a red error row here blamed
+                    # a healthy reply. Genuine extraction failures (week
+                    # mismatch) still raise above and fail the run properly.
                     emit_backend_event(
-                        "outline_extract.failed",
-                        status="failed",
-                        title="No outline available yet",
-                        kind="error",
+                        "outline_extract.skipped",
+                        status="done",
+                        title="No new outline this turn — the agent replied in chat",
                         detail={"reason": "clarification_or_generation_incomplete"},
                     )
             elif bool(session_state.get("save_draft")):

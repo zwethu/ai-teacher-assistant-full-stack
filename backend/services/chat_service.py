@@ -154,6 +154,36 @@ def create_chat(
     }
 
 
+def _parse_cursor(before: str | None):
+    """A `before` query param as a datetime, or None. A malformed cursor yields
+    the newest page rather than an error — the caller gets a usable list."""
+    if not before:
+        return None
+    from datetime import datetime
+
+    try:
+        return datetime.fromisoformat(before.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _is_visible_chat(chat: dict[str, Any]) -> bool:
+    """Excludes workflow/generation run-container chats. `hidden` covers newly
+    created ones; the type/title guards also catch older generation chats
+    created before they were flagged hidden (no backfill required)."""
+    return (
+        not chat.get("hidden")
+        and chat.get("type") != "workflow"
+        and chat.get("title") != "Generation workspace"
+    )
+
+
+# How far past `limit` one round reads. Every generation run leaves a hidden
+# workspace chat behind, so on a busy batch the hidden ones can outnumber the
+# real ones several to one and a 1:1 read would rarely fill a page in one go.
+_CHAT_OVERREAD = 3
+
+
 def list_chats(
     batch_id: str,
     lecturer_id: str,
@@ -161,33 +191,53 @@ def list_chats(
     limit: int | None = None,
     before: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Return chats for a batch ordered newest first, filtered by lecturer_id."""
-    col = _chats_col(batch_id)
-    query = col.where("lecturer_id", "==", lecturer_id).order_by("created_at", direction="DESCENDING")
-    if before:
-        from datetime import datetime
+    """Return chats for a batch ordered newest first, filtered by lecturer_id.
 
-        try:
-            cursor = datetime.fromisoformat(before.replace("Z", "+00:00"))
-            query = query.where("created_at", "<", cursor)
-        except ValueError:
-            pass
-    if limit:
-        query = query.limit(limit)
-    docs = query.stream()
-    chats = [_chat_to_dict(doc.id, doc.to_dict() or {}) for doc in docs]
-    if not include_hidden:
-        # Exclude workflow/generation run-container chats. `hidden` covers newly
-        # created ones; the type/title guards also catch older generation chats
-        # created before they were flagged hidden (no backfill required).
-        chats = [
-            chat
-            for chat in chats
-            if not chat.get("hidden")
-            and chat.get("type") != "workflow"
-            and chat.get("title") != "Generation workspace"
-        ]
-    return chats
+    `limit` counts chats the caller will actually see, not documents read. That
+    distinction is the whole reason this pages internally: the hidden-chat
+    filter cannot be expressed as a Firestore query (it has to match documents
+    written before the `hidden` field existed), so it runs here — and applying
+    it *after* a `.limit()` would mean a full page of 30 could come back as 12.
+    A caller paging until it gets fewer than it asked for would read that as the
+    end of the list and silently lose every older chat.
+    """
+    col = _chats_col(batch_id)
+    base = col.where("lecturer_id", "==", lecturer_id).order_by(
+        "created_at", direction=firestore.Query.DESCENDING
+    )
+    cursor = _parse_cursor(before)
+
+    def _page(after, size: int | None):
+        query = base.where("created_at", "<", after) if after else base
+        return list((query.limit(size) if size else query).stream())
+
+    if not limit:
+        # Unpaginated: one pass, filter, done. Kept for callers that genuinely
+        # want everything.
+        chats = [_chat_to_dict(doc.id, doc.to_dict() or {}) for doc in _page(cursor, None)]
+        return chats if include_hidden else [c for c in chats if _is_visible_chat(c)]
+
+    read = max(limit * _CHAT_OVERREAD, limit)
+    visible: list[dict[str, Any]] = []
+    while len(visible) < limit:
+        docs = _page(cursor, read)
+        if not docs:
+            break
+        for doc in docs:
+            chat = _chat_to_dict(doc.id, doc.to_dict() or {})
+            if include_hidden or _is_visible_chat(chat):
+                visible.append(chat)
+                if len(visible) == limit:
+                    return visible
+        # Short read means the collection is exhausted; otherwise carry on from
+        # the oldest document seen, hidden or not, so a page made entirely of
+        # workspaces still advances.
+        if len(docs) < read:
+            break
+        cursor = (docs[-1].to_dict() or {}).get("created_at")
+        if cursor is None:
+            break
+    return visible
 
 
 def get_chat(batch_id: str, chat_id: str, lecturer_id: str) -> dict[str, Any] | None:

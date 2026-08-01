@@ -24,7 +24,7 @@ import rehypeKatex from 'rehype-katex'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import 'katex/dist/katex.min.css'
-import { ThinkingRow, Spinner, Button } from '../../../design-system'
+import { Spinner, Button } from '../../../design-system'
 import { artifactIcon } from '../../../utils/artifactIcons'
 import type { ChatMessage } from '../../../entity/Chat'
 import { startGoogleOAuth } from '../../../services/authService'
@@ -1890,9 +1890,12 @@ function ExportLink({ href, label }: { href?: string; label: string }) {
  * "the agent is working" reads identically wherever it appears.
  */
 export function ThinkingIndicator() {
+  // Pre-agent phase: the request was just sent — nothing is thinking yet, so no
+  // garland and no text. The thinking mark is reserved for actual agent thoughts
+  // (ThinkingPanel takes over once real thinking events stream in).
   return (
-    <div className="py-1">
-      <ThinkingRow label="Thinking…" size={32} />
+    <div className="py-1 pl-1">
+      <Spinner size={18} tone="muted" />
     </div>
   )
 }

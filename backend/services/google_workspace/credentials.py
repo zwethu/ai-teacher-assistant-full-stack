@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
+import time
 from typing import Any
 
 from google.auth.transport.requests import Request as GoogleAuthRequest
@@ -20,6 +22,25 @@ from google.oauth2.credentials import Credentials
 from utils.firestore_client import get_firestore
 
 logger = logging.getLogger(__name__)
+
+# Refreshed access tokens are valid for ~1h; every googleapiclient service build
+# calls build_user_credentials, and a single lab export builds services a dozen
+# times (folders, two docs, starter uploads). Caching the refreshed Credentials
+# per (uid, scopes) turns all but the first build into a dict lookup instead of
+# a Firestore read + OAuth token round-trip.
+_CREDS_CACHE: dict[tuple[str, tuple[str, ...]], Credentials] = {}
+_CREDS_CACHE_LOCK = threading.Lock()
+
+
+def _cache_key(uid: str, scopes: list[str] | None) -> tuple[str, tuple[str, ...]]:
+    return (uid, tuple(sorted(scopes or [])))
+
+
+def clear_user_credentials_cache(uid: str) -> None:
+    """Drop cached credentials for *uid* (call when their refresh token changes)."""
+    with _CREDS_CACHE_LOCK:
+        for key in [key for key in _CREDS_CACHE if key[0] == uid]:
+            _CREDS_CACHE.pop(key, None)
 
 USERS_COLLECTION = "users"
 
@@ -44,6 +65,7 @@ def store_refresh_token(db: Any, uid: str, refresh_token: str) -> None:
         {"google_refresh_token": refresh_token, "updatedAt": SERVER_TIMESTAMP},
         merge=True,
     )
+    clear_user_credentials_cache(uid)
 
 
 def read_refresh_token(db: Any, uid: str) -> str | None:
@@ -208,6 +230,13 @@ def build_user_credentials(
     GoogleOAuthInvalidError
         If the token refresh fails (e.g. user revoked access).
     """
+    cache_key = _cache_key(uid, required_scopes)
+    with _CREDS_CACHE_LOCK:
+        cached = _CREDS_CACHE.get(cache_key)
+    if cached is not None and cached.valid:
+        return cached
+
+    started = time.perf_counter()
     record = get_user_google_record(uid)
     refresh_token = record.get("google_refresh_token")
     if not refresh_token:
@@ -252,6 +281,14 @@ def build_user_credentials(
             )
         raise GoogleOAuthInvalidError(uid) from exc
 
+    with _CREDS_CACHE_LOCK:
+        _CREDS_CACHE[cache_key] = creds
+    logger.info(
+        "event=google_creds_refresh duration_ms=%d uid=%s scopes=%s",
+        int((time.perf_counter() - started) * 1000),
+        uid,
+        ",".join(required_scopes or []),
+    )
     return creds
 
 

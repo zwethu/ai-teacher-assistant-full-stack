@@ -14,11 +14,12 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 from services.google_workspace.credentials import build_user_credentials
-from services.google_workspace.drive_folders import move_file_to_folder, rename_file
+from services.google_workspace.drive_folders import move_file_to_folder
 from services.google_workspace.forms_rendering.builder import (
     build_intro_requests,
     build_question_request,
 )
+from utils.timing import log_span
 
 logger = logging.getLogger(__name__)
 
@@ -72,14 +73,18 @@ def create_quiz_form_for_user(
     drive = _build_drive_service(uid)
 
     try:
-        # Create empty form
-        form = forms.forms().create(
-            body={"info": {"title": form_title, "documentTitle": form_title}}
-        ).execute()
-        form_id = form["formId"]
+        # Create empty form (the Forms API cannot parent into a folder, so the
+        # Drive move below stays; the create already sets the final title, so
+        # no rename is needed).
+        with log_span(logger, "form_create", title=form_title[:40]):
+            form = forms.forms().create(
+                body={"info": {"title": form_title, "documentTitle": form_title}}
+            ).execute()
+            form_id = form["formId"]
 
-        # Enable quiz mode and set description
-        settings_requests: list[dict[str, Any]] = [
+        # Quiz settings, description, overview blocks and questions all travel
+        # in a single batchUpdate — settings requests first, then items.
+        requests: list[dict[str, Any]] = [
             {
                 "updateSettings": {
                     "settings": {"quizSettings": {"isQuiz": True}},
@@ -88,7 +93,7 @@ def create_quiz_form_for_user(
             }
         ]
         if description:
-            settings_requests.append(
+            requests.append(
                 {
                     "updateFormInfo": {
                         "info": {"description": description},
@@ -96,39 +101,32 @@ def create_quiz_form_for_user(
                     }
                 }
             )
-
-        forms.forms().batchUpdate(
-            formId=form_id,
-            body={"requests": settings_requests},
-        ).execute()
-
-        # Add themed overview blocks and questions
         intro_requests = build_intro_requests(quiz_payload)
         question_requests = [
             build_question_request(q, index + len(intro_requests))
             for index, q in enumerate(questions)
         ]
-        item_requests = intro_requests + question_requests
-        if item_requests:
+        requests += intro_requests + question_requests
+
+        with log_span(logger, "form_content", requests=len(requests)):
             forms.forms().batchUpdate(
                 formId=form_id,
-                body={"requests": item_requests},
+                body={"requests": requests},
             ).execute()
 
-        # Share with teacher
-        drive.permissions().create(
-            fileId=form_id,
-            body={
-                "type": "user",
-                "role": "writer",
-                "emailAddress": lecturer_email,
-            },
-            sendNotificationEmail=False,
-        ).execute()
-        if drive_file_name:
-            rename_file(uid, form_id, drive_file_name)
-        if target_folder_id:
-            move_file_to_folder(uid, form_id, target_folder_id)
+        with log_span(logger, "form_finalize"):
+            if lecturer_email:
+                drive.permissions().create(
+                    fileId=form_id,
+                    body={
+                        "type": "user",
+                        "role": "writer",
+                        "emailAddress": lecturer_email,
+                    },
+                    sendNotificationEmail=False,
+                ).execute()
+            if target_folder_id:
+                move_file_to_folder(uid, form_id, target_folder_id)
 
     except HttpError as exc:
         logger.exception("Google Forms API error for uid=%s title=%r", uid, title)

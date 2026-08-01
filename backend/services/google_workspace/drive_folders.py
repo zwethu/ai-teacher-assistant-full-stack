@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from googleapiclient.discovery import build
@@ -11,6 +12,7 @@ from googleapiclient.errors import HttpError
 
 from services.google_workspace.credentials import build_user_credentials
 from utils.firestore_client import get_firestore
+from utils.timing import log_span
 
 FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
 BATCHES_COLLECTION = "batches"
@@ -147,43 +149,89 @@ def ensure_batch_artifact_folders(
     batch_name: str,
     course_name: str = "",
 ) -> dict[str, Any]:
+    with log_span(logger, "ensure_batch_artifact_folders", batch_id=batch_id):
+        return _ensure_batch_artifact_folders(uid, batch_id, batch_name, course_name)
+
+
+def _ensure_batch_artifact_folders(
+    uid: str,
+    batch_id: str,
+    batch_name: str,
+    course_name: str,
+) -> dict[str, Any]:
     db = get_firestore()
     batch_ref = db.collection(BATCHES_COLLECTION).document(batch_id)
     data = batch_ref.get().to_dict() or {}
-
-    root = _valid_folder(uid, str(data.get("drive_root_folder_id") or ""))
-    if root is None:
-        root = get_or_create_folder(
-            uid,
-            build_batch_root_folder_name(batch_name, course_name),
-        )
-
     stored_folders = data.get("drive_folders") or {}
-    folders: dict[str, dict[str, str]] = {}
-    for key in FOLDER_KEYS:
-        stored = stored_folders.get(key) or {}
-        folder = _valid_folder(uid, str(stored.get("id") or ""))
-        if folder is None:
-            folder = get_or_create_folder(uid, SUBFOLDER_NAMES[key], parent_id=root["id"])
-        folders[key] = folder
 
-    lab_root = folders.get("lab") or {}
-    lab_root_id = str(lab_root.get("id") or "")
-    if lab_root_id:
-        for key, name in LAB_SUBFOLDER_NAMES.items():
-            stored = stored_folders.get(key) or {}
-            try:
-                folder = _valid_folder(uid, str(stored.get("id") or ""))
-                if folder is None:
-                    folder = get_or_create_folder(uid, name, parent_id=lab_root_id)
-                folders[key] = folder
-            except Exception as exc:
-                logger.warning(
-                    "Failed to ensure nested lab folder key=%s batch_id=%s; using Labs fallback: %s",
-                    key,
-                    batch_id,
-                    exc,
+    # Each validation/create is one Drive round-trip; none depend on each other
+    # except that creating a missing subfolder needs its parent's id. So: check
+    # everything concurrently, then create only the gaps (also concurrently).
+    # Every worker builds its own Drive service — googleapiclient services are
+    # not thread-safe — but the OAuth credentials underneath come from the
+    # process-level cache, so a service build costs no network round-trip.
+    check_keys = list(FOLDER_KEYS) + list(LAB_SUBFOLDER_NAMES)
+    with ThreadPoolExecutor(max_workers=len(check_keys) + 1) as pool:
+        root_check = pool.submit(
+            _valid_folder, uid, str(data.get("drive_root_folder_id") or "")
+        )
+        checks = {
+            key: pool.submit(
+                _valid_folder, uid, str((stored_folders.get(key) or {}).get("id") or "")
+            )
+            for key in check_keys
+        }
+
+        root = root_check.result()
+        if root is None:
+            root = get_or_create_folder(
+                uid,
+                build_batch_root_folder_name(batch_name, course_name),
+            )
+
+        folders: dict[str, dict[str, str]] = {}
+        creates: dict[str, Any] = {}
+        for key in FOLDER_KEYS:
+            folder = checks[key].result()
+            if folder is None:
+                creates[key] = pool.submit(
+                    get_or_create_folder, uid, SUBFOLDER_NAMES[key], root["id"]
                 )
+            else:
+                folders[key] = folder
+        for key, future in creates.items():
+            folders[key] = future.result()
+
+        lab_root_id = str((folders.get("lab") or {}).get("id") or "")
+        if lab_root_id:
+            lab_creates: dict[str, Any] = {}
+            for key, name in LAB_SUBFOLDER_NAMES.items():
+                try:
+                    folder = checks[key].result()
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to ensure nested lab folder key=%s batch_id=%s; using Labs fallback: %s",
+                        key,
+                        batch_id,
+                        exc,
+                    )
+                    continue
+                if folder is None:
+                    lab_creates[key] = pool.submit(
+                        get_or_create_folder, uid, name, lab_root_id
+                    )
+                else:
+                    folders[key] = folder
+            for key, future in lab_creates.items():
+                try:
+                    folders[key] = future.result()
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to ensure nested lab folder key=%s batch_id=%s; using Labs fallback: %s",
+                        key,
+                        batch_id,
+                        exc,
+                    )
 
     update = {
         "drive_root_folder_id": root["id"],
@@ -295,31 +343,65 @@ def upload_lab_starter_files(
             f for f in starter_files
             if str(f.get("file_role") or "") == "solution" and str(f.get("content") or "").strip()
         ]
-        if student_files:
-            folder = get_or_create_folder(uid, f"{base_name} — Lab Files", parent_id=student_parent_id)
-            for f in student_files:
-                upload_text_file(
-                    uid,
-                    name=str(f.get("path") or "file.txt").replace("/", "__"),
-                    content=str(f.get("content") or ""),
-                    parent_id=folder["id"],
-                )
-            result["lab_files_folder_id"] = folder["id"]
-            result["lab_files_folder_url"] = folder.get("url") or folder_url(folder["id"])
-        if solution_files:
-            folder = get_or_create_folder(uid, f"{base_name} — Solutions", parent_id=lecturer_parent_id)
-            for f in solution_files:
-                upload_text_file(
-                    uid,
-                    name=str(f.get("path") or "solution.txt").replace("/", "__"),
-                    content=str(f.get("content") or ""),
-                    parent_id=folder["id"],
-                )
-            result["lab_solutions_folder_id"] = folder["id"]
-            result["lab_solutions_folder_url"] = folder.get("url") or folder_url(folder["id"])
-    except Exception:  # pragma: no cover - defensive: delivery is best-effort
-        import logging
+        if not student_files and not solution_files:
+            return result
 
-        logging.getLogger(__name__).warning("lab starter-file upload failed", exc_info=True)
+        with log_span(
+            logger,
+            "upload_lab_starter_files",
+            files=len(student_files) + len(solution_files),
+        ), ThreadPoolExecutor(max_workers=8) as pool:
+            # The two destination folders don't depend on each other, and the
+            # file uploads within a folder don't either — only folder-before-
+            # its-files ordering matters. upload_text_file builds its own Drive
+            # service, so each future is thread-safe.
+            student_folder_future = (
+                pool.submit(
+                    get_or_create_folder, uid, f"{base_name} — Lab Files", student_parent_id
+                )
+                if student_files
+                else None
+            )
+            solution_folder_future = (
+                pool.submit(
+                    get_or_create_folder, uid, f"{base_name} — Solutions", lecturer_parent_id
+                )
+                if solution_files
+                else None
+            )
+
+            uploads = []
+            if student_folder_future is not None:
+                folder = student_folder_future.result()
+                uploads += [
+                    pool.submit(
+                        upload_text_file,
+                        uid,
+                        name=str(f.get("path") or "file.txt").replace("/", "__"),
+                        content=str(f.get("content") or ""),
+                        parent_id=folder["id"],
+                    )
+                    for f in student_files
+                ]
+                result["lab_files_folder_id"] = folder["id"]
+                result["lab_files_folder_url"] = folder.get("url") or folder_url(folder["id"])
+            if solution_folder_future is not None:
+                folder = solution_folder_future.result()
+                uploads += [
+                    pool.submit(
+                        upload_text_file,
+                        uid,
+                        name=str(f.get("path") or "solution.txt").replace("/", "__"),
+                        content=str(f.get("content") or ""),
+                        parent_id=folder["id"],
+                    )
+                    for f in solution_files
+                ]
+                result["lab_solutions_folder_id"] = folder["id"]
+                result["lab_solutions_folder_url"] = folder.get("url") or folder_url(folder["id"])
+            for upload in uploads:
+                upload.result()
+    except Exception:  # pragma: no cover - defensive: delivery is best-effort
+        logger.warning("lab starter-file upload failed", exc_info=True)
         result["lab_files_upload_error"] = "Starter file upload failed — files are in the doc."
     return result

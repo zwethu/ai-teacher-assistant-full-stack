@@ -9,9 +9,13 @@ from __future__ import annotations
 import logging
 import hashlib
 import json
+import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any
+
+from utils.timing import log_span
 
 from utils.firestore_client import get_firestore
 from services.google_workspace.credentials import assert_google_oauth_valid
@@ -673,15 +677,18 @@ def export_lesson_plan_draft_to_google_docs(
         )
         raise
 
-    assert_google_oauth_valid(lecturer_id, ["documents", "drive.file"])
+    export_started = time.perf_counter()
+    with log_span(logger, "export_oauth_check", kind="lesson_plan"):
+        assert_google_oauth_valid(lecturer_id, ["documents", "drive.file"])
 
     week = int(payload.get("week") or artifact.get("week") or 0)
     title = str(payload.get("title") or artifact.get("title") or "Lesson Plan")
-    next_version = (
-        int(artifact.get("version") or 0)
-        if was_confirmed and artifact.get("version")
-        else _next_confirmed_version(batch_id, "lesson_plan", week)
-    )
+    with log_span(logger, "export_version_scan", kind="lesson_plan"):
+        next_version = (
+            int(artifact.get("version") or 0)
+            if was_confirmed and artifact.get("version")
+            else _next_confirmed_version(batch_id, "lesson_plan", week)
+        )
     folders = ensure_batch_artifact_folders(
         uid=lecturer_id,
         batch_id=batch_id,
@@ -705,13 +712,14 @@ def export_lesson_plan_draft_to_google_docs(
         }
     )
     try:
-        doc_result = create_lesson_plan_doc_for_user(
-            uid=lecturer_id,
-            lesson_plan_payload=payload,
-            lecturer_email=str(batch.get("lecturer_email") or artifact.get("created_by_email") or ""),
-            target_folder_id=folder_id,
-            drive_file_name=drive_file_name,
-        )
+        with log_span(logger, "export_doc_generation", kind="lesson_plan"):
+            doc_result = create_lesson_plan_doc_for_user(
+                uid=lecturer_id,
+                lesson_plan_payload=payload,
+                lecturer_email=str(batch.get("lecturer_email") or artifact.get("created_by_email") or ""),
+                target_folder_id=folder_id,
+                drive_file_name=drive_file_name,
+            )
     except Exception as exc:
         safe_error = str(exc)[:1000]
         ref.update(
@@ -727,10 +735,11 @@ def export_lesson_plan_draft_to_google_docs(
 
     if not was_confirmed:
         _supersede_current_artifacts(batch_id, "lesson_plan", week, artifact_id)
-    export_metadata = _google_doc_export_metadata(
-        uid=lecturer_id,
-        doc_id=str(doc_result.get("doc_id") or ""),
-    )
+    with log_span(logger, "export_drive_metadata", kind="lesson_plan"):
+        export_metadata = _google_doc_export_metadata(
+            uid=lecturer_id,
+            doc_id=str(doc_result.get("doc_id") or ""),
+        )
     updates = {
         "status": "confirmed",
         "is_current": original_is_current if was_confirmed else True,
@@ -750,13 +759,19 @@ def export_lesson_plan_draft_to_google_docs(
         "export_error": "",
         **export_metadata,
     }
-    ref.update(updates)
-    _update_source_message_export_metadata(
-        batch_id=batch_id,
-        artifact=artifact,
-        export_updates=updates,
+    with log_span(logger, "export_finalize", kind="lesson_plan"):
+        ref.update(updates)
+        _update_source_message_export_metadata(
+            batch_id=batch_id,
+            artifact=artifact,
+            export_updates=updates,
+        )
+        saved = _doc_to_dict(ref.get())
+    logger.info(
+        "event=export_total kind=lesson_plan duration_ms=%d artifact_id=%s",
+        int((time.perf_counter() - export_started) * 1000),
+        artifact_id,
     )
-    saved = _doc_to_dict(ref.get())
     return {
         "artifact_id": artifact_id,
         "status": saved.get("status"),
@@ -822,12 +837,15 @@ def export_lab_draft_to_google_docs(
             was_confirmed=was_confirmed,
         )
         raise
-    assert_google_oauth_valid(lecturer_id, ["documents", "drive.file"])
-    next_version = (
-        int(artifact.get("version") or 0)
-        if was_confirmed and artifact.get("version")
-        else _next_confirmed_version(batch_id, "lab", week)
-    )
+    export_started = time.perf_counter()
+    with log_span(logger, "export_oauth_check", kind="lab"):
+        assert_google_oauth_valid(lecturer_id, ["documents", "drive.file"])
+    with log_span(logger, "export_version_scan", kind="lab"):
+        next_version = (
+            int(artifact.get("version") or 0)
+            if was_confirmed and artifact.get("version")
+            else _next_confirmed_version(batch_id, "lab", week)
+        )
     folders = ensure_batch_artifact_folders(
         uid=lecturer_id,
         batch_id=batch_id,
@@ -861,16 +879,17 @@ def export_lab_draft_to_google_docs(
 
     ref.update({"status": "exporting", "export_error": "", "updated_at": _now()})
     try:
-        doc_result = create_lab_docs_for_user(
-            uid=lecturer_id,
-            lab_payload=payload,
-            lecturer_email=str(batch.get("lecturer_email") or artifact.get("created_by_email") or ""),
-            target_folder_id=folder_id,
-            lecturer_target_folder_id=lecturer_folder_id,
-            student_target_folder_id=student_folder_id,
-            lecturer_drive_file_name=lecturer_name,
-            student_drive_file_name=student_name,
-        )
+        with log_span(logger, "export_doc_generation", kind="lab"):
+            doc_result = create_lab_docs_for_user(
+                uid=lecturer_id,
+                lab_payload=payload,
+                lecturer_email=str(batch.get("lecturer_email") or artifact.get("created_by_email") or ""),
+                target_folder_id=folder_id,
+                lecturer_target_folder_id=lecturer_folder_id,
+                student_target_folder_id=student_folder_id,
+                lecturer_drive_file_name=lecturer_name,
+                student_drive_file_name=student_name,
+            )
     except Exception as exc:
         safe_error = str(exc)[:1000]
         ref.update(
@@ -889,25 +908,28 @@ def export_lab_draft_to_google_docs(
 
     # Physical scaffold delivery: real Drive files next to the docs. Best-effort —
     # the files are also embedded in the docs' Lab Files section either way.
+    # Runs concurrently with the (independent) Drive metadata read.
     starter_delivery: dict[str, str] = {}
     starter_files = payload.get("starter_files") or []
-    if isinstance(starter_files, list) and starter_files:
-        from services.google_workspace.drive_folders import upload_lab_starter_files
-
-        starter_delivery = upload_lab_starter_files(
-            lecturer_id,
-            starter_files=[f for f in starter_files if isinstance(f, dict)],
-            student_parent_id=student_folder_id,
-            lecturer_parent_id=lecturer_folder_id,
-            base_name=build_artifact_file_name(
-                version=next_version, week=week, artifact_type="lab", title=title
-            ),
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        metadata_future = pool.submit(
+            _google_doc_export_metadata,
+            uid=lecturer_id,
+            doc_id=str(doc_result.get("lecturer_doc_id") or ""),
         )
+        if isinstance(starter_files, list) and starter_files:
+            from services.google_workspace.drive_folders import upload_lab_starter_files
 
-    export_metadata = _google_doc_export_metadata(
-        uid=lecturer_id,
-        doc_id=str(doc_result.get("lecturer_doc_id") or ""),
-    )
+            starter_delivery = upload_lab_starter_files(
+                lecturer_id,
+                starter_files=[f for f in starter_files if isinstance(f, dict)],
+                student_parent_id=student_folder_id,
+                lecturer_parent_id=lecturer_folder_id,
+                base_name=build_artifact_file_name(
+                    version=next_version, week=week, artifact_type="lab", title=title
+                ),
+            )
+        export_metadata = metadata_future.result()
     metadata = {
         **starter_delivery,
         "student_doc_url": doc_result.get("student_doc_url", ""),
@@ -942,13 +964,19 @@ def export_lab_draft_to_google_docs(
         "export_error": "",
         **export_metadata,
     }
-    ref.update(updates)
-    _update_source_message_export_metadata(
-        batch_id=batch_id,
-        artifact=artifact,
-        export_updates=updates,
+    with log_span(logger, "export_finalize", kind="lab"):
+        ref.update(updates)
+        _update_source_message_export_metadata(
+            batch_id=batch_id,
+            artifact=artifact,
+            export_updates=updates,
+        )
+        saved = _doc_to_dict(ref.get())
+    logger.info(
+        "event=export_total kind=lab duration_ms=%d artifact_id=%s",
+        int((time.perf_counter() - export_started) * 1000),
+        artifact_id,
     )
-    saved = _doc_to_dict(ref.get())
     saved_metadata = saved.get("metadata") or {}
     return {
         "artifact_id": artifact_id,
@@ -1005,12 +1033,15 @@ def export_quiz_draft_to_google_forms(
             "doc_id": artifact.get("doc_id", ""),
             "drive_file_name": artifact.get("drive_file_name", ""),
         }
-    assert_google_oauth_valid(lecturer_id, ["forms.body", "drive.file"])
-    next_version = (
-        int(artifact.get("version") or 0)
-        if was_confirmed and artifact.get("version")
-        else _next_confirmed_version(batch_id, "quiz", week)
-    )
+    export_started = time.perf_counter()
+    with log_span(logger, "export_oauth_check", kind="quiz"):
+        assert_google_oauth_valid(lecturer_id, ["forms.body", "drive.file"])
+    with log_span(logger, "export_version_scan", kind="quiz"):
+        next_version = (
+            int(artifact.get("version") or 0)
+            if was_confirmed and artifact.get("version")
+            else _next_confirmed_version(batch_id, "quiz", week)
+        )
     folders = ensure_batch_artifact_folders(
         uid=lecturer_id,
         batch_id=batch_id,
@@ -1029,13 +1060,14 @@ def export_quiz_draft_to_google_forms(
 
     ref.update({"status": "exporting", "export_error": "", "updated_at": _now()})
     try:
-        form_result = create_quiz_form_for_user(
-            uid=lecturer_id,
-            quiz_payload=payload,
-            lecturer_email=str(batch.get("lecturer_email") or artifact.get("created_by_email") or ""),
-            target_folder_id=folder_id,
-            drive_file_name=drive_file_name,
-        )
+        with log_span(logger, "export_doc_generation", kind="quiz"):
+            form_result = create_quiz_form_for_user(
+                uid=lecturer_id,
+                quiz_payload=payload,
+                lecturer_email=str(batch.get("lecturer_email") or artifact.get("created_by_email") or ""),
+                target_folder_id=folder_id,
+                drive_file_name=drive_file_name,
+            )
     except Exception as exc:
         safe_error = str(exc)[:1000]
         ref.update(
@@ -1077,13 +1109,19 @@ def export_quiz_draft_to_google_forms(
         "updated_at": _now(),
         "export_error": "",
     }
-    ref.update(updates)
-    _update_source_message_export_metadata(
-        batch_id=batch_id,
-        artifact=artifact,
-        export_updates=updates,
+    with log_span(logger, "export_finalize", kind="quiz"):
+        ref.update(updates)
+        _update_source_message_export_metadata(
+            batch_id=batch_id,
+            artifact=artifact,
+            export_updates=updates,
+        )
+        saved = _doc_to_dict(ref.get())
+    logger.info(
+        "event=export_total kind=quiz duration_ms=%d artifact_id=%s",
+        int((time.perf_counter() - export_started) * 1000),
+        artifact_id,
     )
-    saved = _doc_to_dict(ref.get())
     return {
         "artifact_id": artifact_id,
         "status": saved.get("status"),

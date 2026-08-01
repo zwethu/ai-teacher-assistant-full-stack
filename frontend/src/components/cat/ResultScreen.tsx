@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { PawPrint, CheckCircle, Target, Timer, Hourglass, Medal, ArrowsClockwise } from '@phosphor-icons/react';
+import { PawPrint, CheckCircle, Target, Timer, Hourglass, Medal, ArrowsClockwise, PaperPlaneTilt, Flag } from '@phosphor-icons/react';
 import type { AnswerRecord, AvatarType, BehaviorSummary } from '../../types/catGame.types';
 import CatSprite from './CatSprite';
 import Confetti from './Confetti';
@@ -87,6 +87,20 @@ export default function ResultScreen({
                 <div className="stat-row">
                   <span className="stat-label"><Timer size={17} weight="duotone" /> Time</span>
                   <span className="stat-value">{formatDuration(behavior.durationMs)}</span>
+                </div>
+              )}
+              {behavior && behavior.submitCount > 0 && (
+                <div className="stat-row">
+                  <span className="stat-label"><PaperPlaneTilt size={17} weight="duotone" /> Submissions</span>
+                  <span className="stat-value">{behavior.submitCount}</span>
+                </div>
+              )}
+              {/* Only worth a row when the session was actually dealt in several
+                  rounds — a single-round game already says this in "Correct". */}
+              {behavior && behavior.totalRounds > 1 && (
+                <div className="stat-row">
+                  <span className="stat-label"><Flag size={17} weight="duotone" /> Rounds cleared</span>
+                  <span className="stat-value">{behavior.roundsCompleted} / {behavior.totalRounds}</span>
                 </div>
               )}
             </div>

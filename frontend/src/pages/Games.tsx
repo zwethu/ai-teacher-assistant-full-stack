@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
+  BookOpen,
   CalendarClock,
   Check,
   ChevronDown,
   Copy,
+  Download,
   ExternalLink,
   Gamepad2,
   Lock,
@@ -26,6 +28,7 @@ import { gameTimeLimitMinutes } from '../lib/gameTiming'
 import { artifactIcon } from '../utils/artifactIcons'
 import {
   deleteGame,
+  downloadGameResults,
   gamePlayUrl,
   listGames,
   updateGame,
@@ -33,7 +36,7 @@ import {
 } from '../services/gameService'
 import type { ToastMessage } from '../types'
 import { getErrorMessage } from '../utils/errors'
-import { Spinner } from '../design-system'
+import { Button, Modal, Spinner } from '../design-system'
 
 // Saved work a game can be built from. Course plans are excluded: they are strategy, not
 // the term-bearing teaching content a term/definition game needs.
@@ -69,6 +72,37 @@ function formatDeadline(value?: string | null): { text: string; passed: boolean 
     minute: '2-digit',
   })
   return { text, passed: date.getTime() <= Date.now() }
+}
+
+/**
+ * The chosen deadline has to outlive the component that collected it.
+ *
+ * The run view tells the lecturer, in as many words, that they can leave the
+ * page and generation keeps running. Taking it at its word used to unmount the
+ * generator and drop the deadline on the floor, so the game was created with no
+ * due date — silently, right after the app said it was safe to go. Session
+ * storage is the right lifetime: one in-flight generation per space, gone when
+ * the tab closes.
+ */
+const deadlineKey = (batchId: string) => `mila:game-deadline:${batchId}`
+
+function readStoredDeadline(batchId: string): string {
+  try {
+    return sessionStorage.getItem(deadlineKey(batchId)) ?? ''
+  } catch {
+    // Storage can be blocked outright (privacy mode, locked-down browser). A
+    // missing deadline is recoverable; a crashed form is not.
+    return ''
+  }
+}
+
+function writeStoredDeadline(batchId: string, value: string): void {
+  try {
+    if (value) sessionStorage.setItem(deadlineKey(batchId), value)
+    else sessionStorage.removeItem(deadlineKey(batchId))
+  } catch {
+    /* see above */
+  }
 }
 
 function artifactTypeLabel(type: string): string {
@@ -143,11 +177,13 @@ export default function Games() {
     <div>
       <Toast toast={toast} onDismiss={() => setToast(null)} />
 
-      <div className="mb-6">
+      {/* One line, about the page. How the builder works is the builder's job to
+          say — stating it here too meant the same sentence three times before a
+          lecturer reached a single field. */}
+      <div className="mb-6 max-w-xl">
         <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Games</h1>
-        <p className="text-sm text-slate-500 mt-1">
-          Build a term/definition study game from a document you upload, or from a lesson plan,
-          lab, or assessment you already saved.
+        <p className="text-sm text-slate-600 mt-1">
+          Term/definition study games your students open from a link.
         </p>
       </div>
 
@@ -165,35 +201,24 @@ export default function Games() {
         </div>
       ) : (
         <>
-          <div className="mb-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-            <label htmlFor="games-batch" className="mb-1.5 block text-sm font-semibold text-slate-700">
-              Space (batch)
-            </label>
-            <select
-              id="games-batch"
-              value={selectedBatchId ?? ''}
-              onChange={(event) => setSelectedBatchId(event.target.value)}
-              disabled={batchesLoading}
-              className="block w-full max-w-lg rounded-md border border-slate-300 px-2 py-2.5 text-sm focus:border-violet-500 focus:ring-violet-500"
-            >
-              {batches.map((batch) => (
-                <option key={batch.id} value={batch.id}>
-                  {batch.batch_name} — {batch.course_name}
-                </option>
-              ))}
-            </select>
-          </div>
-
           {selectedBatch && (
             <GameGenerator
               key={selectedBatch.id}
               batch={selectedBatch}
+              batches={batches}
+              batchesLoading={batchesLoading}
+              onSelectBatch={setSelectedBatchId}
               onCreated={() => void refresh(selectedBatch.id)}
             />
           )}
 
           <div className="mb-3 mt-8 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-slate-700">Games in this space</h2>
+            {/* Names the space rather than saying "this space". The control that
+                sets it now lives inside the builder, so the list has to say what
+                it is showing on its own. */}
+            <h2 className="text-sm font-semibold text-slate-700">
+              Games in {selectedBatch?.batch_name ?? 'this space'}
+            </h2>
             <button
               type="button"
               onClick={() => selectedBatchId && void refresh(selectedBatchId)}
@@ -228,7 +253,12 @@ export default function Games() {
                     key={game.gameId}
                     className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
                   >
-                    <div className="flex items-center gap-3 p-4">
+                    {/* One row, two bands: what the game IS (with the actions a
+                        lecturer actually takes on it), then when students can
+                        play it. The pair list is a rare review step, not a
+                        headline action, so it hangs off the count instead of
+                        owning a button of its own. */}
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 p-4">
                       <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-violet-100 text-violet-700">
                         <Gamepad2 className="h-5 w-5" />
                       </span>
@@ -244,24 +274,34 @@ export default function Games() {
                           )}
                         </div>
                         <p className="mt-0.5 text-xs text-slate-500">
-                          {game.itemCount} pair{game.itemCount === 1 ? '' : 's'}
+                          <button
+                            type="button"
+                            onClick={() => setExpandedId(expanded ? null : game.gameId)}
+                            aria-expanded={expanded}
+                            className="inline-flex items-center gap-1 rounded font-medium text-slate-600 underline decoration-slate-300 underline-offset-2 hover:text-violet-700 hover:decoration-violet-400"
+                          >
+                            {game.itemCount} pair{game.itemCount === 1 ? '' : 's'}
+                            <ChevronDown
+                              className={`h-3 w-3 transition-transform ${expanded ? 'rotate-180' : ''}`}
+                            />
+                          </button>
                           {created ? ` · created ${created}` : ''}
                         </p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setExpandedId(expanded ? null : game.gameId)}
-                        aria-expanded={expanded}
-                        className="inline-flex flex-shrink-0 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                      >
-                        {expanded ? 'Hide' : 'View pairs'}
-                        <ChevronDown className={`h-4 w-4 transition-transform ${expanded ? 'rotate-180' : ''}`} />
-                      </button>
+                      <GameResultsButton
+                        batchId={selectedBatchId ?? ''}
+                        game={game}
+                        onError={(message) => setToast({ type: 'error', message })}
+                      />
+                      <GamePlayLink gameId={game.gameId} />
                       <button
                         type="button"
                         onClick={() => void handleDelete(game)}
                         disabled={deletingId === game.gameId}
-                        className="flex-shrink-0 rounded-md p-2 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+                        // slate-400 measured 2.63:1 on white — under the 3:1 floor
+                        // for a graphical control. slate-500 clears it at 4.76:1
+                        // and still reads as recessive next to the link buttons.
+                        className="flex-shrink-0 rounded-md p-2 text-slate-500 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
                         aria-label={`Delete ${game.title}`}
                       >
                         {deletingId === game.gameId ? (
@@ -271,7 +311,6 @@ export default function Games() {
                         )}
                       </button>
                     </div>
-                    <GamePlayLink gameId={game.gameId} />
                     <GameSchedule
                       batchId={selectedBatchId ?? ''}
                       game={game}
@@ -422,7 +461,54 @@ function GameSchedule({
   )
 }
 
-/** The student-facing link for a game — the game's equivalent of a Google Docs URL. */
+/**
+ * Results download for one game. The lecturer's question after the link goes out
+ * is "who played, and how did they do" — until now the page could not answer it.
+ */
+function GameResultsButton({
+  batchId,
+  game,
+  onError,
+}: {
+  batchId: string
+  game: GameSession
+  onError: (message: string) => void
+}) {
+  const [downloading, setDownloading] = useState(false)
+
+  async function handleDownload() {
+    setDownloading(true)
+    try {
+      await downloadGameResults(batchId, game.gameId)
+    } catch (err) {
+      onError(getErrorMessage(err, 'Could not export results for that game.'))
+    } finally {
+      setDownloading(false)
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => void handleDownload()}
+      disabled={downloading || !batchId}
+      title="Download results as CSV"
+      className="inline-flex flex-shrink-0 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+    >
+      {downloading ? <Spinner size={16} /> : <Download className="h-4 w-4" />}
+      Results
+    </button>
+  )
+}
+
+/**
+ * The student-facing link for a game — the game's equivalent of a Google Docs URL.
+ *
+ * It used to be a full-width strip of its own carrying the raw URL in a `<code>`
+ * tag. Nobody transcribes a URL by eye: the two things a lecturer does with it are
+ * hand it to students (copy) and check it themselves (open), so those are the two
+ * controls and the address itself is gone.
+ */
 function GamePlayLink({ gameId }: { gameId: string }) {
   const url = gamePlayUrl(gameId)
   const [copied, setCopied] = useState(false)
@@ -444,25 +530,153 @@ function GamePlayLink({ gameId }: { gameId: string }) {
   }
 
   return (
-    <div className="flex items-center gap-2 border-t border-slate-100 bg-slate-50/40 px-4 py-2.5">
+    <div className="flex flex-shrink-0 items-center gap-2">
+      <button
+        type="button"
+        onClick={() => void handleCopy()}
+        className="inline-flex flex-shrink-0 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+      >
+        {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+        {copied ? 'Copied' : 'Copy link'}
+      </button>
       <a
         href={url}
         target="_blank"
         rel="noreferrer"
-        className="inline-flex flex-shrink-0 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+        className="inline-flex flex-shrink-0 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
       >
-        <ExternalLink className="h-3.5 w-3.5" /> Open player
+        <ExternalLink className="h-4 w-4" /> Open game
       </a>
-      <button
-        type="button"
-        onClick={() => void handleCopy()}
-        className="inline-flex flex-shrink-0 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-      >
-        {copied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
-        {copied ? 'Copied' : 'Copy link for students'}
-      </button>
-      <code className="min-w-0 flex-1 truncate text-xs text-slate-400">{url}</code>
     </div>
+  )
+}
+
+/**
+ * Choosing among a term's saved work — a dialog, not a panel on the form.
+ *
+ * On the form this was a 224px scroll window showing about four rows. A 14-week
+ * course with lesson plans, labs and assessments can put 40+ items behind that
+ * porthole, unsorted and unsearchable. A dialog has the room, and it keeps the
+ * form itself asking one question: what is this game built from?
+ */
+function SavedWorkPicker({
+  open,
+  onClose,
+  artifacts,
+  matches,
+  query,
+  onQueryChange,
+  selectedId,
+  onChoose,
+}: {
+  open: boolean
+  onClose: () => void
+  artifacts: Artifact[]
+  matches: Artifact[]
+  query: string
+  onQueryChange: (value: string) => void
+  selectedId: string | null
+  onChoose: (artifact: Artifact) => void
+}) {
+  if (!open) return null
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Use saved work"
+      eyebrow="Choose a source"
+      size="md"
+      footer={
+        <Button type="button" variant="secondary" onClick={onClose}>
+          Cancel
+        </Button>
+      }
+    >
+      {artifacts.length === 0 ? (
+        <p className="py-2 text-sm text-slate-600">
+          Nothing saved in this space yet. Generate a lesson plan, lab, or assessment first, then
+          come back and build a game from it.
+        </p>
+      ) : (
+        <div className="space-y-3">
+          {/* Only worth the row once the list outgrows a glance. */}
+          {artifacts.length > 6 && (
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => onQueryChange(event.target.value)}
+              placeholder="Search by title, type, or week"
+              aria-label="Search saved work"
+              className="block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-500"
+            />
+          )}
+
+          {matches.length === 0 ? (
+            <p className="py-2 text-sm text-slate-600">Nothing matches “{query}”.</p>
+          ) : (
+            // Single-choice, so it announces as one: a radiogroup rather than N
+            // independent toggles. Choosing closes the dialog — there is nothing
+            // left to confirm once the pick is made.
+            <ul
+              className="max-h-80 space-y-1.5 overflow-y-auto"
+              role="radiogroup"
+              aria-label="Saved work in this space"
+            >
+              {matches.map((artifact, index) => {
+                const type = String(artifact.type || artifact.artifact_type || '')
+                const Icon = artifactIcon(type)
+                const active = selectedId === artifact.id
+                return (
+                  <li key={artifact.id}>
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      tabIndex={active || (!selectedId && index === 0) ? 0 : -1}
+                      autoFocus={active || (!selectedId && index === 0)}
+                      onClick={() => onChoose(artifact)}
+                      onKeyDown={(event) => {
+                        if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+                        event.preventDefault()
+                        const step = event.key === 'ArrowDown' ? 1 : -1
+                        const nextIndex = (index + step + matches.length) % matches.length
+                        const list = event.currentTarget.closest('ul')
+                        list?.querySelectorAll('button')[nextIndex]?.focus()
+                      }}
+                      className={`flex w-full items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-1 ${
+                        active
+                          ? 'border-violet-500 bg-violet-50 ring-1 ring-violet-300'
+                          : 'border-slate-200 hover:border-violet-300 hover:bg-violet-50/40'
+                      }`}
+                    >
+                      <span
+                        aria-hidden="true"
+                        className={`flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border ${
+                          active ? 'border-violet-600' : 'border-slate-300'
+                        }`}
+                      >
+                        {active && <span className="h-2 w-2 rounded-full bg-violet-600" />}
+                      </span>
+                      <Icon className="h-4 w-4 flex-shrink-0 text-violet-600" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-slate-800">
+                          {artifact.title}
+                        </span>
+                        <span className="block text-xs text-slate-600">
+                          {artifactTypeLabel(type)}
+                          {artifact.week ? ` · Week ${artifact.week}` : ''}
+                        </span>
+                      </span>
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </div>
+      )}
+    </Modal>
   )
 }
 
@@ -472,16 +686,40 @@ function GamePlayLink({ gameId }: { gameId: string }) {
  * picking a saved artifact clears any upload and vice versa — because the agent is told
  * to use a single source and mixing them produces a game that matches neither.
  */
-function GameGenerator({ batch, onCreated }: { batch: Batch; onCreated: () => void }) {
+function GameGenerator({
+  batch,
+  batches,
+  batchesLoading,
+  onSelectBatch,
+  onCreated,
+}: {
+  batch: Batch
+  batches: Batch[]
+  batchesLoading: boolean
+  onSelectBatch: (id: string) => void
+  onCreated: () => void
+}) {
   const run = useGenerationRun(batch, 'game')
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [artifactsLoading, setArtifactsLoading] = useState(false)
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null)
+  // The saved-work picker is a dialog, not a panel on the form. Two reasons: the
+  // form should ask for ONE source, not make the lecturer choose a mechanism
+  // first; and a whole term's lesson plans, labs and assessments never fit a
+  // 4-row window on a form — a dialog has room to list and filter them.
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [pickerQuery, setPickerQuery] = useState('')
   const [instructions, setInstructions] = useState('')
   // Held as text so the field can be cleared while typing; validated before use.
   const [pairCount, setPairCount] = useState(String(DEFAULT_PAIRS))
-  const [hasDeadline, setHasDeadline] = useState(false)
-  const [deadline, setDeadline] = useState('')
+  // Seeded from storage so returning mid-run restores the deadline the lecturer
+  // already chose, instead of quietly creating the game without one.
+  const [deadline, setDeadline] = useState(() => readStoredDeadline(batch.id))
+  const [hasDeadline, setHasDeadline] = useState(() => Boolean(readStoredDeadline(batch.id)))
+
+  useEffect(() => {
+    writeStoredDeadline(batch.id, hasDeadline ? deadline : '')
+  }, [batch.id, hasDeadline, deadline])
 
   const pairs = Number(pairCount)
   const pairsValid = Number.isInteger(pairs) && pairs >= MIN_PAIRS && pairs <= MAX_PAIRS
@@ -504,13 +742,12 @@ function GameGenerator({ batch, onCreated }: { batch: Batch; onCreated: () => vo
     listArtifacts(batch.id, { current: true })
       .then((data) => {
         if (cancelled) return
-        setArtifacts(
-          data.filter((item) =>
-            ARTIFACT_SOURCE_TYPES.includes(
-              String(item.type || item.artifact_type || '') as (typeof ARTIFACT_SOURCE_TYPES)[number],
-            ),
+        const usable = data.filter((item) =>
+          ARTIFACT_SOURCE_TYPES.includes(
+            String(item.type || item.artifact_type || '') as (typeof ARTIFACT_SOURCE_TYPES)[number],
           ),
         )
+        setArtifacts(usable)
       })
       .catch(() => {
         if (!cancelled) setArtifacts([])
@@ -523,14 +760,29 @@ function GameGenerator({ batch, onCreated }: { batch: Batch; onCreated: () => vo
     }
   }, [batch.id])
 
-  // One source only: choosing a saved artifact drops any uploaded file.
+  // One source only, enforced from both ends: picking saved work drops any
+  // upload, and attaching a file drops any pick. A pending upload still rides
+  // along with the generate call even when it is off screen, so a leftover would
+  // send the agent both sources — the mix this form exists to prevent.
   function chooseArtifact(artifact: Artifact) {
-    const next = selectedArtifactId === artifact.id ? null : artifact.id
-    setSelectedArtifactId(next)
-    if (next) uploads.forEach((item) => run.removePendingAttachment(item.attachment_id))
+    setSelectedArtifactId(artifact.id)
+    uploads.forEach((item) => run.removePendingAttachment(item.attachment_id))
+    setPickerOpen(false)
+    setPickerQuery('')
   }
 
+  useEffect(() => {
+    if (uploads.length > 0) setSelectedArtifactId(null)
+  }, [uploads.length])
+
   const hasSource = uploads.length > 0 || Boolean(selectedArtifact)
+
+  const pickerMatches = artifacts.filter((artifact) => {
+    if (!pickerQuery.trim()) return true
+    const type = String(artifact.type || artifact.artifact_type || '')
+    const haystack = `${artifact.title} ${artifactTypeLabel(type)} ${artifact.week ? `week ${artifact.week}` : ''}`
+    return haystack.toLowerCase().includes(pickerQuery.trim().toLowerCase())
+  })
 
   async function handleGenerate() {
     if (run.sending || !hasSource || !pairsValid || !deadlineValid) return
@@ -553,6 +805,8 @@ function GameGenerator({ batch, onCreated }: { batch: Batch; onCreated: () => vo
 
   if (started) {
     return (
+      // Same width as the form it replaces, so hitting Generate doesn't snap the
+      // panel to a different size mid-flow.
       <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
           <h2 className="text-sm font-semibold text-slate-700">Game generation</h2>
@@ -561,6 +815,8 @@ function GameGenerator({ batch, onCreated }: { batch: Batch; onCreated: () => vo
             onClick={() => {
               run.reset()
               setSelectedArtifactId(null)
+              setHasDeadline(false)
+              setDeadline('')
               onCreated()
             }}
             className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
@@ -574,6 +830,10 @@ function GameGenerator({ batch, onCreated }: { batch: Batch; onCreated: () => vo
             run={run}
             accent="primary"
             gameDeadlineAt={deadlineIso}
+            // The list lives on this page; the create button lives four
+            // components down. Without this the run could finish and the list
+            // below would still insist the space was empty.
+            onGameCreated={onCreated}
           />
         </div>
       </section>
@@ -581,66 +841,40 @@ function GameGenerator({ batch, onCreated }: { batch: Batch; onCreated: () => vo
   }
 
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+    // Full width, matching the games list below it. Capping the card left the
+    // page with three different right edges — the card, the list, and the page
+    // header — which read as misalignment rather than rhythm. Individual
+    // controls are capped instead, so a short value never sits in a 1000px box.
+    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
       <h2 className="text-sm font-semibold text-slate-700">Build a game</h2>
-      <p className="mt-1 text-xs text-slate-500">Pick one source — an upload or saved work.</p>
 
-      <div className="mt-4 grid gap-5 md:grid-cols-2">
-        <div className={`rounded-lg border p-4 ${uploads.length > 0 ? 'border-violet-300 bg-violet-50/40' : 'border-slate-200'}`}>
-          <h3 className="mb-2 text-sm font-semibold text-slate-800">Upload a document</h3>
-          <p className="mb-3 text-xs text-slate-500">A PDF, slide deck, or notes file to extract terms from.</p>
-          <GenerationAttachments run={run} />
-        </div>
-
-        <div className={`rounded-lg border p-4 ${selectedArtifact ? 'border-violet-300 bg-violet-50/40' : 'border-slate-200'}`}>
-          <h3 className="mb-2 text-sm font-semibold text-slate-800">Or use saved work</h3>
-          {artifactsLoading ? (
-            <div className="flex items-center gap-2 py-3 text-xs text-slate-500">
-              <Spinner size={14} />
-              Loading saved work…
-            </div>
-          ) : artifacts.length === 0 ? (
-            <p className="text-xs text-slate-500">
-              Nothing saved in this space yet. Generate a lesson plan, lab, or assessment first.
-            </p>
-          ) : (
-            <ul className="max-h-56 space-y-1.5 overflow-y-auto">
-              {artifacts.map((artifact) => {
-                const type = String(artifact.type || artifact.artifact_type || '')
-                const Icon = artifactIcon(type)
-                const active = selectedArtifactId === artifact.id
-                return (
-                  <li key={artifact.id}>
-                    <button
-                      type="button"
-                      onClick={() => chooseArtifact(artifact)}
-                      aria-pressed={active}
-                      className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-2 text-left transition-colors ${
-                        active
-                          ? 'border-violet-400 bg-white'
-                          : 'border-transparent hover:border-slate-200 hover:bg-slate-50'
-                      }`}
-                    >
-                      <Icon className="h-4 w-4 flex-shrink-0 text-violet-600" />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-xs font-medium text-slate-800">
-                          {artifact.title}
-                        </span>
-                        <span className="block text-[11px] text-slate-400">
-                          {artifactTypeLabel(type)}
-                          {artifact.week ? ` · Week ${artifact.week}` : ''}
-                        </span>
-                      </span>
-                    </button>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-        </div>
+      {/* The space belongs at the top of the form, not floating in the page
+          corner where it aligned with nothing. It is still scope for the whole
+          page — the list below names the space it is showing for that reason. */}
+      <div className="mt-4">
+        <label htmlFor="games-batch" className="mb-1.5 block text-sm font-semibold text-slate-700">
+          Space
+        </label>
+        <select
+          id="games-batch"
+          value={batch.id}
+          onChange={(event) => onSelectBatch(event.target.value)}
+          disabled={batchesLoading}
+          className="block w-full max-w-md rounded-md border border-slate-300 bg-white px-3 py-2.5 pr-9 text-sm text-slate-700 focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-500"
+        >
+          {batches.map((option) => (
+            <option key={option.id} value={option.id}>
+              {option.batch_name} — {option.course_name}
+            </option>
+          ))}
+        </select>
       </div>
 
-      <div className="mt-4 grid gap-4 sm:grid-cols-[10rem_1fr]">
+      {/* Settings next — they arrive with sensible defaults, so the lecturer
+          reads rather than works. The one genuinely required input, the source,
+          comes last and sits directly above the button that consumes it.
+          Sections are separated by rules, not by more borders. */}
+      <div className="mt-5 grid max-w-3xl gap-4 border-t border-slate-100 pt-5 sm:grid-cols-[8rem_1fr]">
         <div>
           <label htmlFor="game-pair-count" className="mb-1.5 block text-sm font-semibold text-slate-700">
             Number of pairs
@@ -684,7 +918,7 @@ function GameGenerator({ batch, onCreated }: { batch: Batch; onCreated: () => vo
         </div>
       </div>
 
-      <div className="mt-4 rounded-lg border border-slate-200 p-4">
+      <div className="mt-5 border-t border-slate-100 pt-5">
         <label className="flex items-center gap-2.5">
           <input
             type="checkbox"
@@ -728,21 +962,115 @@ function GameGenerator({ batch, onCreated }: { batch: Batch; onCreated: () => vo
         )}
       </div>
 
-      <div className="mt-4">
-        <button
-          type="button"
-          onClick={() => void handleGenerate()}
-          disabled={run.sending || !hasSource || !pairsValid || !deadlineValid}
-          className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-violet-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-violet-700 shadow-sm transition-colors disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none disabled:cursor-not-allowed"
-        >
-          {run.sending ? <Spinner tone="inverse" size={16} /> : <Sparkles className="h-4 w-4" />}
-          Generate game
-        </button>
+      {/* One slot, two ways to fill it. The earlier version asked the lecturer to
+          pick a MECHANISM (upload tab vs saved-work tab) before picking a thing,
+          which is a question about the software rather than about the teaching. */}
+      <div className="mt-5 border-t border-slate-100 pt-5">
+        <h3 className="text-sm font-semibold text-slate-700">Source</h3>
+        {/* The two buttons below already say what the options are; spelling them
+            out here as well was the third time this page made the same point. */}
+        <p className="mt-1 text-xs text-slate-500">Where the terms come from. Pick one.</p>
+
+        {selectedArtifact ? (
+          <div className="mt-3 flex flex-wrap items-center gap-x-2.5 gap-y-2 rounded-lg border border-violet-300 bg-violet-50 px-3 py-2.5">
+            {(() => {
+              const type = String(selectedArtifact.type || selectedArtifact.artifact_type || '')
+              const Icon = artifactIcon(type)
+              return (
+                <>
+                  <Icon className="h-4 w-4 flex-shrink-0 text-violet-600" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium text-slate-800">
+                      {selectedArtifact.title}
+                    </span>
+                    <span className="block text-xs text-slate-600">
+                      {artifactTypeLabel(type)}
+                      {selectedArtifact.week ? ` · Week ${selectedArtifact.week}` : ''}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setPickerOpen(true)}
+                    className="rounded-md px-2 py-1 text-xs font-medium text-violet-700 hover:bg-violet-100"
+                  >
+                    Change
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedArtifactId(null)}
+                    className="rounded-md px-2 py-1 text-xs font-medium text-slate-600 hover:bg-violet-100"
+                  >
+                    Remove
+                  </button>
+                </>
+              )
+            })()}
+          </div>
+        ) : (
+          <div className="mt-3">
+            {/* The alternative rides inside the attach ROW rather than beside the
+                whole component: file previews grow downward, so a sibling laid
+                out next to them floats to the middle of a tall block.
+                `label={null}` — the heading above already names this, and the
+                component's default calls a required input "optional". */}
+            <GenerationAttachments
+              run={run}
+              label={null}
+              actions={
+                <>
+                  {/* Stays available with a file attached. Hiding it meant a
+                      lecturer who attached the wrong thing had to work out that
+                      removing it was the route to the other option; choosing
+                      saved work simply replaces the upload. */}
+                  <span className="text-xs text-slate-500">or</span>
+                  <button
+                    type="button"
+                    onClick={() => setPickerOpen(true)}
+                    disabled={artifactsLoading}
+                    className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    {artifactsLoading ? <Spinner size={16} /> : <BookOpen className="h-4 w-4" />}
+                    Use saved work
+                  </button>
+                </>
+              }
+            />
+          </div>
+        )}
+      </div>
+
+      <SavedWorkPicker
+        open={pickerOpen}
+        onClose={() => {
+          setPickerOpen(false)
+          setPickerQuery('')
+        }}
+        artifacts={artifacts}
+        matches={pickerMatches}
+        query={pickerQuery}
+        onQueryChange={setPickerQuery}
+        selectedId={selectedArtifactId}
+        onChoose={chooseArtifact}
+      />
+
+      {/* Full-bleed across the old 1180px column, the CTA read as a banner rather
+          than a button. Right-aligned at the end of the form is where the eye
+          finishes, with the blocking reason beside it instead of centred under. */}
+      <div className="mt-5 flex flex-wrap items-center justify-end gap-x-4 gap-y-2 border-t border-slate-100 pt-5">
         {!hasSource && !run.sending && (
-          <p className="mt-2 text-center text-xs text-slate-500">
+          <p className="mr-auto text-xs text-slate-500">
             Upload a document or pick saved work to continue.
           </p>
         )}
+        <Button
+          type="button"
+          onClick={() => void handleGenerate()}
+          disabled={run.sending || !hasSource || !pairsValid || !deadlineValid}
+          loading={run.sending}
+          leadingIcon={<Sparkles className="h-4 w-4" />}
+        >
+          Generate game
+        </Button>
       </div>
     </section>
   )

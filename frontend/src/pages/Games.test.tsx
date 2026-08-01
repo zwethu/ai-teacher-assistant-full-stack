@@ -83,7 +83,9 @@ describe('Games page', () => {
     await waitFor(() => expect(screen.getByText('Plant Biology')).toBeTruthy())
     expect(screen.queryByText('Photosynthesis')).toBeNull()
 
-    await userEvent.click(screen.getByRole('button', { name: /View pairs/ }))
+    // The pair count doubles as the disclosure — reviewing 30 generated pairs is
+    // a rare check, not an action worth a button of its own on every row.
+    await userEvent.click(screen.getByRole('button', { name: /2 pairs/ }))
 
     expect(screen.getByText('Photosynthesis')).toBeTruthy()
     expect(screen.getByText(/Converting light into chemical energy/)).toBeTruthy()

@@ -1,4 +1,4 @@
-import { useRef, useState, type ChangeEvent } from 'react'
+import { useRef, useState, type ChangeEvent, type ReactNode } from 'react'
 import { Paperclip } from 'lucide-react'
 import type { ChatAttachmentSnapshot } from '../../entity/Chat'
 import type { GenerationRunState } from '../../hooks/useGenerationRun'
@@ -18,7 +18,26 @@ import { Spinner } from '../../design-system'
  * the full viewer, and the identical readiness wording — a lecturer attaching a
  * PDF here should not have to learn a second set of affordances.
  */
-export function GenerationAttachments({ run }: { run: GenerationRunState }) {
+export function GenerationAttachments({
+  run,
+  label = 'Reference files (optional)',
+  actions,
+}: {
+  run: GenerationRunState
+  /**
+   * Override when the host form has already named this input. Pass `null` to
+   * render no label at all — on the Games page the file IS the source the game
+   * is built from, so the default wording would call a required input optional.
+   */
+  label?: string | null
+  /**
+   * Sibling controls for the Attach row — an alternative way to supply the same
+   * input, say. They belong on the button's own line: a host that lays them out
+   * beside this whole component instead ends up centring them against the file
+   * previews, which grow downward.
+   */
+  actions?: ReactNode
+}) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [preview, setPreview] = useState<ChatAttachmentSnapshot | null>(null)
 
@@ -37,9 +56,9 @@ export function GenerationAttachments({ run }: { run: GenerationRunState }) {
 
   return (
     <div>
-      <label className="mb-1.5 block text-sm font-semibold text-slate-700">
-        Reference files (optional)
-      </label>
+      {label && (
+        <label className="mb-1.5 block text-sm font-semibold text-slate-700">{label}</label>
+      )}
       <input
         ref={fileInputRef}
         type="file"
@@ -48,19 +67,22 @@ export function GenerationAttachments({ run }: { run: GenerationRunState }) {
         className="hidden"
         onChange={onFiles}
       />
-      <button
-        type="button"
-        onClick={() => fileInputRef.current?.click()}
-        disabled={run.attachmentsUploading}
-        className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-      >
-        {run.attachmentsUploading ? (
-          <Spinner size={16} />
-        ) : (
-          <Paperclip className="h-4 w-4" />
-        )}
-        Attach files
-      </button>
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={run.attachmentsUploading}
+          className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+        >
+          {run.attachmentsUploading ? (
+            <Spinner size={16} />
+          ) : (
+            <Paperclip className="h-4 w-4" />
+          )}
+          Attach files
+        </button>
+        {actions}
+      </div>
 
       {run.pendingAttachments.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-2">

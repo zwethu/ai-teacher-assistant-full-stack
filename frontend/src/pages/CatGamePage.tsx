@@ -48,6 +48,7 @@ export default function CatGamePage() {
         nickname={state.nickname}
         playerUid={state.playerUid}
         assessmentId={state.session.id}
+        batchId={state.session.batchId}
       />
     </div>
   );

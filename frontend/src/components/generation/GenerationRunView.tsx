@@ -31,6 +31,7 @@ export function GenerationRunView({
   emptyHint,
   onBlueprintSaved,
   gameDeadlineAt,
+  onGameCreated,
 }: {
   batch: Batch
   run: GenerationRunState
@@ -39,6 +40,10 @@ export function GenerationRunView({
   onBlueprintSaved?: (version: number | null) => void
   /** Deadline chosen on the game form, applied when the staged game is created. */
   gameDeadlineAt?: string | null
+  /** Fires once the staged game actually exists, so a host page holding a list
+   *  of games can refresh. Without it the page that owns the list has no idea
+   *  the run produced anything. */
+  onGameCreated?: () => void
 }) {
   const { stage, activeMessage, runState } = deriveGenerationStage(run)
   const theme = ACCENT[accent]
@@ -171,7 +176,13 @@ export function GenerationRunView({
             <GameCreateButton
               batchId={batch.id}
               msg={activeMessage}
-              onDelivered={deliver}
+              // `deliver` keeps the stepper honest; `onGameCreated` tells the host
+              // page the game now exists. Both matter: without the second, the
+              // page can say "Game created" and "No games yet" at the same time.
+              onDelivered={(patch) => {
+                deliver(patch)
+                onGameCreated?.()
+              }}
               deadlineAt={gameDeadlineAt}
             />
             <div className="flex flex-wrap items-center gap-2 pt-1">

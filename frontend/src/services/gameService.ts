@@ -95,3 +95,30 @@ export async function getGame(batchId: string, gameId: string): Promise<GameSess
 export async function deleteGame(batchId: string, gameId: string): Promise<void> {
   await api.delete(`/batches/${batchId}/games/${gameId}`)
 }
+
+/**
+ * Downloads one game's results as a CSV, one row per enrolled student — including
+ * the ones who never played, so the lecturer can see who to chase.
+ *
+ * The blob is built here rather than pointing an <a href> at the endpoint because
+ * the request needs the auth header; a bare link would arrive unauthenticated.
+ */
+export async function downloadGameResults(batchId: string, gameId: string): Promise<void> {
+  const res = await api.get(`/batches/${batchId}/games/${gameId}/results.csv`, {
+    responseType: 'blob',
+  })
+
+  // Prefer the filename the server chose — it carries the game title and date.
+  const disposition = String(res.headers['content-disposition'] ?? '')
+  const match = disposition.match(/filename="?([^"]+)"?/)
+  const filename = match?.[1] ?? `game-results-${gameId}.csv`
+
+  const url = URL.createObjectURL(new Blob([res.data], { type: 'text/csv;charset=utf-8' }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}

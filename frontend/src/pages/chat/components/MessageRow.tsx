@@ -1,7 +1,6 @@
 import { memo, useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  BookOpen,
   CalendarClock,
   Check,
   CircleSlash,
@@ -9,12 +8,9 @@ import {
   CornerUpLeft,
   Download,
   ExternalLink,
-  FileQuestion,
   FileText,
-  FlaskConical,
   Gamepad2,
   Mail,
-  Map as MapIcon,
   Maximize2,
   Pencil,
   RefreshCw,
@@ -28,7 +24,8 @@ import rehypeKatex from 'rehype-katex'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import 'katex/dist/katex.min.css'
-import { ThinkingRow, Spinner, Button } from '../../../design-system'
+import { Spinner, Button } from '../../../design-system'
+import { artifactIcon } from '../../../utils/artifactIcons'
 import type { ChatMessage } from '../../../entity/Chat'
 import { startGoogleOAuth } from '../../../services/authService'
 import {
@@ -264,6 +261,7 @@ export const MessageRow = memo(function MessageRow({
   batchId,
   onApproveOutline,
   approvalDisabled = false,
+  approvalGenerating = false,
   approvalCompleted = false,
   approvalSuperseded = false,
   onPendingEmailEdited,
@@ -281,6 +279,8 @@ export const MessageRow = memo(function MessageRow({
   retrying?: boolean
   onApproveOutline?: (message: ChatMessage) => void
   approvalDisabled?: boolean
+  /** This outline's own approval run is in flight — not merely "something is". */
+  approvalGenerating?: boolean
   approvalCompleted?: boolean
   approvalSuperseded?: boolean
   onPendingEmailEdited?: (runId: string, result: UpdatePendingEmailResult) => void
@@ -411,6 +411,7 @@ export const MessageRow = memo(function MessageRow({
                     <OutlineApprovalCard
                       msg={msg}
                       disabled={approvalDisabled}
+                      generating={approvalGenerating}
                       completed={approvalCompleted}
                       superseded={approvalSuperseded}
                       onApprove={() => onApproveOutline?.(msg)}
@@ -521,10 +522,14 @@ export function isOutlineApprovalMessage(msg: ChatMessage, isPending: boolean) {
 }
 
 export function OutlineApprovalCard({
-  msg, disabled, completed, superseded, onApprove,
+  msg, disabled, generating = false, completed, superseded, onApprove,
 }: {
   msg: ChatMessage
   disabled: boolean
+  /** This card's approval is the run in flight. `disabled` is the broader "the
+   *  chat is busy" — a plain follow-up message sets it too, and reporting that
+   *  as "Generating full preview..." would name work nobody started. */
+  generating?: boolean
   completed: boolean
   superseded: boolean
   onApprove: () => void
@@ -535,7 +540,9 @@ export function OutlineApprovalCard({
   const locked = completed || isSuperseded || approvalStatus === 'approved'
   const type = String(metadata.outline_artifact_type || metadata.artifact_type || '')
   const label = type === 'lab' ? 'Lab Outline' : type === 'quiz' ? 'Assessment Configuration' : type === 'course_blueprint' ? 'Course Plan Outline' : 'Lesson Plan Outline'
-  const Icon = type === 'lab' ? FlaskConical : type === 'quiz' ? FileQuestion : BookOpen
+  // Was a ternary that fell course_blueprint through to BookOpen — the lesson
+  // plan's icon — so the two outlines were indistinguishable at a glance.
+  const Icon = artifactIcon(type)
   return (
     <div className="overflow-hidden rounded-lg border border-violet-200/80 bg-white/75 shadow-sm backdrop-blur-sm">
       <div className="flex items-center gap-3 border-b border-violet-100 bg-violet-50/40 px-4 py-3.5">
@@ -552,15 +559,23 @@ export function OutlineApprovalCard({
       <div className="px-5 py-4"><ResponseMarkdown content={msg.content} streaming={false} metadata={msg.metadata} /></div>
       <div className="flex flex-col gap-2 border-t border-slate-200/80 bg-slate-50/50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-xs leading-5 text-slate-500">Reply with changes to revise the outline before generation.</p>
-        <Button type="button" disabled={disabled || locked} onClick={onApprove} className="flex-shrink-0">
+        <Button
+          type="button"
+          disabled={disabled || locked}
+          /* The garland, not a bare label change: the button is the thing that
+             was pressed, so it is the thing that has to look busy. */
+          loading={generating && !locked}
+          onClick={onApprove}
+          className="flex-shrink-0"
+        >
           {completed
             ? 'Full preview generated'
             : isSuperseded
               ? 'Outline revision requested'
             : approvalStatus === 'approved'
               ? 'Outline approved'
-              : disabled
-                ? 'Generating full preview...'
+              : generating
+                ? type === 'course_blueprint' ? 'Generating course plan...' : 'Generating full preview...'
                 : type === 'course_blueprint' ? 'Approve and generate course plan' : 'Approve and generate full preview'}
         </Button>
       </div>
@@ -626,7 +641,9 @@ export function ArtifactPreviewCard({
     ? `Week ${String(week)}`
     : ''
   const summary = extractPreviewSummary(content)
-  const Icon = isLab ? FlaskConical : isQuiz ? FileQuestion : isCourseBlueprint ? MapIcon : isGame ? Gamepad2 : BookOpen
+  // The preview card drew the course plan as a map pin while the approval card
+  // above drew it as a book and the composer chip drew a mortarboard. One mark.
+  const Icon = artifactIcon(artifactType)
 
   useEffect(() => {
     if (!open) return
@@ -1773,6 +1790,8 @@ export function ArtifactExportButton({
             <>
               <ExportLink href={result?.lecturer_doc_url || result?.doc_url} label="Open Lecturer Guide" />
               <ExportLink href={result?.student_doc_url} label="Open Student Instructions" />
+              <ExportLink href={result?.lab_files_folder_url} label="Open Lab Files" />
+              <ExportLink href={result?.lab_solutions_folder_url} label="Open Solutions (lecturer)" />
             </>
           ) : artifactType === 'quiz' ? (
             <ExportLink href={result?.form_url || result?.doc_url} label="Open Google Form" />
@@ -1871,9 +1890,12 @@ function ExportLink({ href, label }: { href?: string; label: string }) {
  * "the agent is working" reads identically wherever it appears.
  */
 export function ThinkingIndicator() {
+  // Pre-agent phase: the request was just sent — nothing is thinking yet, so no
+  // garland and no text. The thinking mark is reserved for actual agent thoughts
+  // (ThinkingPanel takes over once real thinking events stream in).
   return (
-    <div className="py-1">
-      <ThinkingRow label="Thinking…" size={32} />
+    <div className="py-1 pl-1">
+      <Spinner size={18} tone="muted" />
     </div>
   )
 }

@@ -55,6 +55,10 @@ export type LessonPlanExportResult = {
   student_doc_url?: string
   student_doc_id?: string
   student_drive_file_name?: string
+  /** Drive folder holding the lab's runnable starter files (student-shareable). */
+  lab_files_folder_url?: string
+  /** Lecturer-only Drive folder holding solution files, when the lab has any. */
+  lab_solutions_folder_url?: string
 }
 
 export async function listArtifacts(

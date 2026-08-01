@@ -866,6 +866,25 @@
     }
   }
 
+  /* A row of tabs that can scroll sideways on a narrow screen, with the rule
+     under it drawn as an inset shadow rather than a border.
+
+     The usual construction — `border-b` on the strip, `-mb-px` on the tabs so
+     each tab's own 2px underline lands on top of it — leaves the tabs
+     overhanging their container by exactly 1px. That is enough to give the
+     strip a *vertical* scrollbar, because setting `overflow-x: auto` forces a
+     `visible` `overflow-y` to compute to `auto` (CSS Overflow 3 §3): the row
+     grew a scrollbar with stepper arrows down its side, over 1px of border
+     nobody can scroll to. Clipping it instead (`overflow-y: hidden`) eats half
+     the active tab's underline, and padding it out drops the underline below
+     the rule instead of over it.
+
+     As an inset shadow the rule sits at the padding-box edge, so a tab's own
+     border-bottom covers it with no negative margin and nothing overflows. */
+  .mila-tabstrip {
+    box-shadow: inset 0 -1px 0 var(--color-slate-200);
+  }
+
   .no-scrollbar::-webkit-scrollbar {
     display: none;
   }

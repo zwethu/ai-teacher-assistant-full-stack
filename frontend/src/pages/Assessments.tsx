@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { ChevronDown, ExternalLink, FileQuestion, Plus, Sparkles } from 'lucide-react'
+import { ChevronDown, ExternalLink, Plus, Sparkles } from 'lucide-react'
 import type { ToastMessage } from '../types'
 import Toast from '../components/ui/Toast'
 import { getErrorMessage } from '../utils/errors'
@@ -10,7 +10,10 @@ import { GenerationAttachments } from '../components/generation/GenerationAttach
 import { PlanHintBanner } from '../components/generation/PlanHintBanner'
 import { listArtifacts, type Artifact } from '../services/artifactService'
 import { timeAgo } from '../utils/formatDate'
+import { artifactIcon } from '../utils/artifactIcons'
 import { Spinner } from '../design-system'
+
+const AssessmentIcon = artifactIcon('assessment')
 
 const QUIZ_MODES: Array<{ value: string; label: string }> = [
   { value: 'mixed', label: 'Mixed' },
@@ -282,7 +285,7 @@ export default function Assessments() {
               </div>
             ) : artifacts.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-10 text-center rounded-xl border border-slate-100 bg-white">
-                <FileQuestion className="w-8 h-8 text-slate-300 mb-2" />
+                <AssessmentIcon className="w-8 h-8 text-slate-300 mb-2" />
                 <p className="text-sm text-slate-500">No assessments yet for this space.</p>
               </div>
             ) : (
@@ -291,7 +294,7 @@ export default function Assessments() {
                   <article key={a.id} className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
                     <div className="flex items-start gap-3 mb-2">
                       <div className="h-9 w-9 rounded-lg bg-violet-50 text-violet-600 flex items-center justify-center border border-violet-100">
-                        <FileQuestion className="w-4 h-4" />
+                        <AssessmentIcon className="w-4 h-4" />
                       </div>
                       <div className="min-w-0 flex-1">
                         <h3 className="font-semibold text-slate-900 truncate">{a.title || 'Quiz'}</h3>

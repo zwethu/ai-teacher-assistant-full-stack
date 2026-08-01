@@ -886,11 +886,30 @@ def export_lab_draft_to_google_docs(
 
     if not was_confirmed:
         _supersede_current_artifacts(batch_id, "lab", week, artifact_id)
+
+    # Physical scaffold delivery: real Drive files next to the docs. Best-effort —
+    # the files are also embedded in the docs' Lab Files section either way.
+    starter_delivery: dict[str, str] = {}
+    starter_files = payload.get("starter_files") or []
+    if isinstance(starter_files, list) and starter_files:
+        from services.google_workspace.drive_folders import upload_lab_starter_files
+
+        starter_delivery = upload_lab_starter_files(
+            lecturer_id,
+            starter_files=[f for f in starter_files if isinstance(f, dict)],
+            student_parent_id=student_folder_id,
+            lecturer_parent_id=lecturer_folder_id,
+            base_name=build_artifact_file_name(
+                version=next_version, week=week, artifact_type="lab", title=title
+            ),
+        )
+
     export_metadata = _google_doc_export_metadata(
         uid=lecturer_id,
         doc_id=str(doc_result.get("lecturer_doc_id") or ""),
     )
     metadata = {
+        **starter_delivery,
         "student_doc_url": doc_result.get("student_doc_url", ""),
         "student_doc_id": doc_result.get("student_doc_id", ""),
         "student_drive_file_name": doc_result.get("student_drive_file_name", student_name),

@@ -158,10 +158,23 @@ def list_chats(
     batch_id: str,
     lecturer_id: str,
     include_hidden: bool = False,
+    limit: int | None = None,
+    before: str | None = None,
 ) -> list[dict[str, Any]]:
     """Return chats for a batch ordered newest first, filtered by lecturer_id."""
     col = _chats_col(batch_id)
-    docs = col.where("lecturer_id", "==", lecturer_id).order_by("created_at", direction="DESCENDING").stream()
+    query = col.where("lecturer_id", "==", lecturer_id).order_by("created_at", direction="DESCENDING")
+    if before:
+        from datetime import datetime
+
+        try:
+            cursor = datetime.fromisoformat(before.replace("Z", "+00:00"))
+            query = query.where("created_at", "<", cursor)
+        except ValueError:
+            pass
+    if limit:
+        query = query.limit(limit)
+    docs = query.stream()
     chats = [_chat_to_dict(doc.id, doc.to_dict() or {}) for doc in docs]
     if not include_hidden:
         # Exclude workflow/generation run-container chats. `hidden` covers newly
@@ -374,8 +387,15 @@ def _attachment_snapshot(data: dict[str, Any]) -> dict[str, Any]:
 def add_user_message_with_attachments(
     *, batch_id: str, chat_id: str, content: str, lecturer_id: str,
     run_id: str, attachment_ids: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """Atomically persist a user message and claim its chat attachments."""
+    """Atomically persist a user message and claim its chat attachments.
+
+    ``metadata`` is stored verbatim on the message. Its one use today is
+    ``{"auto_generated": True}``, stamped on the request a UI control issues on
+    the lecturer's behalf (approving an outline) so the transcript can leave it
+    out — they pressed a button, they did not write a sentence.
+    """
     from services.attachment_constants import (
         MAX_ATTACHMENTS_PER_MESSAGE, MAX_IMAGES_PER_MESSAGE,
         MAX_MESSAGE_ATTACHMENT_BYTES,
@@ -433,6 +453,8 @@ def add_user_message_with_attachments(
             "message_id": msg_id, "chat_id": chat_id, "role": "user", "content": content,
             "run_id": run_id, "attachments": snapshots, "created_at": SERVER_TIMESTAMP,
         }
+        if metadata:
+            doc["metadata"] = metadata
         txn.set(msg_ref, doc)
         for ref in refs:
             from services.attachment_constants import get_chat_attachment_retention_days
@@ -450,7 +472,7 @@ def add_user_message_with_attachments(
     snapshots, records = _commit(transaction)
     return {
         "message_id": msg_id, "chat_id": chat_id, "role": "user", "content": content,
-        "run_id": run_id, "attachments": snapshots,
+        "run_id": run_id, "attachments": snapshots, "metadata": metadata or {},
     }, records
 
 
@@ -508,7 +530,11 @@ def update_assistant_message_content_for_run(
 
 
 def list_messages(
-    batch_id: str, chat_id: str, lecturer_id: str, limit: int | None = None
+    batch_id: str,
+    chat_id: str,
+    lecturer_id: str,
+    limit: int | None = None,
+    before: str | None = None,
 ) -> list[dict[str, Any]]:
     """Return messages for a chat oldest-first, after ownership check.
 
@@ -523,8 +549,17 @@ def list_messages(
     if limit is None:
         docs = col.order_by("created_at").stream()
         return [_msg_to_dict(doc.id, doc.to_dict() or {}) for doc in docs]
-    # Newest N, then flip back to chronological for the caller.
-    docs = col.order_by("created_at", direction=firestore.Query.DESCENDING).limit(limit).stream()
+    # Newest N (optionally before a cursor), flipped back to chronological.
+    query = col.order_by("created_at", direction=firestore.Query.DESCENDING)
+    if before:
+        from datetime import datetime
+
+        try:
+            cursor = datetime.fromisoformat(before.replace("Z", "+00:00"))
+            query = query.where("created_at", "<", cursor)
+        except ValueError:
+            pass  # bad cursor → newest page, never an error
+    docs = query.limit(limit).stream()
     return [_msg_to_dict(doc.id, doc.to_dict() or {}) for doc in docs][::-1]
 
 

@@ -24,6 +24,7 @@ export default function Chat() {
         textareaRef={state.textareaRef}
         handleSend={state.handleSend}
         handleApproveOutline={state.handleApproveOutline}
+        approvingOutlineMessageId={state.approvingOutlineMessageId}
         applyPendingEmailEdit={state.applyPendingEmailEdit}
         activeGenerateMode={state.activeGenerateMode}
         setActiveGenerateMode={state.setActiveGenerateMode}

@@ -1,11 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import {
-  BookOpen,
-  FileQuestion,
-  FlaskConical,
-  Gamepad2,
   Globe,
-  GraduationCap,
   History,
   Mail,
   Paperclip,
@@ -14,6 +9,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { Spinner, Switch } from '../../../design-system'
+import { ARTIFACT_ICONS } from '../../../utils/artifactIcons'
 import { useExitDelay } from '../../../hooks/useExitDelay'
 
 /**
@@ -220,33 +216,33 @@ export const GENERATE_MODES: ModeSpec[] = [
   {
     mode: 'course_blueprint',
     label: 'Course Plan',
-    icon: GraduationCap,
+    icon: ARTIFACT_ICONS.course_blueprint,
     placeholder:
       'Describe the course plan you want, e.g. a 12-week plan focused on applied data skills...',
   },
   {
     mode: 'lesson_plan',
     label: 'Lesson Plan Preview',
-    icon: BookOpen,
+    icon: ARTIFACT_ICONS.lesson_plan,
     placeholder: 'Describe the lesson plan preview you want, e.g. Week 1 intro to Power BI...',
   },
   {
     mode: 'lab',
     label: 'Lab Preview',
-    icon: FlaskConical,
+    icon: ARTIFACT_ICONS.lab,
     placeholder: 'Describe the lab preview you want, e.g. Week 3 Firebase guestbook lab...',
   },
   {
     mode: 'assessment',
     label: 'Assessment Preview',
-    icon: FileQuestion,
+    icon: ARTIFACT_ICONS.assessment,
     placeholder:
       'Describe the assessment preview you want, e.g. Week 3 mixed quiz, 10 questions...',
   },
   {
     mode: 'game',
     label: 'Study Game',
-    icon: Gamepad2,
+    icon: ARTIFACT_ICONS.game,
     placeholder: 'Attach a PDF, then describe the game, e.g. a matching game from these lecture notes...',
   },
   {

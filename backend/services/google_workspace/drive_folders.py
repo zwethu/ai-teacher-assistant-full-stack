@@ -243,3 +243,83 @@ def delete_drive_file(uid: str, file_id: str) -> bool:
         if getattr(exc.resp, "status", None) == 404:
             return False
         raise
+
+
+def upload_text_file(
+    uid: str,
+    *,
+    name: str,
+    content: str,
+    parent_id: str,
+    mime_type: str = "text/plain",
+) -> dict[str, str]:
+    """Upload a small text file (lab starter code) into a Drive folder."""
+    from googleapiclient.http import MediaInMemoryUpload
+
+    drive = _build_drive_service(uid)
+    media = MediaInMemoryUpload(content.encode("utf-8"), mimetype=mime_type)
+    created = drive.files().create(
+        body={"name": sanitize_drive_name(name), "parents": [parent_id]},
+        media_body=media,
+        fields="id,name,webViewLink",
+    ).execute()
+    return {
+        "id": str(created.get("id") or ""),
+        "name": str(created.get("name") or name),
+        "url": str(created.get("webViewLink") or ""),
+    }
+
+
+def upload_lab_starter_files(
+    uid: str,
+    *,
+    starter_files: list[dict],
+    student_parent_id: str,
+    lecturer_parent_id: str,
+    base_name: str,
+) -> dict[str, str]:
+    """Materialize the lab scaffold as real Drive files.
+
+    Starter + data files land in a student-shareable "<base> — Lab Files" folder;
+    solution files land in a lecturer-only "<base> — Solutions" folder. Drive has
+    no nested paths, so file paths are flattened with '__'. Returns folder links;
+    never raises (file delivery must not fail the doc export).
+    """
+    result: dict[str, str] = {}
+    try:
+        student_files = [
+            f for f in starter_files
+            if str(f.get("file_role") or "starter") != "solution" and str(f.get("content") or "").strip()
+        ]
+        solution_files = [
+            f for f in starter_files
+            if str(f.get("file_role") or "") == "solution" and str(f.get("content") or "").strip()
+        ]
+        if student_files:
+            folder = get_or_create_folder(uid, f"{base_name} — Lab Files", parent_id=student_parent_id)
+            for f in student_files:
+                upload_text_file(
+                    uid,
+                    name=str(f.get("path") or "file.txt").replace("/", "__"),
+                    content=str(f.get("content") or ""),
+                    parent_id=folder["id"],
+                )
+            result["lab_files_folder_id"] = folder["id"]
+            result["lab_files_folder_url"] = folder.get("url") or folder_url(folder["id"])
+        if solution_files:
+            folder = get_or_create_folder(uid, f"{base_name} — Solutions", parent_id=lecturer_parent_id)
+            for f in solution_files:
+                upload_text_file(
+                    uid,
+                    name=str(f.get("path") or "solution.txt").replace("/", "__"),
+                    content=str(f.get("content") or ""),
+                    parent_id=folder["id"],
+                )
+            result["lab_solutions_folder_id"] = folder["id"]
+            result["lab_solutions_folder_url"] = folder.get("url") or folder_url(folder["id"])
+    except Exception:  # pragma: no cover - defensive: delivery is best-effort
+        import logging
+
+        logging.getLogger(__name__).warning("lab starter-file upload failed", exc_info=True)
+        result["lab_files_upload_error"] = "Starter file upload failed — files are in the doc."
+    return result

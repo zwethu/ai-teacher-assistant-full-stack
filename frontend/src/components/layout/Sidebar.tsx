@@ -4,10 +4,7 @@ import { MilaLogo } from '../brand/MilaLogo'
 import type { LucideIcon } from 'lucide-react'
 import {
   Activity,
-  BarChart3,
-  BookOpen,
   ChevronDown,
-  Gamepad2,
   History,
   LogOut,
   Mail,
@@ -18,6 +15,7 @@ import {
   X,
 } from 'lucide-react'
 import { useAuth } from '../../hooks/useAuth'
+import { ARTIFACT_ICONS } from '../../utils/artifactIcons'
 import { getStress, type StressState } from '../../services/wellnessService'
 import WellnessPopover from '../wellness/WellnessPopover'
 const NAV_ITEMS: {
@@ -28,10 +26,10 @@ const NAV_ITEMS: {
 }[] = [
   { to: '/chat', label: 'Chat', icon: MessageCircle, end: true },
   { to: '/batches', label: 'Batches', icon: Users },
-  { to: '/lesson-plans', label: 'Lesson Plans', icon: BookOpen },
-  { to: '/assessments', label: 'Assessments', icon: BarChart3 },
+  { to: '/lesson-plans', label: 'Lesson Plans', icon: ARTIFACT_ICONS.lesson_plan },
+  { to: '/assessments', label: 'Assessments', icon: ARTIFACT_ICONS.assessment },
   { to: '/email', label: 'Send Emails', icon: Mail },
-  { to: '/games', label: 'Games', icon: Gamepad2 },
+  { to: '/games', label: 'Games', icon: ARTIFACT_ICONS.game },
   { to: '/chat-history', label: 'Sessions', icon: History },
 ]
 

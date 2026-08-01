@@ -8,8 +8,6 @@ import {
   Copy,
   Download,
   ExternalLink,
-  FileQuestion,
-  FlaskConical,
   Gamepad2,
   Lock,
   LockOpen,
@@ -27,6 +25,7 @@ import { useBatchSelection } from '../hooks/useBatchSelection'
 import { useGenerationRun } from '../hooks/useGenerationRun'
 import { listArtifacts, type Artifact } from '../services/artifactService'
 import { gameTimeLimitMinutes } from '../lib/gameTiming'
+import { artifactIcon } from '../utils/artifactIcons'
 import {
   deleteGame,
   downloadGameResults,
@@ -104,12 +103,6 @@ function writeStoredDeadline(batchId: string, value: string): void {
   } catch {
     /* see above */
   }
-}
-
-function artifactIcon(type: string) {
-  if (type === 'lab') return FlaskConical
-  if (type === 'quiz' || type === 'assessment') return FileQuestion
-  return BookOpen
 }
 
 function artifactTypeLabel(type: string): string {

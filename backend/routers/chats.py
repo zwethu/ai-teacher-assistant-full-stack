@@ -150,9 +150,13 @@ async def create_chat_endpoint(
 @router.get("", response_model=list[dict])
 async def list_chats_endpoint(
     batch_id: str,
+    limit: int = 30,
+    before: str | None = None,
     current_user: CurrentUser = Depends(get_current_user),
 ) -> list[dict]:
-    return list_chats(batch_id, current_user["uid"])
+    return list_chats(
+        batch_id, current_user["uid"], limit=max(1, min(limit, 100)), before=before
+    )
 
 
 @router.delete("/{chat_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -308,13 +312,16 @@ async def delete_chat_attachment_endpoint(
 async def list_messages_endpoint(
     batch_id: str,
     chat_id: str,
+    before: str | None = None,
+    limit: int | None = None,
     current_user: CurrentUser = Depends(get_current_user),
 ) -> list[dict]:
     lecturer_id: str = current_user["uid"]
     chat = get_chat(batch_id, chat_id, lecturer_id)
     if chat is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
-    return list_messages(batch_id, chat_id, lecturer_id, limit=DEFAULT_MESSAGE_LIMIT)
+    page = max(1, min(limit or DEFAULT_MESSAGE_LIMIT, DEFAULT_MESSAGE_LIMIT))
+    return list_messages(batch_id, chat_id, lecturer_id, limit=page, before=before)
 
 
 def _export_response(payload: bytes, media_type: str, filename: str) -> Response:

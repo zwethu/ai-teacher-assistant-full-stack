@@ -15,9 +15,6 @@ from services.artifact_renderers.code_blocks import normalize_code_block
 
 Block = TextBlock | TableBlock
 
-_SECTION_DIVIDER = "─" * 48
-
-
 class LabDocBuilder:
     """Build lecturer or student lab Google Doc blocks from a LabFull."""
 
@@ -31,10 +28,6 @@ class LabDocBuilder:
         return self._build_student()
 
     @staticmethod
-    def _append_section_divider(blocks: list[Block]) -> None:
-        blocks.append(TextBlock(BlockType.DIVIDER, _SECTION_DIVIDER))
-
-    @staticmethod
     def _append_starter_files(blocks: list[Block], lab, *, include_solutions: bool) -> None:
         files = [
             f for f in getattr(lab, "starter_files", [])
@@ -45,7 +38,7 @@ class LabDocBuilder:
         blocks.append(TextBlock(BlockType.HEADING1, "Lab Files (starter scaffold)"))
         for f in files:
             role = f" ({f.file_role})" if f.file_role and f.file_role != "starter" else ""
-            blocks.append(TextBlock(BlockType.HEADING2, f"{f.path}{role}"))
+            blocks.append(TextBlock(BlockType.HEADING3, f"{f.path}{role}"))
             if f.description:
                 blocks.append(TextBlock(BlockType.BODY, f.description))
             blocks.append(TextBlock(BlockType.CODE, f.content.rstrip()))
@@ -69,16 +62,13 @@ class LabDocBuilder:
                 ],
             )
         )
-        blocks.append(TextBlock(BlockType.DIVIDER, "―" * 48))
 
         blocks.append(TextBlock(BlockType.HEADING1, "Lesson Plan Alignment"))
         blocks.append(TextBlock(BlockType.BODY, lab.lesson_plan_alignment))
-        self._append_section_divider(blocks)
 
         blocks.append(TextBlock(BlockType.HEADING1, "Learning Objectives"))
         for objective in lab.learning_objectives:
             blocks.append(TextBlock(BlockType.BULLET, objective))
-        self._append_section_divider(blocks)
 
         blocks.append(TextBlock(BlockType.HEADING1, "Environment Setup"))
         env = lab.environment_profile
@@ -98,15 +88,13 @@ class LabDocBuilder:
             ("Access constraints", env.access_constraints),
         ):
             if items:
-                blocks.append(TextBlock(BlockType.HEADING2, label))
+                blocks.append(TextBlock(BlockType.HEADING3, label))
                 for item in items:
                     blocks.append(TextBlock(BlockType.BULLET, item))
-        self._append_section_divider(blocks)
 
         blocks.append(TextBlock(BlockType.HEADING1, "Materials / Software / Equipment"))
         for item in lab.materials:
             blocks.append(TextBlock(BlockType.BULLET, item))
-        self._append_section_divider(blocks)
 
         blocks.append(TextBlock(BlockType.HEADING1, "Safety and Risk Profile"))
         safety = lab.safety_profile
@@ -121,7 +109,7 @@ class LabDocBuilder:
             ("Prohibited actions", safety.prohibited_actions),
         ):
             if items:
-                blocks.append(TextBlock(BlockType.HEADING2, label))
+                blocks.append(TextBlock(BlockType.HEADING3, label))
                 for item in items:
                     blocks.append(TextBlock(BlockType.BULLET, item))
         blocks.append(
@@ -130,12 +118,10 @@ class LabDocBuilder:
                 f"Supervision required: {'Yes' if safety.supervision_required else 'No'}",
             )
         )
-        self._append_section_divider(blocks)
 
         blocks.append(TextBlock(BlockType.HEADING1, "Pre-Lab Lecturer Checklist"))
         for task in lab.pre_lab_tasks:
             blocks.append(TextBlock(BlockType.BULLET, task))
-        self._append_section_divider(blocks)
 
         blocks.append(TextBlock(BlockType.HEADING1, "Session Timeline"))
         timeline_rows = [
@@ -148,7 +134,6 @@ class LabDocBuilder:
                 rows=timeline_rows,
             )
         )
-        self._append_section_divider(blocks)
 
         blocks.append(TextBlock(BlockType.HEADING1, "Instructor Walkthrough"))
         for step in lab.procedure_steps:
@@ -164,7 +149,7 @@ class LabDocBuilder:
                 ["Evidence required", step.evidence_required or "—"],
                 ["Est. time", f"{step.estimated_minutes} min"],
             ]
-            blocks.append(TableBlock(headers=["Field", "Content"], rows=rows))
+            blocks.append(TableBlock(headers=rows[0], rows=rows[1:], kv=True))
             self._append_rich_step_blocks(blocks, step, include_recovery=True)
             blocks.append(TextBlock(BlockType.BODY, ""))
 
@@ -190,7 +175,7 @@ class LabDocBuilder:
                     ]
                 )
             blocks.append(
-                TableBlock(headers=["Field", "Detail"], rows=checkpoint_rows)
+                TableBlock(headers=checkpoint_rows[0], rows=checkpoint_rows[1:], kv=True)
             )
             blocks.append(TextBlock(BlockType.BODY, ""))
 
@@ -237,7 +222,6 @@ class LabDocBuilder:
         self._append_starter_files(blocks, lab, include_solutions=True)
 
         if lab.sources:
-            self._append_section_divider(blocks)
             blocks.append(TextBlock(BlockType.HEADING1, "Sources"))
             for src in lab.sources:
                 label = "[course_material]" if src.source_type == "course_material" else "[web]"
@@ -271,11 +255,11 @@ class LabDocBuilder:
         blocks.append(TextBlock(BlockType.HEADING1, "Safety / Acceptable-Use Notice"))
         safety = lab.safety_profile
         if safety.hazards:
-            blocks.append(TextBlock(BlockType.HEADING2, "Hazards"))
+            blocks.append(TextBlock(BlockType.HEADING3, "Hazards"))
             for item in safety.hazards:
                 blocks.append(TextBlock(BlockType.BULLET, item))
         if safety.ppe:
-            blocks.append(TextBlock(BlockType.HEADING2, "PPE"))
+            blocks.append(TextBlock(BlockType.HEADING3, "PPE"))
             for item in safety.ppe:
                 blocks.append(TextBlock(BlockType.BULLET, item))
 
@@ -303,7 +287,7 @@ class LabDocBuilder:
                     blocks.append(TextBlock(BlockType.BODY, raw))
             self._append_rich_step_blocks(blocks, step, include_recovery=False)
             blocks.append(
-                TextBlock(BlockType.BODY, f"⏱ Estimated time: {step.estimated_minutes} min")
+                TextBlock(BlockType.META, f"⏱ Estimated time: {step.estimated_minutes} min")
             )
             if step.evidence_required:
                 blocks.append(TextBlock(BlockType.BODY, f"Evidence required: {step.evidence_required}"))
@@ -324,9 +308,9 @@ class LabDocBuilder:
         for item in lab.deliverables:
             blocks.append(TextBlock(BlockType.BULLET, item))
         if lab.submission_checklist:
-            blocks.append(TextBlock(BlockType.HEADING2, "Submission Checklist"))
+            blocks.append(TextBlock(BlockType.HEADING3, "Submission Checklist"))
             for item in lab.submission_checklist:
-                blocks.append(TextBlock(BlockType.BULLET, f"☐ {item}"))
+                blocks.append(TextBlock(BlockType.CHECKLIST, item))
 
         blocks.append(TextBlock(BlockType.HEADING1, "Reflection Questions"))
         for index, question in enumerate(lab.post_lab_questions, start=1):
@@ -364,9 +348,9 @@ class LabDocBuilder:
         prompt_templates = getattr(step, "prompt_templates", []) or []
         prompt_templates = [str(prompt).strip() for prompt in prompt_templates if str(prompt).strip()]
         if prompt_templates:
-            blocks.append(TextBlock(BlockType.HEADING2, "Prompt Templates"))
+            blocks.append(TextBlock(BlockType.HEADING3, "Prompt Templates"))
             for prompt in prompt_templates:
-                blocks.append(TextBlock(BlockType.BODY, f"> {prompt}"))
+                blocks.append(TextBlock(BlockType.QUOTE, prompt))
 
         for heading, values in (
             ("Code Blocks", getattr(step, "code_blocks", []) or []),
@@ -378,7 +362,7 @@ class LabDocBuilder:
                 if (normalized := normalize_code_block(value)) is not None
             ]
             if normalized_values:
-                blocks.append(TextBlock(BlockType.HEADING2, heading))
+                blocks.append(TextBlock(BlockType.HEADING3, heading))
                 for normalized in normalized_values:
                     if normalized["title"]:
                         blocks.append(TextBlock(BlockType.META, normalized["title"], bold=True))

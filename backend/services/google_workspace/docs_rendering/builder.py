@@ -17,9 +17,12 @@ class BlockType(str, Enum):
     TITLE = "title"
     HEADING1 = "heading1"
     HEADING2 = "heading2"
+    HEADING3 = "heading3"
     META = "meta"
     BODY = "body"
     BULLET = "bullet"
+    CHECKLIST = "checklist"
+    QUOTE = "quote"
     TABLE = "table"
     DIVIDER = "divider"
     CODE = "code"
@@ -39,6 +42,9 @@ class TableBlock:
     headers: list[str]
     rows: list[list[str]]
     header_bg: tuple[float, float, float] | None = None
+    # Key-value table: no header row — `headers` is just the first data row.
+    # The first column renders as a bold, tinted, fixed-width label column.
+    kv: bool = False
 
 
 Block = TextBlock | TableBlock
@@ -56,20 +62,20 @@ class DocBuilder:
 
         blocks.append(TextBlock(BlockType.TITLE, p.title))
 
-        meta_parts = [
-            f"Subject: {p.subject}",
-            f"Grade: {p.grade}",
-            f"Batch: {p.batch_name}",
-            f"Week: {p.week}",
-            f"Duration: {p.lecture_duration} minutes",
-            f"Difficulty: {p.difficulty}",
-            f"Type: {p.lesson_plan_type}",
-            f"Approach: {p.teaching_approach}",
+        # At-a-glance key-value table instead of one unscannable pipe-joined line.
+        meta_rows = [
+            ["Subject", str(p.subject)],
+            ["Grade", str(p.grade)],
+            ["Batch", str(p.batch_name)],
+            ["Week", str(p.week)],
+            ["Duration", f"{p.lecture_duration} minutes"],
+            ["Difficulty", str(p.difficulty)],
+            ["Type", str(p.lesson_plan_type)],
+            ["Approach", str(p.teaching_approach)],
         ]
         if p.date:
-            meta_parts.append(f"Date: {p.date}")
-        blocks.append(TextBlock(BlockType.META, "  |  ".join(meta_parts)))
-        blocks.append(TextBlock(BlockType.DIVIDER, "―" * 48))
+            meta_rows.append(["Date", str(p.date)])
+        blocks.append(TableBlock(headers=meta_rows[0], rows=meta_rows[1:], kv=True))
 
         blocks.append(TextBlock(BlockType.HEADING1, "Learning Objectives"))
         for obj in p.objectives:
@@ -110,7 +116,7 @@ class DocBuilder:
             for key, value in p.type_specific_plan.items():
                 label = str(key).replace("_", " ").title()
                 if isinstance(value, list):
-                    blocks.append(TextBlock(BlockType.HEADING2, label))
+                    blocks.append(TextBlock(BlockType.HEADING3, label))
                     for item in value:
                         blocks.append(TextBlock(BlockType.BULLET, str(item)))
                 else:
@@ -126,11 +132,11 @@ class DocBuilder:
             )
             blocks.append(TextBlock(BlockType.BODY, activity.description))
             if activity.teacher_actions:
-                blocks.append(TextBlock(BlockType.HEADING2, "Teacher Actions"))
+                blocks.append(TextBlock(BlockType.HEADING3, "Teacher Actions"))
                 for action in activity.teacher_actions:
                     blocks.append(TextBlock(BlockType.BULLET, action))
             if activity.student_actions:
-                blocks.append(TextBlock(BlockType.HEADING2, "Student Actions"))
+                blocks.append(TextBlock(BlockType.HEADING3, "Student Actions"))
                 for action in activity.student_actions:
                     blocks.append(TextBlock(BlockType.BULLET, action))
             for step in activity.instructions:
@@ -147,9 +153,9 @@ class DocBuilder:
             if activity.prompt_templates:
                 prompts = [str(prompt).strip() for prompt in activity.prompt_templates if str(prompt).strip()]
                 if prompts:
-                    blocks.append(TextBlock(BlockType.HEADING2, "Prompt Templates"))
+                    blocks.append(TextBlock(BlockType.HEADING3, "Prompt Templates"))
                     for prompt in prompts:
-                        blocks.append(TextBlock(BlockType.BODY, f"> {prompt}"))
+                        blocks.append(TextBlock(BlockType.QUOTE, prompt))
             if activity.code_blocks:
                 normalized_blocks = [
                     normalized
@@ -157,13 +163,13 @@ class DocBuilder:
                     if (normalized := normalize_code_block(block)) is not None
                 ]
                 if normalized_blocks:
-                    blocks.append(TextBlock(BlockType.HEADING2, "Code / Configuration Blocks"))
+                    blocks.append(TextBlock(BlockType.HEADING3, "Code / Configuration Blocks"))
                 for normalized in normalized_blocks:
                     if normalized["title"]:
                         blocks.append(TextBlock(BlockType.META, normalized["title"], bold=True))
                     blocks.append(TextBlock(BlockType.CODE, normalized["code"]))
             if activity.assessment_checks:
-                blocks.append(TextBlock(BlockType.HEADING2, "Assessment Checks"))
+                blocks.append(TextBlock(BlockType.HEADING3, "Assessment Checks"))
                 for check in activity.assessment_checks:
                     blocks.append(TextBlock(BlockType.BULLET, check))
             for outcome in activity.learning_outcomes:

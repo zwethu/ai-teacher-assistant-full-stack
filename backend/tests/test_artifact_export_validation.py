@@ -1,6 +1,7 @@
 import unittest
 
 from services.artifact_export_validation import validate_rendered_blocks_coverage
+from services.google_workspace.docs_rendering import theme
 from services.google_workspace.docs_rendering.builder import BlockType, TextBlock
 from services.artifact_renderers.code_blocks import normalize_code_block, render_code_block
 from services.artifact_renderers.lab_markdown import _append_code_blocks as append_lab_code_blocks
@@ -92,9 +93,13 @@ class ArtifactExportValidationTests(unittest.TestCase):
         inserted = content[0]["insertText"]["text"]
         self.assertNotIn("```", inserted)
         self.assertIn("SubmitForm", inserted)
-        style = styles[0]["updateTextStyle"]["textStyle"]
-        self.assertEqual(style["weightedFontFamily"]["fontFamily"], "Courier New")
-        self.assertIn("backgroundColor", style)
+        text_styles = [r["updateTextStyle"] for r in styles if "updateTextStyle" in r]
+        style = text_styles[0]["textStyle"]
+        self.assertEqual(style["weightedFontFamily"]["fontFamily"], theme.FONT_CODE)
+        # The block reads as code via full-width paragraph shading, not
+        # per-character background highlighting.
+        para_styles = [r["updateParagraphStyle"] for r in styles if "updateParagraphStyle" in r]
+        self.assertIn("shading", para_styles[0]["paragraphStyle"])
 
 
 if __name__ == "__main__":

@@ -130,11 +130,16 @@ def _remap_table_style_starts(
 ) -> None:
     for req in style_requests:
         cell_style = req.get("updateTableCellStyle")
-        if not cell_style:
+        if cell_style:
+            location = cell_style["tableRange"]["tableCellLocation"]["tableStartLocation"]
+            planned = location["index"]
+            location["index"] = start_map.get(planned, planned)
             continue
-        location = cell_style["tableRange"]["tableCellLocation"]["tableStartLocation"]
-        planned = location["index"]
-        location["index"] = start_map.get(planned, planned)
+        column_props = req.get("updateTableColumnProperties")
+        if column_props:
+            location = column_props["tableStartLocation"]
+            planned = location["index"]
+            location["index"] = start_map.get(planned, planned)
 
 
 def _apply_blocks(docs_service, doc_id: str, requests: list[dict[str, Any]]) -> None:

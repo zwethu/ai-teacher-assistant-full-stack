@@ -30,12 +30,15 @@ export function GenerationRunView({
   accent = 'primary',
   emptyHint,
   onBlueprintSaved,
+  gameDeadlineAt,
 }: {
   batch: Batch
   run: GenerationRunState
   accent?: GenAccent
   emptyHint?: ReactNode
   onBlueprintSaved?: (version: number | null) => void
+  /** Deadline chosen on the game form, applied when the staged game is created. */
+  gameDeadlineAt?: string | null
 }) {
   const { stage, activeMessage, runState } = deriveGenerationStage(run)
   const theme = ACCENT[accent]
@@ -161,7 +164,12 @@ export function GenerationRunView({
               onSaved={onBlueprintSaved}
               onDelivered={deliver}
             />
-            <GameCreateButton batchId={batch.id} msg={activeMessage} onDelivered={deliver} />
+            <GameCreateButton
+              batchId={batch.id}
+              msg={activeMessage}
+              onDelivered={deliver}
+              deadlineAt={gameDeadlineAt}
+            />
             <div className="flex flex-wrap items-center gap-2 pt-1">
               {runState && <RunInspector run={runState} />}
               {stage === 'preview' && refineTrigger('Refine this draft')}

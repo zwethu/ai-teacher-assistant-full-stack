@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import {
   Check,
@@ -10,13 +11,19 @@ import {
 } from 'lucide-react'
 import { invalidateSessionsCache, useAllSessions, type SessionItem } from '../hooks/useAllSessions'
 import { deleteChat, updateChatTitle } from '../services/chatService'
-import { formatDateTime } from '../utils/formatDate'
+import { formatDateTime, timeAgo } from '../utils/formatDate'
 import { Spinner } from '../design-system'
+
+// Enough to decide whether the menu fits below its button before it is
+// rendered — the list card clips anything drawn inside it, so the menu is
+// portalled to the body and has to be placed by hand.
+const MENU_HEIGHT = 76
 
 export default function ChatHistory() {
   const navigate = useNavigate()
   const { sessions, loading, refresh } = useAllSessions()
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
+  const [menuPos, setMenuPos] = useState({ top: 0, right: 0 })
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
@@ -30,9 +37,35 @@ export default function ChatHistory() {
       setMenuOpenId(null)
     }
 
+    // The menu is positioned once, against the viewport. Scrolling or resizing
+    // would leave it floating away from its row, so it closes instead.
+    function dismiss() {
+      setMenuOpenId(null)
+    }
+
     document.addEventListener('mousedown', handleMouseDown)
-    return () => document.removeEventListener('mousedown', handleMouseDown)
+    window.addEventListener('resize', dismiss)
+    window.addEventListener('scroll', dismiss, true)
+    return () => {
+      document.removeEventListener('mousedown', handleMouseDown)
+      window.removeEventListener('resize', dismiss)
+      window.removeEventListener('scroll', dismiss, true)
+    }
   }, [menuOpenId])
+
+  function toggleMenu(chatId: string, anchor: HTMLElement) {
+    if (menuOpenId === chatId) {
+      setMenuOpenId(null)
+      return
+    }
+    const rect = anchor.getBoundingClientRect()
+    const flipUp = rect.bottom + MENU_HEIGHT > window.innerHeight
+    setMenuPos({
+      top: flipUp ? rect.top - MENU_HEIGHT - 4 : rect.bottom + 4,
+      right: window.innerWidth - rect.right,
+    })
+    setMenuOpenId(chatId)
+  }
 
   function startRename(session: SessionItem) {
     setRenamingId(session.chat_id)
@@ -75,24 +108,12 @@ export default function ChatHistory() {
     }
   }
 
-  const grouped = sessions.reduce<
-    Record<string, { batch_name: string; chats: typeof sessions }>
-  >((acc, session) => {
-    if (!acc[session.batch_id]) {
-      acc[session.batch_id] = { batch_name: session.batch_name, chats: [] }
-    }
-    acc[session.batch_id].chats.push(session)
-    return acc
-  }, {})
-
-  const batchGroups = Object.entries(grouped)
-
   return (
     <div>
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Sessions</h1>
         <p className="text-sm text-slate-500 mt-1">
-          All chat sessions across your batches.
+          Every chat across your batches, most recent first.
         </p>
       </div>
 
@@ -111,129 +132,126 @@ export default function ChatHistory() {
             </p>
           </div>
         ) : (
-          <div className="divide-y divide-slate-100">
-            {batchGroups.map(([batchId, group]) => (
-              <section key={batchId}>
-                <div className="px-6 py-3 bg-slate-50/90 border-b border-slate-100">
-                  <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                    {group.batch_name}
-                  </h2>
-                </div>
-                <ul className="divide-y divide-slate-50">
-                  {group.chats.map((chat) => (
-                    <li key={chat.chat_id} className="group relative">
-                      <div className="w-full px-6 py-4 hover:bg-violet-50/60 transition-colors">
-                        <div className="flex items-start justify-between gap-4">
-                          <div
-                            className="min-w-0 flex-1 cursor-pointer"
-                            onClick={() => {
-                              if (renamingId !== chat.chat_id) {
-                                navigate(`/batches/${chat.batch_id}/chats/${chat.chat_id}`)
-                              }
-                            }}
-                          >
-                            {renamingId === chat.chat_id ? (
-                              <input
-                                ref={renameInputRef}
-                                value={renameValue}
-                                onChange={(e) => setRenameValue(e.target.value)}
-                                onBlur={() => void commitRename(chat)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') void commitRename(chat)
-                                  if (e.key === 'Escape') cancelRename()
-                                }}
-                                className="w-full bg-transparent text-sm font-medium text-slate-900 outline-none border-b border-violet-400"
-                                onClick={(e) => e.stopPropagation()}
-                              />
-                            ) : (
-                              <div className="text-sm font-medium text-slate-900 truncate">
-                                {chat.title}
-                              </div>
-                            )}
-                            {chat.preview && renamingId !== chat.chat_id && (
-                              <p className="text-xs text-slate-500 mt-1 line-clamp-2">
-                                {chat.preview}
-                              </p>
-                            )}
-                          </div>
-                          <div className="flex flex-shrink-0 items-start gap-2">
-                            <span className="text-xs text-slate-400 whitespace-nowrap">
-                              {chat.updated_at ? formatDateTime(chat.updated_at) : '—'}
-                            </span>
-                            <div
-                              className={`relative flex items-center gap-0.5 transition-opacity ${
-                                confirmDeleteId === chat.chat_id || menuOpenId === chat.chat_id
-                                  ? 'opacity-100'
-                                  : 'opacity-0 group-hover:opacity-100'
-                              }`}
-                              data-session-menu
-                            >
-                              {confirmDeleteId === chat.chat_id ? (
-                                <>
-                                  <button
-                                    type="button"
-                                    onClick={() => void doDelete(chat)}
-                                    className="rounded p-1 text-red-500 hover:bg-red-50 hover:text-red-600"
-                                    aria-label="Confirm delete session"
-                                  >
-                                    <Check className="h-4 w-4" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setConfirmDeleteId(null)}
-                                    className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-                                    aria-label="Cancel delete session"
-                                  >
-                                    <X className="h-4 w-4" />
-                                  </button>
-                                </>
-                              ) : (
-                                <>
-                                  <button
-                                    type="button"
-                                    onClick={() => setMenuOpenId((value) => (
-                                      value === chat.chat_id ? null : chat.chat_id
-                                    ))}
-                                    className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-                                    aria-label="Open session actions"
-                                  >
-                                    <MoreHorizontal className="h-4 w-4" />
-                                  </button>
-                                  {menuOpenId === chat.chat_id && (
-                                    <div className="absolute right-0 top-7 z-20 w-32 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
-                                      <button
-                                        type="button"
-                                        onClick={() => startRename(chat)}
-                                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-                                      >
-                                        <Pencil className="h-3.5 w-3.5" />
-                                        Rename
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setConfirmDeleteId(chat.chat_id)
-                                          setMenuOpenId(null)
-                                        }}
-                                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-red-500 hover:bg-red-50 hover:text-red-600"
-                                      >
-                                        <Trash2 className="h-3.5 w-3.5" />
-                                        Delete
-                                      </button>
-                                    </div>
-                                  )}
-                                </>
-                              )}
-                            </div>
-                          </div>
-                        </div>
+          <ul className="divide-y divide-slate-100">
+            {sessions.map((chat) => (
+              <li key={chat.chat_id} className="group relative">
+                <div className="flex w-full items-center gap-3 px-5 py-3 transition-colors hover:bg-violet-50/50">
+                  <div className="grid h-9 w-9 flex-shrink-0 place-items-center rounded-lg bg-violet-50 text-violet-500 transition-colors group-hover:bg-violet-100">
+                    <MessageCircle className="h-4 w-4" />
+                  </div>
+
+                  <div
+                    className="min-w-0 flex-1 cursor-pointer"
+                    onClick={() => {
+                      if (renamingId !== chat.chat_id) {
+                        navigate(`/batches/${chat.batch_id}/chats/${chat.chat_id}`)
+                      }
+                    }}
+                  >
+                    {renamingId === chat.chat_id ? (
+                      <input
+                        ref={renameInputRef}
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        onBlur={() => void commitRename(chat)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') void commitRename(chat)
+                          if (e.key === 'Escape') cancelRename()
+                        }}
+                        className="w-full bg-transparent text-sm font-medium text-slate-900 outline-none border-b border-violet-400"
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    ) : (
+                      <div className="truncate text-sm font-medium text-slate-900">
+                        {chat.title}
                       </div>
-                    </li>
-                  ))}
-                </ul>
-              </section>
+                    )}
+                    <p className="truncate text-xs text-slate-400">
+                      {chat.preview || 'No messages yet'}
+                    </p>
+                  </div>
+
+                  {/* The list is no longer grouped by batch, so the batch rides
+                      along on each row — kept in a quiet right-hand column so it
+                      reads as metadata rather than competing with the title. */}
+                  <div className="hidden flex-shrink-0 items-center gap-3 sm:flex">
+                    <span className="max-w-[9rem] truncate rounded-md bg-slate-50 px-2 py-1 text-[11px] font-medium text-slate-500 ring-1 ring-inset ring-slate-200/80">
+                      {chat.batch_name}
+                    </span>
+                    <span
+                      className="w-24 text-right text-xs text-slate-400"
+                      title={chat.updated_at ? formatDateTime(chat.updated_at) : undefined}
+                    >
+                      {chat.updated_at ? timeAgo(chat.updated_at) : '—'}
+                    </span>
+                  </div>
+
+                  <div className="flex flex-shrink-0 items-center gap-0.5" data-session-menu>
+                    {confirmDeleteId === chat.chat_id ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => void doDelete(chat)}
+                          className="rounded-md p-1.5 text-red-500 hover:bg-red-50 hover:text-red-600"
+                          aria-label="Confirm delete session"
+                        >
+                          <Check className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteId(null)}
+                          className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                          aria-label="Cancel delete session"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={(e) => toggleMenu(chat.chat_id, e.currentTarget)}
+                          className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                          aria-label="Open session actions"
+                        >
+                          <MoreHorizontal className="h-4 w-4" />
+                        </button>
+                        {menuOpenId === chat.chat_id &&
+                          createPortal(
+                            <div
+                              data-session-menu
+                              style={{ top: menuPos.top, right: menuPos.right }}
+                              className="fixed z-50 w-32 rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
+                            >
+                              <button
+                                type="button"
+                                onClick={() => startRename(chat)}
+                                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                                Rename
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setConfirmDeleteId(chat.chat_id)
+                                  setMenuOpenId(null)
+                                }}
+                                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-red-500 hover:bg-red-50 hover:text-red-600"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                                Delete
+                              </button>
+                            </div>,
+                            document.body,
+                          )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              </li>
             ))}
-          </div>
+          </ul>
         )}
       </div>
     </div>

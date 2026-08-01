@@ -59,7 +59,38 @@ describe('GameCreateButton', () => {
     await userEvent.click(screen.getByRole('button', { name: /Create game/ }))
 
     await waitFor(() =>
-      expect(createGameFromRun).toHaveBeenCalledWith('batch-1', 'chat-1', 'run-1', 'hash-1'),
+      expect(createGameFromRun).toHaveBeenCalledWith(
+        'batch-1',
+        'chat-1',
+        'run-1',
+        'hash-1',
+        undefined,
+      ),
+    )
+  })
+
+  it('applies the deadline chosen on the generator form', async () => {
+    // The deadline is not part of the agent's prompt — it travels from the form to
+    // this button, which is the only place a game is actually created.
+    createGameFromRun.mockResolvedValue({ gameId: 'game_abc', itemCount: 8 })
+    render(
+      <GameCreateButton
+        batchId="batch-1"
+        msg={message(stagedGame)}
+        deadlineAt="2026-09-01T17:00:00.000Z"
+      />,
+    )
+
+    await userEvent.click(screen.getByRole('button', { name: /Create game/ }))
+
+    await waitFor(() =>
+      expect(createGameFromRun).toHaveBeenCalledWith(
+        'batch-1',
+        'chat-1',
+        'run-1',
+        'hash-1',
+        '2026-09-01T17:00:00.000Z',
+      ),
     )
   })
 

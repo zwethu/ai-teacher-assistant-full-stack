@@ -46,6 +46,12 @@ export type GameSession = {
   items: GameItem[];
   createdAt: Date;
   expiresAt?: Date;
+  /**
+   * Lecturer's due date. Past it, entry is refused; absent means no deadline.
+   * Typed loosely because it arrives as a Firestore Timestamp from the player's
+   * direct read and as an ISO string from the lecturer API.
+   */
+  deadlineAt?: { toDate: () => Date } | Date | string | null;
   gameModeStats?: {
     matching: number;
     ropelink: number;

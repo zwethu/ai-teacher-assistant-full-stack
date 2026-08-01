@@ -25,8 +25,10 @@ from pydantic import ValidationError
 from entity.GameSession import (
     DEFAULT_GAME_TTL_DAYS,
     GAME_MODES,
+    TTL_GRACE_DAYS_AFTER_DEADLINE,
     CreateGameRequest,
     GameContent,
+    UpdateGameRequest,
 )
 from services.agent_sessions import (
     claim_pending_artifact_export,
@@ -64,7 +66,7 @@ def _hash_content(content: dict[str, Any]) -> str:
 
 def _serialize(doc_id: str, data: dict[str, Any]) -> dict[str, Any]:
     result = {**data, "gameId": str(data.get("gameId") or doc_id)}
-    for key in ("createdAt", "updatedAt", "expiresAt"):
+    for key in ("createdAt", "updatedAt", "expiresAt", "deadlineAt"):
         value = result.get(key)
         if hasattr(value, "isoformat"):
             result[key] = value.isoformat()
@@ -86,6 +88,21 @@ def _with_item_ids(items: list[dict[str, str]]) -> list[dict[str, str]]:
         {"id": f"item_{index}", "term": item["term"], "definition": item["definition"]}
         for index, item in enumerate(items, start=1)
     ]
+
+
+def _expiry_for(
+    now: datetime, ttl_days: int | None, deadline_at: datetime | None
+) -> datetime:
+    """When the record retires — never before students stop being allowed to play.
+
+    The TTL is about storage, the deadline is about teaching, and a lecturer who sets a
+    due date two months out should not silently lose the game after the default 30 days.
+    """
+    expires_at = now + timedelta(days=ttl_days or DEFAULT_GAME_TTL_DAYS)
+    if deadline_at:
+        floor = deadline_at + timedelta(days=TTL_GRACE_DAYS_AFTER_DEADLINE)
+        expires_at = max(expires_at, floor)
+    return expires_at
 
 
 def create_game_from_pending(
@@ -140,8 +157,8 @@ def create_game_from_pending(
         _release_lock(batch_id, payload, lock_id, message)
         raise GameEligibilityError(message) from exc
 
-    ttl_days = payload.ttl_days or DEFAULT_GAME_TTL_DAYS
     now = datetime.now(timezone.utc)
+    expires_at = _expiry_for(now, payload.ttl_days, payload.deadline_at)
     game_ref = _games_col().document(f"game_{uuid.uuid4().hex[:16]}")
     content_items = [item.model_dump(mode="json") for item in content.items]
     items = _with_item_ids(content_items)
@@ -162,12 +179,15 @@ def create_game_from_pending(
         # The player app gates entry on exactly this spelling (open|closed|expired);
         # anything else renders as "Not Available" to every student.
         "status": "open",
+        # When the lecturer wants play to stop. None means "no deadline" — the game
+        # stays open until it is closed by hand or its TTL retires it.
+        "deadlineAt": payload.deadline_at,
         # Hashed from the content only — item ids are backend-assigned, so including them
         # would make the same extracted game hash differently on every create.
         "contentHash": _hash_content({"title": content.title, "items": content_items}),
         "createdAt": SERVER_TIMESTAMP,
         "updatedAt": SERVER_TIMESTAMP,
-        "expiresAt": now + timedelta(days=ttl_days),
+        "expiresAt": expires_at,
     }
 
     try:
@@ -268,6 +288,37 @@ def list_games(batch_id: str, lecturer_id: str, limit: int = 50) -> list[dict[st
     games = [_serialize(doc.id, doc.to_dict() or {}) for doc in docs]
     games.sort(key=lambda item: str(item.get("createdAt") or ""), reverse=True)
     return games
+
+
+def update_game(
+    game_id: str, lecturer_id: str, payload: UpdateGameRequest
+) -> dict[str, Any]:
+    """Extend, drop, or enforce a game's deadline, and open or close it by hand."""
+    existing = get_game(game_id, lecturer_id)
+
+    updates: dict[str, Any] = {"updatedAt": SERVER_TIMESTAMP}
+    if payload.clear_deadline:
+        updates["deadlineAt"] = None
+    elif payload.deadline_at is not None:
+        updates["deadlineAt"] = payload.deadline_at
+        # An extension past the old retirement date must carry the record with it.
+        updates["expiresAt"] = _expiry_for(
+            datetime.now(timezone.utc), None, payload.deadline_at
+        )
+        existing_expiry = existing.get("expiresAt")
+        if isinstance(existing_expiry, str) and existing_expiry > updates["expiresAt"].isoformat():
+            del updates["expiresAt"]
+    if payload.status is not None:
+        updates["status"] = payload.status
+
+    _games_col().document(game_id).update(updates)
+    logger.info(
+        "game updated game_id=%s lecturer=%s fields=%s",
+        game_id,
+        lecturer_id,
+        sorted(k for k in updates if k != "updatedAt"),
+    )
+    return get_game(game_id, lecturer_id)
 
 
 def delete_game(game_id: str, lecturer_id: str) -> dict[str, Any]:

@@ -111,15 +111,13 @@ function formatShortDate(value?: string | null): string {
     : date.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
 }
 
-/** Games are retired on their own TTL, so the panel warns before one disappears. */
-function formatExpiry(value?: string | null): string {
+/** A game's due date, when its lecturer set one. */
+function formatDeadline(value?: string | null): string {
   if (!value) return ''
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ''
-  const days = Math.ceil((date.getTime() - Date.now()) / 86_400_000)
-  if (days < 0) return 'expired'
-  if (days === 0) return 'expires today'
-  return `expires in ${days} day${days === 1 ? '' : 's'}`
+  const due = date.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+  return date.getTime() <= Date.now() ? `closed ${due}` : `due ${due}`
 }
 
 export function ChatSidePanel({
@@ -461,8 +459,8 @@ export function ChatSidePanel({
             count={games.length}
           >
             <p className="mb-3 text-[10px] leading-4 text-slate-500">
-              Study games created from this batch — not just this chat. Each game keeps its
-              term/definition pairs until it expires.
+              Study games created from this batch — not just this chat. Set or change a game's
+              deadline on the Games page.
             </p>
             {gamesLoading ? (
               <div className="flex items-center gap-2 py-3 text-xs text-slate-500">
@@ -479,7 +477,7 @@ export function ChatSidePanel({
               <ul className="space-y-2">
                 {games.map((game) => {
                   const created = formatShortDate(game.createdAt)
-                  const expiry = formatExpiry(game.expiresAt)
+                  const deadline = formatDeadline(game.deadlineAt)
                   return (
                     <li
                       key={game.gameId}
@@ -491,7 +489,7 @@ export function ChatSidePanel({
                         <p className="text-[11px] text-slate-400">
                           {game.itemCount} pair{game.itemCount === 1 ? '' : 's'}
                           {created ? ` · created ${created}` : ''}
-                          {expiry ? ` · ${expiry}` : ''}
+                          {deadline ? ` · ${deadline}` : ''}
                         </p>
                       </div>
                       <button

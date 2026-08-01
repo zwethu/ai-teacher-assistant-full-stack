@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { GameController } from '@phosphor-icons/react';
+import { ArrowLeft, GameController } from '@phosphor-icons/react';
 import Lottie from '../components/cat/LottieBox';
 import type { AvatarType } from '../types/catGame.types';
 import { AVATARS, avatarAnimation } from '../components/cat/avatarAnimations';
@@ -10,9 +10,11 @@ import './AvatarSelectPage.css';
 type Props = {
   nickname: string;
   onSelect: (avatar: AvatarType) => void;
+  /** Omitted where there is no earlier step to return to, e.g. the preview page. */
+  onBack?: () => void;
 };
 
-export default function AvatarSelectPage({ nickname, onSelect }: Props) {
+export default function AvatarSelectPage({ nickname, onSelect, onBack }: Props) {
   const [selected, setSelected] = useState<AvatarType | null>(null);
   // No lobby track any more: this screen PREVIEWS the picked pet's theme, and
   // defaults to the cat's before anything is picked.
@@ -21,6 +23,17 @@ export default function AvatarSelectPage({ nickname, onSelect }: Props) {
   return (
     <div className="avatar-select-bg">
       <div className="avatar-select-card">
+        {onBack && (
+          <button
+            type="button"
+            className="play-back-btn"
+            onClick={onBack}
+            aria-label="Back to your nickname"
+            title="Back to your nickname"
+          >
+            <ArrowLeft size={18} weight="bold" />
+          </button>
+        )}
         <MusicToggle />
         <h2 className="avatar-select-title">Choose your buddy, {nickname}! 🐾</h2>
         <p className="avatar-select-subtitle">Who's going to study with you today?</p>

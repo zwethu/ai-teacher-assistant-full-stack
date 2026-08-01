@@ -6,7 +6,7 @@ the game the agent staged on that run's pending artifact and writes the gameSess
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from entity.GameSession import CreateGameRequest
+from entity.GameSession import CreateGameRequest, UpdateGameRequest
 from services.game_service import (
     GameConflictError,
     GameEligibilityError,
@@ -15,6 +15,7 @@ from services.game_service import (
     delete_game,
     get_game,
     list_games,
+    update_game,
 )
 from utils.firebase_auth import CurrentUser, get_current_user
 
@@ -62,6 +63,21 @@ async def get_batch_game(
     del batch_id
     try:
         return get_game(game_id, user["uid"])
+    except Exception as exc:
+        _raise_service_error(exc)
+        raise
+
+
+@router.patch("/{game_id}", response_model=dict)
+async def update_batch_game(
+    batch_id: str,
+    game_id: str,
+    body: UpdateGameRequest,
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    del batch_id
+    try:
+        return update_game(game_id, user["uid"], body)
     except Exception as exc:
         _raise_service_error(exc)
         raise

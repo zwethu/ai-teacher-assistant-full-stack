@@ -7,11 +7,13 @@ import { MemoryRouter } from 'react-router-dom'
 import Games from './Games'
 
 const listGames = vi.fn()
+const updateGame = vi.fn()
 const useBatchSelection = vi.fn()
 
 vi.mock('../services/gameService', () => ({
   listGames: (...args: unknown[]) => listGames(...args),
   deleteGame: vi.fn(),
+  updateGame: (...args: unknown[]) => updateGame(...args),
   gamePlayUrl: (gameId: string) => `${window.location.origin}/play/${gameId}`,
 }))
 
@@ -22,6 +24,7 @@ vi.mock('../hooks/useBatchSelection', () => ({
 afterEach(() => cleanup())
 beforeEach(() => {
   listGames.mockReset()
+  updateGame.mockReset()
   useBatchSelection.mockReturnValue({
     batches: [{ id: 'batch-1', batch_name: 'Batch 2026', course_name: 'Software Testing' }],
     loading: false,
@@ -84,6 +87,40 @@ describe('Games page', () => {
 
     expect(screen.getByText('Photosynthesis')).toBeTruthy()
     expect(screen.getByText(/Converting light into chemical energy/)).toBeTruthy()
+  })
+
+  it('shows the deadline and hides the retention date', async () => {
+    listGames.mockResolvedValue([{ ...game, deadlineAt: inDays(5) }])
+    renderPage()
+
+    await waitFor(() => expect(screen.getByText(/^Due /)).toBeTruthy())
+    // expiresAt is storage bookkeeping — two dates on one row only raised the
+    // question of which one students are actually held to.
+    expect(screen.queryByText(/expires in/)).toBeNull()
+  })
+
+  it('offers to add a deadline to a game created without one', async () => {
+    listGames.mockResolvedValue([game])
+    renderPage()
+
+    await waitFor(() => expect(screen.getByText('No deadline')).toBeTruthy())
+    expect(screen.getByRole('button', { name: 'Set deadline' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Remove' })).toBeNull()
+  })
+
+  it('closes a live game on request and reflects the new state', async () => {
+    listGames.mockResolvedValue([game])
+    updateGame.mockResolvedValue({ ...game, status: 'closed' })
+    renderPage()
+
+    await waitFor(() => expect(screen.getByText('Plant Biology')).toBeTruthy())
+    await userEvent.click(screen.getByRole('button', { name: /Close now/ }))
+
+    await waitFor(() =>
+      expect(updateGame).toHaveBeenCalledWith('batch-1', 'game_abc', { status: 'closed' }),
+    )
+    expect(screen.getByText('Closed')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Reopen/ })).toBeTruthy()
   })
 
   it('points the lecturer at the builder when the space has no games', async () => {

@@ -1,10 +1,12 @@
 """Phase B backend: game extraction, pending staging, metadata, and the create terminal."""
 
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
+from pydantic import ValidationError
 
-from entity.GameSession import CreateGameRequest
+from entity.GameSession import CreateGameRequest, UpdateGameRequest
 from routers.agent import _PENDING_ARTIFACT_WORKFLOWS, _WEEK_REQUIRED_WORKFLOWS
 from services.agent_gateway import (
     _pending_artifact_message_metadata,
@@ -16,6 +18,7 @@ from services.game_service import (
     GameConflictError,
     GameEligibilityError,
     create_game_from_pending,
+    update_game,
 )
 
 _ITEMS = [
@@ -166,6 +169,33 @@ def _request(**overrides):
     return CreateGameRequest(chat_id="chat-1", run_id="run-1", **overrides)
 
 
+def _create_capturing_write(request: CreateGameRequest) -> dict:
+    """Run a create against a stub collection and hand back the document it wrote."""
+    claim = {"state": "claimed", "pending_artifact": _pending(), "export_lock_id": "L"}
+    written: dict = {}
+
+    class _Ref:
+        id = "game_abc"
+
+        def set(self, data):
+            written.update(data)
+
+        def get(self):
+            return type("Snap", (), {"to_dict": lambda _self: dict(written)})()
+
+    class _Col:
+        def document(self, _doc_id):
+            return _Ref()
+
+    with (
+        patch("services.game_service.claim_pending_artifact_export", return_value=claim),
+        patch("services.game_service.mark_agent_run_pending_artifact_exported"),
+        patch("services.game_service._games_col", return_value=_Col()),
+    ):
+        create_game_from_pending("batch-1", "lecturer-1", request)
+    return written
+
+
 def test_create_game_rejects_non_game_pending():
     claim = {"state": "claimed", "pending_artifact": _pending(artifact_type="quiz"), "export_lock_id": "L"}
     with patch("services.game_service.claim_pending_artifact_export", return_value=claim):
@@ -193,28 +223,7 @@ def test_create_game_conflicts_while_in_progress():
 
 
 def test_create_game_writes_the_documented_document_shape():
-    claim = {"state": "claimed", "pending_artifact": _pending(), "export_lock_id": "L"}
-    written: dict = {}
-
-    class _Ref:
-        id = "game_abc"
-
-        def set(self, data):
-            written.update(data)
-
-        def get(self):
-            return type("Snap", (), {"to_dict": lambda _self: dict(written)})()
-
-    class _Col:
-        def document(self, _doc_id):
-            return _Ref()
-
-    with (
-        patch("services.game_service.claim_pending_artifact_export", return_value=claim),
-        patch("services.game_service.mark_agent_run_pending_artifact_exported"),
-        patch("services.game_service._games_col", return_value=_Col()),
-    ):
-        create_game_from_pending("batch-1", "lecturer-1", _request())
+    written = _create_capturing_write(_request())
 
     assert written["batchId"] == "batch-1"
     # The player app only opens a session whose status is exactly "open".
@@ -227,6 +236,89 @@ def test_create_game_writes_the_documented_document_shape():
     # Ownership is enforced on every read, so the doc must carry the owner.
     assert written["lecturerId"] == "lecturer-1"
     assert "expiresAt" in written and "createdAt" in written
+
+
+def test_create_game_without_a_deadline_leaves_it_unset():
+    """No deadline is the default: the game stays open until closed or retired."""
+    written = _create_capturing_write(_request())
+    assert written["deadlineAt"] is None
+
+
+def test_create_game_stores_the_deadline_and_outlives_it():
+    """The record's TTL must never retire a game students may still play."""
+    deadline = datetime.now(timezone.utc) + timedelta(days=90)
+    written = _create_capturing_write(_request(deadline_at=deadline))
+
+    assert written["deadlineAt"] == deadline
+    # Default TTL is 30 days — far short of a 90-day deadline, so it has to stretch.
+    assert written["expiresAt"] > deadline
+
+
+def test_deadline_in_the_past_is_rejected():
+    with pytest.raises(ValidationError):
+        _request(deadline_at=datetime.now(timezone.utc) - timedelta(minutes=1))
+
+
+def test_naive_deadline_is_read_as_utc_not_server_local():
+    """A missing offset must not silently shift the deadline by the host's zone."""
+    naive = (datetime.now(timezone.utc) + timedelta(days=1)).replace(tzinfo=None)
+    assert _request(deadline_at=naive).deadline_at == naive.replace(tzinfo=timezone.utc)
+
+
+def test_update_rejects_an_empty_change():
+    with pytest.raises(ValidationError):
+        UpdateGameRequest()
+
+
+def test_update_rejects_setting_and_clearing_at_once():
+    with pytest.raises(ValidationError):
+        UpdateGameRequest(
+            deadline_at=datetime.now(timezone.utc) + timedelta(days=1), clear_deadline=True
+        )
+
+
+def test_update_extending_the_deadline_pushes_the_expiry_out():
+    deadline = datetime.now(timezone.utc) + timedelta(days=120)
+    updates: dict = {}
+
+    class _Ref:
+        def update(self, data):
+            updates.update(data)
+
+    class _Col:
+        def document(self, _doc_id):
+            return _Ref()
+
+    existing = {"gameId": "game_abc", "expiresAt": "2026-09-01T00:00:00+00:00"}
+    with (
+        patch("services.game_service._games_col", return_value=_Col()),
+        patch("services.game_service.get_game", return_value=existing),
+    ):
+        update_game("game_abc", "lecturer-1", UpdateGameRequest(deadline_at=deadline))
+
+    assert updates["deadlineAt"] == deadline
+    assert updates["expiresAt"] > deadline
+
+
+def test_update_clearing_the_deadline_leaves_the_expiry_alone():
+    updates: dict = {}
+
+    class _Ref:
+        def update(self, data):
+            updates.update(data)
+
+    class _Col:
+        def document(self, _doc_id):
+            return _Ref()
+
+    with (
+        patch("services.game_service._games_col", return_value=_Col()),
+        patch("services.game_service.get_game", return_value={"gameId": "game_abc"}),
+    ):
+        update_game("game_abc", "lecturer-1", UpdateGameRequest(clear_deadline=True))
+
+    assert updates["deadlineAt"] is None
+    assert "expiresAt" not in updates
 
 
 def test_content_hash_ignores_backend_assigned_item_ids():

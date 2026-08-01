@@ -183,6 +183,41 @@
   transform: translateY(-2px);
 }
 
+/* ─── Back control ───
+   Lives here rather than in either picker's stylesheet because both the avatar
+   and mode screens use it, and this page is the flow that hands them their
+   onBack. Deliberately the same 38px disc as the music toggle it mirrors in the
+   opposite corner: the card titles are centred and can run long, so a wider
+   labelled control would run into them. */
+.play-back-btn {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  z-index: 4;
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 2px solid var(--g-rose-300);
+  background: rgba(255, 255, 255, 0.82);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  color: var(--g-accent-hover);
+  cursor: pointer;
+  transition: transform 0.18s ease, color 0.18s ease, border-color 0.18s ease;
+}
+.play-back-btn:hover:not(:disabled) {
+  transform: translateX(-2px);
+  color: var(--g-accent);
+  border-color: var(--g-accent);
+}
+.play-back-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* ─── Nickname input ─── */
 .play-input-wrap {
   width: 100%;

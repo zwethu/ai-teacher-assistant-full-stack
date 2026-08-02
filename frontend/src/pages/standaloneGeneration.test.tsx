@@ -35,20 +35,13 @@ vi.mock('../components/generation/GenerationAttachments', () => ({
 // The run view is a large tree of its own; this stands in for it and exposes
 // the one control under test.
 vi.mock('../components/generation/GenerationRunView', () => ({
-  GenerationRunView: ({ onDiscard }: { onDiscard?: () => void }) => (
-    <div>
-      <span>run in progress</span>
-      {onDiscard && (
-        <button type="button" onClick={onDiscard}>
-          discard
-        </button>
-      )}
-    </div>
-  ),
+  GenerationRunView: () => <span>run in progress</span>,
 }))
 
 const idle = () => ({
   messages: [] as unknown[],
+  // The real hook always supplies this;  indexes it.
+  runStates: {} as Record<string, unknown>,
   currentRunId: null as string | null,
   sending: false,
   pendingAttachments: [],
@@ -164,21 +157,33 @@ describe('a standalone generation page', () => {
   })
 
   /**
-   * The waiting stages are persisted to localStorage so a reload can rejoin
-   * them. Without a way out, the approval screen came back on every reload for
-   * as long as the record existed.
+   * Every unfinished state, not only the two that wait on the lecturer.
+   *
+   * The workflow is persisted to localStorage, so any state without an exit is
+   * a page that comes back on every reload — and the exit used to live inside
+   * the run view at two specific stages.
    */
-  it('offers a way out of a run that is waiting on the lecturer', async () => {
+  it.each([
+    ['mid-generation', { currentRunId: 'r1', sending: true, messages: [] as unknown[] }],
+    [
+      // `pending` is what `deriveGenerationStage` reads as work in flight; an
+      // assistant message with bare metadata settles instead, and a settled run
+      // offers "Generate another" rather than a discard.
+      'a run that has produced a placeholder',
+      {
+        currentRunId: 'r1',
+        messages: [
+          { message_id: 'm1', role: 'assistant', content: '', run_id: 'r1', pending: true, metadata: {} },
+        ],
+      },
+    ],
+  ])('offers a way out while %s', async (_label, over) => {
     const user = userEvent.setup()
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
-    runState = {
-      ...idle(),
-      currentRunId: 'r1',
-      messages: [{ message_id: 'm1', role: 'assistant', content: 'outline', metadata: {} }],
-    }
+    runState = { ...idle(), ...over }
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: 'discard' }))
+    await user.click(screen.getByRole('button', { name: /Discard/ }))
 
     // Cancel first: `reset` alone would leave the backend generating into a
     // run nobody is listening to.
@@ -187,17 +192,31 @@ describe('a standalone generation page', () => {
     confirm.mockRestore()
   })
 
-  /** Nothing in flight — there is no run to cancel, only local state to drop. */
-  it('does not cancel a run that is not running', async () => {
+  it('asks before throwing the draft away', async () => {
     const user = userEvent.setup()
-    runState = {
-      ...idle(),
-      messages: [{ message_id: 'm1', role: 'assistant', content: 'preview', metadata: {} }],
-    }
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    runState = { ...idle(), currentRunId: 'r1', sending: true }
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: 'discard' }))
-    expect(cancelRun).not.toHaveBeenCalled()
-    expect(reset).toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: /Discard/ }))
+    expect(reset).not.toHaveBeenCalled()
+    confirm.mockRestore()
+  })
+
+  /**
+   * The hang.
+   *
+   * `currentRunId` alone decided whether the run view took the page over, and
+   * it is persisted — so an id that outlived its messages hid the form behind
+   * a run view whose own stage was `idle`. The screen showed a stepper on step
+   * one, the words "Fill in the form and click Generate to start", and no form
+   * anywhere on it.
+   */
+  it('shows the form again when a persisted run has nothing left in it', async () => {
+    runState = { ...idle(), currentRunId: 'stale-run', sending: false, messages: [] }
+    renderPage()
+
+    expect(await screen.findByRole('button', { name: /Generate outline/ })).toBeTruthy()
+    expect(screen.queryByText('run in progress')).toBeNull()
   })
 })

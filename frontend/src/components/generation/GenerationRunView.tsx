@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Info, Pencil, Square, Trash2, X } from 'lucide-react'
+import { Info, Pencil, Square, X } from 'lucide-react'
 import type { Batch } from '../../entity/Batch'
 import type { GenerationRunState } from '../../hooks/useGenerationRun'
 import {
@@ -32,7 +32,6 @@ export function GenerationRunView({
   run,
   accent = 'primary',
   emptyHint,
-  onDiscard,
   onBlueprintSaved,
   gameDeadlineAt,
   onGameCreated,
@@ -41,16 +40,6 @@ export function GenerationRunView({
   run: GenerationRunState
   accent?: GenAccent
   emptyHint?: ReactNode
-  /**
-   * Abandon the workflow and go back to the form.
-   *
-   * The stages that wait on the lecturer — an outline to approve, a preview to
-   * export — are persisted to localStorage so a reload can rejoin them. That
-   * is right for coming back to finish, and a trap for changing your mind:
-   * without this there was no way out of the approval screen at all, and it
-   * returned on every reload for as long as the record existed.
-   */
-  onDiscard?: () => void
   onBlueprintSaved?: (version: number | null) => void
   /** Deadline chosen on the game form, applied when the staged game is created. */
   gameDeadlineAt?: string | null
@@ -100,25 +89,6 @@ export function GenerationRunView({
       {label}
     </Button>
   )
-
-  /* Quiet, and to the right of the two things the lecturer is more likely to
-     want. It is not a destructive action in the data sense — nothing has been
-     saved yet at either stage — but it does throw away work they waited for,
-     so it asks first. */
-  const discardTrigger = onDiscard ? (
-    <button
-      type="button"
-      onClick={() => {
-        if (window.confirm('Discard this draft?\n\nNothing has been saved, and you will start again from the form.')) {
-          onDiscard()
-        }
-      }}
-      className="ml-auto inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
-    >
-      <Trash2 className="h-4 w-4" />
-      Discard
-    </button>
-  ) : null
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -250,7 +220,6 @@ export function GenerationRunView({
             <div className="flex flex-wrap items-center gap-2">
               {runState && <RunInspector run={runState} />}
               {refineTrigger('Request outline changes')}
-              {discardTrigger}
             </div>
             <RefineField
               accent={accent}
@@ -288,7 +257,6 @@ export function GenerationRunView({
             <div className="flex flex-wrap items-center gap-2 pt-1">
               {runState && <RunInspector run={runState} />}
               {stage === 'preview' && refineTrigger('Refine this draft')}
-            {stage === 'preview' && discardTrigger}
             </div>
             {stage === 'preview' && (
               <RefineField

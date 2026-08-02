@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { ChevronDown, ExternalLink, Plus, RefreshCw, Sparkles } from 'lucide-react'
+import { ChevronDown, ExternalLink, Plus, RefreshCw, Sparkles, Trash2 } from 'lucide-react'
 import type { ToastMessage } from '../types'
 import Toast from '../components/ui/Toast'
 import { getErrorMessage } from '../utils/errors'
@@ -188,6 +188,13 @@ export default function LessonPlans() {
      genuinely in flight — `reset` alone would leave the backend generating
      into a run nobody is listening to. */
   const discardRun = useCallback(() => {
+    if (
+      !window.confirm(
+        'Discard this draft?\n\nNothing has been saved, and you will start again from the form.',
+      )
+    ) {
+      return
+    }
     if (run.currentRunId) void run.cancelRun()
     run.reset()
   }, [run])
@@ -204,7 +211,17 @@ export default function LessonPlans() {
     settledRef.current = settled
   }, [settled, selectedBatchId, refreshArtifacts])
 
-  const started = run.messages.length > 0 || Boolean(run.currentRunId)
+  /* A run takes the page over only when it has something to show or something
+     in flight.
+     ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+     `currentRunId` alone was enough, and it is persisted to localStorage. So a
+     run id that outlived its messages — stopped server-side, or a record that
+     never produced one — hid the form behind a run view whose own derived
+     stage was `idle`. The result was a stepper on step 1, the words "Fill in
+     the form and click Generate to start", and no form anywhere on the page.
+     Nothing was wrong except that neither half believed it was in charge. */
+  const started =
+    (run.messages.length > 0 || Boolean(run.currentRunId)) && (stage !== 'idle' || run.sending)
   const missing = missingRequiredInputs(form, Boolean(selectedBatch))
 
   return (
@@ -229,10 +246,20 @@ export default function LessonPlans() {
             {/* Only once the workflow has finished. It used to appear the moment
                 a run started, so a tap mid-generation — or mid-approval —
                 discarded work in progress with no warning and no undo. */}
-            {settled && (
+            {/* Always one way out.
+                Restricting this to `settled` meant every unfinished state —
+                waiting on an approval, mid-generation, or the empty one above
+                — had no exit at all, and the workflow is persisted, so a page
+                the lecturer could not leave came back on every reload. */}
+            {settled ? (
               <Button type="button" variant="secondary" size="sm" onClick={() => run.reset()}
                 leadingIcon={<Plus className="h-4 w-4" />}>
                 Generate another
+              </Button>
+            ) : (
+              <Button type="button" variant="secondary" size="sm" onClick={discardRun}
+                leadingIcon={<Trash2 className="h-4 w-4" />}>
+                Discard
               </Button>
             )}
           </div>
@@ -249,7 +276,6 @@ export default function LessonPlans() {
               batch={selectedBatch}
               run={run}
               accent="primary"
-              onDiscard={discardRun}
             />
           </div>
         </div>

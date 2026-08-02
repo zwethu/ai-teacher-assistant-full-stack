@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Info, Pencil, Square, X } from 'lucide-react'
+import { Info, Pencil, Plus, Square, Trash2, X } from 'lucide-react'
 import type { Batch } from '../../entity/Batch'
 import type { GenerationRunState } from '../../hooks/useGenerationRun'
 import {
@@ -12,7 +12,7 @@ import {
 import { RunDetails } from '../../pages/chat/components/run/RunDetails'
 import { ThinkingPanel } from '../../pages/chat/components/run/ThinkingPanel'
 import { useStickToBottom } from '../../hooks/useStickToBottom'
-import { deriveGenerationStage } from './generationStage'
+import { deriveGenerationStage, isWorkflowSettled } from './generationStage'
 import { GenerationStepper } from './GenerationStepper'
 import { RefineField } from './RefineField'
 import { RunInspector } from './RunInspector'
@@ -32,6 +32,8 @@ export function GenerationRunView({
   run,
   accent = 'primary',
   emptyHint,
+  onDiscard,
+  onGenerateAnother,
   onBlueprintSaved,
   gameDeadlineAt,
   onGameCreated,
@@ -40,6 +42,21 @@ export function GenerationRunView({
   run: GenerationRunState
   accent?: GenAccent
   emptyHint?: ReactNode
+  /**
+   * Abandon the workflow and go back to the form.
+   *
+   * Rendered in one fixed place — the card's own footer, bottom right —
+   * rather than above the card or scattered through each stage.
+   *
+   * The header was correct in principle and useless in practice: a generated
+   * outline runs well past a screen, so the one way out sat above the fold
+   * while the lecturer read to the bottom and found only Approve and Request
+   * changes. Per-stage rows fixed the distance and cost the predictability —
+   * the exit moved depending on what the run happened to be doing.
+   */
+  onDiscard?: () => void
+  /** The settled twin of `onDiscard`, in the same slot. */
+  onGenerateAnother?: () => void
   onBlueprintSaved?: (version: number | null) => void
   /** Deadline chosen on the game form, applied when the staged game is created. */
   gameDeadlineAt?: string | null
@@ -64,6 +81,10 @@ export function GenerationRunView({
   }, [stage])
 
   const generating = stage === 'generating_outline' || stage === 'generating_full'
+  const settled = isWorkflowSettled(stage)
+  // The stages that already draw a row of actions for the exit to join.
+  const hasActionRow =
+    stage === 'outline_review' || stage === 'preview' || stage === 'done'
 
   // Terminal actions report their result back into the run so the stepper can
   // reach its final step without waiting for a remount to re-read Firestore.
@@ -89,6 +110,43 @@ export function GenerationRunView({
       {label}
     </Button>
   )
+
+  /* The card's one fixed exit, bottom right.
+     ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+     Same corner at every stage: Discard while there is a draft to abandon,
+     Generate another once the work is saved. The stage's own actions —
+     Approve, Refine, View steps — stay where they are; this is the way *out*,
+     and a way out that moves is one the lecturer has to look for.
+
+     Not a danger colour. Nothing has been saved at any stage that offers
+     Discard, so the risk is losing a draft rather than deleting work. */
+  const exitControl = settled ? (
+    onGenerateAnother ? (
+      /* Primary. Once the work is saved this is the only thing left to do on
+         the page, and it was reading as another quiet option beside View steps
+         and Open Google Doc — three secondary buttons in a row, none of them
+         claiming to be the next step. Discard stays the quietest thing in the
+         card: they share a corner, and only one of them is an invitation. */
+      <Button
+        type="button"
+        variant="primary"
+        onClick={onGenerateAnother}
+        leadingIcon={<Plus className="h-4 w-4" />}
+      >
+        Generate another
+      </Button>
+    ) : null
+  ) : onDiscard ? (
+    /* The design system's own ghost, not a hand-rolled button that resembles
+       one. The hand-rolled version set its own padding and min-height, so the
+       icon and the label were centred against different boxes and sat a pixel
+       or two apart — and it stood at a different height from the two real
+       Buttons beside it in the row. `.maia-btn` centres both on one flex line
+       and matches its neighbours by construction. */
+    <Button type="button" variant="ghost" onClick={onDiscard} leadingIcon={<Trash2 className="h-4 w-4" />}>
+      Discard
+    </Button>
+  ) : null
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -217,9 +275,14 @@ export function GenerationRunView({
               }
               onApprove={() => run.approveOutline(activeMessage)}
             />
+            {/* One row. The exit belongs beside View steps and Request
+                changes rather than under them — it is one of the three things
+                the lecturer can do here, and a row of its own made it read as
+                a separate decision about the page instead of about the run. */}
             <div className="flex flex-wrap items-center gap-2">
               {runState && <RunInspector run={runState} />}
               {refineTrigger('Request outline changes')}
+              {exitControl && <span className="ml-auto">{exitControl}</span>}
             </div>
             <RefineField
               accent={accent}
@@ -257,6 +320,7 @@ export function GenerationRunView({
             <div className="flex flex-wrap items-center gap-2 pt-1">
               {runState && <RunInspector run={runState} />}
               {stage === 'preview' && refineTrigger('Refine this draft')}
+              {exitControl && <span className="ml-auto">{exitControl}</span>}
             </div>
             {stage === 'preview' && (
               <RefineField
@@ -278,6 +342,12 @@ export function GenerationRunView({
             </div>
             {runState && <RunInspector run={runState} />}
           </div>
+        )}
+
+        {/* Only where there is no action row to join: mid-generation, idle,
+            cancelled and failed have nothing else to sit beside. */}
+        {exitControl && !hasActionRow && (
+          <div className="mt-4 flex justify-end">{exitControl}</div>
         )}
       </div>
     </div>

@@ -34,8 +34,30 @@ vi.mock('../components/generation/GenerationAttachments', () => ({
 }))
 // The run view is a large tree of its own; this stands in for it and exposes
 // the one control under test.
+// Stands in for a large tree, but keeps the two controls the page owns — it
+// hands them down, and where they end up inside the card is the view's business.
 vi.mock('../components/generation/GenerationRunView', () => ({
-  GenerationRunView: () => <span>run in progress</span>,
+  GenerationRunView: ({
+    onDiscard,
+    onGenerateAnother,
+  }: {
+    onDiscard?: () => void
+    onGenerateAnother?: () => void
+  }) => (
+    <div>
+      <span>run in progress</span>
+      {onDiscard && (
+        <button type="button" onClick={onDiscard}>
+          Discard
+        </button>
+      )}
+      {onGenerateAnother && (
+        <button type="button" onClick={onGenerateAnother}>
+          Generate another
+        </button>
+      )}
+    </div>
+  ),
 }))
 
 const idle = () => ({

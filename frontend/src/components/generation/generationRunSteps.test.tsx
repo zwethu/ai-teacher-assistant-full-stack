@@ -61,6 +61,40 @@ function generatingRun(events: AgentRunEvent[]): GenerationRunState {
   } as unknown as GenerationRunState
 }
 
+/** Waiting on the lecturer to approve an outline. */
+function outlineReviewRun(): GenerationRunState {
+  const runId = 'run-2'
+  return {
+    messages: [
+      {
+        message_id: 'm1', chat_id: 'c1', role: 'assistant',
+        content: '## Outline', created_at: null, status: 'done', run_id: runId,
+        metadata: { workflow_stage: 'outline', outline_approvable: true, artifact_type: 'lesson_plan' },
+      },
+    ],
+    runStates: { [runId]: { status: 'done', events: [], steps: {} } },
+    currentRunId: runId, activePhase: null, sending: false, cancelling: false,
+    cancelRun: () => Promise.resolve(),
+  } as unknown as GenerationRunState
+}
+
+/** Finished and delivered, so the work is saved. */
+function doneRun(): GenerationRunState {
+  const runId = 'run-3'
+  return {
+    messages: [
+      {
+        message_id: 'm2', chat_id: 'c1', role: 'assistant',
+        content: '## Lesson plan', created_at: null, status: 'done', run_id: runId,
+        metadata: { artifact_preview: true, artifact_type: 'lesson_plan', doc_url: 'https://x' },
+      },
+    ],
+    runStates: { [runId]: { status: 'done', events: [], steps: {} } },
+    currentRunId: runId, activePhase: null, sending: false, cancelling: false,
+    cancelRun: () => Promise.resolve(),
+  } as unknown as GenerationRunState
+}
+
 const view = (events: AgentRunEvent[]) =>
   render(<GenerationRunView batch={batch} run={generatingRun(events)} />)
 
@@ -109,6 +143,84 @@ describe('the standalone generation card while working', () => {
     expect(capped?.className).toContain('min-h-0')
     // Every row is still rendered — it scrolls, it does not truncate.
     expect(capped?.querySelectorAll('.mila-step-row')).toHaveLength(6)
+  })
+
+  /**
+   * The way out has moved three times, so it is pinned here.
+   *
+   * It started in the page header, which is above the fold by the time a
+   * lecturer has read a generated outline to the bottom and is deciding. It
+   * then went into a footer row of its own, which read as a decision about the
+   * page rather than about the run. It belongs beside the other things this
+   * stage can do.
+   */
+  it('puts the exit in the same row as the stage\'s own actions', () => {
+    const onDiscard = vi.fn()
+    render(
+      <GenerationRunView batch={batch} run={outlineReviewRun()} onDiscard={onDiscard} />,
+    )
+
+    const discard = screen.getByRole('button', { name: /Discard/ })
+    const steps = screen.getByRole('button', { name: /View steps/ })
+    const refine = screen.getByRole('button', { name: /Request outline changes/ })
+
+    // All three share one row: same parent, no wrapper of its own.
+    expect(discard.closest('div')).toBe(steps.closest('div'))
+    expect(refine.closest('div')).toBe(steps.closest('div'))
+  })
+
+  /**
+   * Discard was hand-rolled: its own padding and min-height, so the icon and
+   * the label were centred against different boxes and it stood at a different
+   * height from the two real Buttons beside it.
+   */
+  it('builds the exit from the same button as its neighbours', () => {
+    render(<GenerationRunView batch={batch} run={outlineReviewRun()} onDiscard={vi.fn()} />)
+
+    const discard = screen.getByRole('button', { name: /Discard/ })
+    const steps = screen.getByRole('button', { name: /View steps/ })
+    // `.maia-btn` centres icon and label on one flex line; a bespoke button
+    // has to re-derive that and gets it a pixel or two wrong.
+    expect(discard.className).toContain('maia-btn')
+    expect(steps.className).toContain('maia-btn')
+    // Quiet, but not a different kind of object.
+    expect(discard.className).toContain('maia-btn--ghost')
+  })
+
+  /**
+   * Once the work is saved this is the only thing left to do on the page. As a
+   * secondary it was a third quiet button in a row of quiet buttons, none of
+   * them claiming to be the next step.
+   */
+  it('offers Generate another as the primary action once the run is done', () => {
+    const onGenerateAnother = vi.fn()
+    render(
+      <GenerationRunView
+        batch={batch}
+        run={doneRun()}
+        onGenerateAnother={onGenerateAnother}
+      />,
+    )
+
+    const generate = screen.getByRole('button', { name: /Generate another/ })
+    // The design system's primary is the solid violet fill.
+    expect(generate.className).toMatch(/violet-600|maia-btn--primary/)
+    fireEvent.click(generate)
+    expect(onGenerateAnother).toHaveBeenCalled()
+  })
+
+  /** Discard never appears once there is saved work to lose. */
+  it('swaps Discard for Generate another rather than showing both', () => {
+    render(
+      <GenerationRunView
+        batch={batch}
+        run={doneRun()}
+        onDiscard={vi.fn()}
+        onGenerateAnother={vi.fn()}
+      />,
+    )
+    expect(screen.queryByRole('button', { name: /Discard/ })).toBeNull()
+    expect(screen.getByRole('button', { name: /Generate another/ })).toBeTruthy()
   })
 
   it('keeps Stop out of the scrolling region entirely', () => {

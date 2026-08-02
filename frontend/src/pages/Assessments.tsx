@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { ChevronDown, ExternalLink, Plus, RefreshCw, Sparkles, Trash2 } from 'lucide-react'
+import { ChevronDown, ExternalLink, RefreshCw, Sparkles } from 'lucide-react'
 import type { ToastMessage } from '../types'
 import Toast from '../components/ui/Toast'
 import { getErrorMessage } from '../utils/errors'
@@ -16,7 +16,7 @@ import { artifactIcon } from '../utils/artifactIcons'
 import { SelectField, toOptions } from '../components/ui/SelectField'
 import { NumberField } from '../components/ui/NumberField'
 import { CHECKBOX_CLASS, FIELD_CLASS, FIELD_LABEL_CLASS, TEXTAREA_CLASS } from '../components/ui/fieldStyles'
-import { Button, Spinner } from '../design-system'
+import { Spinner } from '../design-system'
 
 const AssessmentIcon = artifactIcon('assessment')
 
@@ -220,30 +220,6 @@ export default function Assessments() {
 
       {started && selectedBatch ? (
         <div>
-          {/* No heading: the page title above already names the workflow, and
-              repeating it in smaller type says nothing the reader did not just
-              read. The row exists only to hang the reset control off. */}
-          <div className="mb-3 flex items-center justify-end">
-            {/* Only once the workflow has finished. It used to appear the moment
-                a run started, so a tap mid-generation — or mid-approval —
-                discarded work in progress with no warning and no undo. */}
-            {/* Always one way out.
-                Restricting this to `settled` meant every unfinished state —
-                waiting on an approval, mid-generation, or the empty one above
-                — had no exit at all, and the workflow is persisted, so a page
-                the lecturer could not leave came back on every reload. */}
-            {settled ? (
-              <Button type="button" variant="secondary" size="sm" onClick={() => run.reset()}
-                leadingIcon={<Plus className="h-4 w-4" />}>
-                Generate another
-              </Button>
-            ) : (
-              <Button type="button" variant="secondary" size="sm" onClick={discardRun}
-                leadingIcon={<Trash2 className="h-4 w-4" />}>
-                Discard
-              </Button>
-            )}
-          </div>
           {/* The floor is for the *working* stages, where thinking and a step
               list need somewhere to grow without the card resizing under them.
               Once there is a result it only leaves dead space: a short preview
@@ -257,6 +233,8 @@ export default function Assessments() {
               batch={selectedBatch}
               run={run}
               accent="primary"
+              onDiscard={discardRun}
+              onGenerateAnother={() => run.reset()}
             />
           </div>
         </div>

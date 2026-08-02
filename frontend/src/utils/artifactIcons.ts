@@ -4,6 +4,7 @@ import {
   FlaskConical,
   Gamepad2,
   GraduationCap,
+  Mail,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -22,7 +23,13 @@ import {
  * "Lab Preview" and "Lab Outline" depending on where it appears, and that is
  * correct.
  */
-export type ArtifactKind = 'course_blueprint' | 'lesson_plan' | 'lab' | 'assessment' | 'game'
+export type ArtifactKind =
+  | 'course_blueprint'
+  | 'lesson_plan'
+  | 'lab'
+  | 'assessment'
+  | 'game'
+  | 'email'
 
 export const ARTIFACT_ICONS: Record<ArtifactKind, LucideIcon> = {
   course_blueprint: GraduationCap,
@@ -30,6 +37,10 @@ export const ARTIFACT_ICONS: Record<ArtifactKind, LucideIcon> = {
   lab: FlaskConical,
   assessment: FileQuestion,
   game: Gamepad2,
+  // Already the mark for email in the sidebar and the composer's mode menu;
+  // it only reached this table when the batch tab started drawing an icon per
+  // row, and an email was falling through to the lesson plan's book.
+  email: Mail,
 }
 
 /** `quiz` is the artifact_type the agent writes; `assessment` is the composer

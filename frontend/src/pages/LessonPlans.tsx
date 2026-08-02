@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
-import { ChevronDown, Clock, ExternalLink, Plus, Sparkles } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { ChevronDown, ExternalLink, Plus, RefreshCw, Sparkles } from 'lucide-react'
 import type { ToastMessage } from '../types'
 import Toast from '../components/ui/Toast'
 import { getErrorMessage } from '../utils/errors'
@@ -13,6 +13,9 @@ import { PlanHintBanner } from '../components/generation/PlanHintBanner'
 import { listArtifacts, type Artifact } from '../services/artifactService'
 import { timeAgo } from '../utils/formatDate'
 import { artifactIcon } from '../utils/artifactIcons'
+import { SelectField, toOptions } from '../components/ui/SelectField'
+import { NumberField } from '../components/ui/NumberField'
+import { FIELD_CLASS, FIELD_LABEL_CLASS, TEXTAREA_CLASS } from '../components/ui/fieldStyles'
 import { Button, Spinner } from '../design-system'
 
 // Read from the shared table rather than named twice: the empty state used to
@@ -27,6 +30,16 @@ const PLAN_TYPES = [
   'standard', 'scenario_based', 'case_based', 'lab_based',
   'project_based', 'flipped', 'workshop_practice', 'review_remediation',
 ]
+
+/* Values stay exactly as the agent prompt expects them; only the labels are
+   dressed up. Difficulty used to be capitalised by a `capitalize` utility on
+   the control, which the custom dropdown has no equivalent for — and doing it
+   in the label is the honest place anyway, since it is a display concern. */
+const DURATION_OPTIONS = toOptions(DURATIONS.map(String))
+const GRADE_OPTIONS = toOptions(GRADES)
+const DIFFICULTY_OPTIONS = toOptions(DIFFICULTIES, (d) => d[0].toUpperCase() + d.slice(1))
+const APPROACH_OPTIONS = toOptions(APPROACHES)
+const PLAN_TYPE_OPTIONS = toOptions(PLAN_TYPES, (t) => t.replace(/_/g, ' '))
 
 const INITIAL_FORM = {
   title: '',
@@ -109,6 +122,12 @@ export default function LessonPlans() {
   // undone the moment anything else re-renders.
   const prefilledFor = useRef('')
 
+  // Course name as the hint, so typing either it or the cohort finds the space.
+  const batchOptions = useMemo(
+    () => batches.map((b) => ({ value: b.id, label: b.batch_name, hint: b.course_name })),
+    [batches],
+  )
+
   useEffect(() => {
     if (!prefill || !selectedBatchId || prefilledFor.current === selectedBatchId) return
     prefilledFor.current = selectedBatchId
@@ -164,6 +183,27 @@ export default function LessonPlans() {
   }
 
   // Keep the page form-first: the progress panel only appears once a run starts.
+  /* Nothing is persisted as an artifact until the workflow finishes, so
+     discarding costs only the draft. `cancelRun` first when something is
+     genuinely in flight — `reset` alone would leave the backend generating
+     into a run nobody is listening to. */
+  const discardRun = useCallback(() => {
+    if (run.currentRunId) void run.cancelRun()
+    run.reset()
+  }, [run])
+
+  const stage = deriveGenerationStage(run).stage
+  const settled = isWorkflowSettled(stage)
+
+  /* The list is live now rather than hidden behind the run, so it has to pick
+     up what the run just produced — otherwise a lecturer watches a generation
+     finish above a list that still does not contain it. */
+  const settledRef = useRef(false)
+  useEffect(() => {
+    if (settled && !settledRef.current && selectedBatchId) void refreshArtifacts(selectedBatchId)
+    settledRef.current = settled
+  }, [settled, selectedBatchId, refreshArtifacts])
+
   const started = run.messages.length > 0 || Boolean(run.currentRunId)
   const missing = missingRequiredInputs(form, Boolean(selectedBatch))
 
@@ -189,7 +229,7 @@ export default function LessonPlans() {
             {/* Only once the workflow has finished. It used to appear the moment
                 a run started, so a tap mid-generation — or mid-approval —
                 discarded work in progress with no warning and no undo. */}
-            {isWorkflowSettled(deriveGenerationStage(run).stage) && (
+            {settled && (
               <Button type="button" variant="secondary" size="sm" onClick={() => run.reset()}
                 leadingIcon={<Plus className="h-4 w-4" />}>
                 Generate another
@@ -202,29 +242,28 @@ export default function LessonPlans() {
               card and two buttons sat in 384px with a third of it empty. */}
           <div
             className={`flex flex-col rounded-xl border border-slate-200 bg-white shadow-sm ${
-              isWorkflowSettled(deriveGenerationStage(run).stage) ? '' : 'min-h-[24rem]'
+              settled ? '' : 'min-h-[24rem]'
             }`}
           >
-            <GenerationRunView batch={selectedBatch} run={run} accent="primary" />
+              <GenerationRunView
+              batch={selectedBatch}
+              run={run}
+              accent="primary"
+              onDiscard={discardRun}
+            />
           </div>
         </div>
       ) : (
         <div className="space-y-6">
           <form onSubmit={handleGenerate} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm space-y-3">
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1">Space (batch)</label>
-              <select
-                required
-                value={selectedBatchId ?? ''}
-                onChange={(e) => setSelectedBatchId(e.target.value)}
-                disabled={batchesLoading}
-                className="block w-full rounded-md border border-slate-300 py-2 px-2 text-sm focus:border-violet-500 focus:ring-violet-500"
-              >
-                {batches.map((b) => (
-                  <option key={b.id} value={b.id}>{b.batch_name} — {b.course_name}</option>
-                ))}
-              </select>
-            </div>
+            <SelectField
+              label="Space (batch)"
+              value={selectedBatchId ?? ''}
+              onChange={setSelectedBatchId}
+              options={batchOptions}
+              disabled={batchesLoading}
+              placeholder={batchesLoading ? 'Loading spaces…' : 'Select a space'}
+            />
 
             {/* Filling a required field without saying so is the kind of help
                 that reads as a bug the first time someone notices it. One line,
@@ -236,55 +275,51 @@ export default function LessonPlans() {
               </p>
             )}
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">Week</label>
-                <input type="number" min={1} required value={form.week}
-                  onChange={(e) => setForm((f) => ({ ...f, week: Number(e.target.value || 1) }))}
-                  className="block w-full rounded-md border border-slate-300 py-2 px-2.5 text-sm focus:border-violet-500 focus:ring-violet-500" />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">Duration (min)</label>
-                <select value={form.duration} onChange={(e) => setForm((f) => ({ ...f, duration: Number(e.target.value) }))}
-                  className="block w-full rounded-md border border-slate-300 py-2 px-2 text-sm focus:border-violet-500 focus:ring-violet-500">
-                  {DURATIONS.map((d) => <option key={d} value={d}>{d}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">Level</label>
-                <select value={form.grade} onChange={(e) => setForm((f) => ({ ...f, grade: e.target.value }))}
-                  className="block w-full rounded-md border border-slate-300 py-2 px-2 text-sm focus:border-violet-500 focus:ring-violet-500">
-                  {GRADES.map((g) => <option key={g} value={g}>{g}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">Difficulty</label>
-                <select value={form.difficulty} onChange={(e) => setForm((f) => ({ ...f, difficulty: e.target.value }))}
-                  className="block w-full rounded-md border border-slate-300 py-2 px-2 text-sm focus:border-violet-500 focus:ring-violet-500 capitalize">
-                  {DIFFICULTIES.map((d) => <option key={d} value={d}>{d}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">Approach</label>
-                <select value={form.approach} onChange={(e) => setForm((f) => ({ ...f, approach: e.target.value }))}
-                  className="block w-full rounded-md border border-slate-300 py-2 px-2 text-sm focus:border-violet-500 focus:ring-violet-500">
-                  {APPROACHES.map((a) => <option key={a} value={a}>{a}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">Plan type</label>
-                <select value={form.planType} onChange={(e) => setForm((f) => ({ ...f, planType: e.target.value }))}
-                  className="block w-full rounded-md border border-slate-300 py-2 px-2 text-sm focus:border-violet-500 focus:ring-violet-500">
-                  {PLAN_TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
-                </select>
-              </div>
+              <NumberField
+                label="Week"
+                min={1}
+                required
+                value={form.week}
+                onChange={(week) => setForm((f) => ({ ...f, week }))}
+              />
+              <SelectField
+                label="Duration (min)"
+                value={String(form.duration)}
+                onChange={(v) => setForm((f) => ({ ...f, duration: Number(v) }))}
+                options={DURATION_OPTIONS}
+              />
+              <SelectField
+                label="Level"
+                value={form.grade}
+                onChange={(v) => setForm((f) => ({ ...f, grade: v }))}
+                options={GRADE_OPTIONS}
+              />
+              <SelectField
+                label="Difficulty"
+                value={form.difficulty}
+                onChange={(v) => setForm((f) => ({ ...f, difficulty: v }))}
+                options={DIFFICULTY_OPTIONS}
+              />
+              <SelectField
+                label="Approach"
+                value={form.approach}
+                onChange={(v) => setForm((f) => ({ ...f, approach: v }))}
+                options={APPROACH_OPTIONS}
+              />
+              <SelectField
+                label="Plan type"
+                value={form.planType}
+                onChange={(v) => setForm((f) => ({ ...f, planType: v }))}
+                options={PLAN_TYPE_OPTIONS}
+              />
             </div>
 
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1">Prior knowledge</label>
+              <label className={FIELD_LABEL_CLASS}>Prior knowledge</label>
               <textarea rows={2} required value={form.priorKnowledge}
                 onChange={(e) => setForm((f) => ({ ...f, priorKnowledge: e.target.value }))}
                 placeholder="What students already know, e.g. basic spreadsheet concepts"
-                className="block w-full rounded-md border border-slate-300 py-2 px-2.5 text-sm focus:border-violet-500 focus:ring-violet-500 resize-y" />
+                className={TEXTAREA_CLASS} />
             </div>
 
             <div>
@@ -299,25 +334,25 @@ export default function LessonPlans() {
               {showOptional && (
                 <div className="mt-3 space-y-3 rounded-lg border border-slate-100 bg-slate-50/70 p-3">
                   <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-1">Lesson plan name</label>
+                    <label className={FIELD_LABEL_CLASS}>Lesson plan name</label>
                     <input type="text" value={form.title}
                       onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
                       placeholder="Leave blank — agent names it from the course plan or topic"
-                      className="block w-full rounded-md border border-slate-300 py-2 px-2.5 text-sm focus:border-violet-500 focus:ring-violet-500" />
+                      className={FIELD_CLASS} />
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-1">Topic</label>
+                    <label className={FIELD_LABEL_CLASS}>Topic</label>
                     <input type="text" value={form.topic}
                       onChange={(e) => setForm((f) => ({ ...f, topic: e.target.value }))}
                       placeholder="Leave blank to let the agent choose from the course plan"
-                      className="block w-full rounded-md border border-slate-300 py-2 px-2.5 text-sm focus:border-violet-500 focus:ring-violet-500" />
+                      className={FIELD_CLASS} />
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-1">Additional instructions</label>
+                    <label className={FIELD_LABEL_CLASS}>Additional instructions</label>
                     <textarea rows={2} value={form.instructions}
                       onChange={(e) => setForm((f) => ({ ...f, instructions: e.target.value }))}
                       placeholder="Anything else the agent should consider…"
-                      className="block w-full rounded-md border border-slate-300 py-2 px-2.5 text-sm focus:border-violet-500 focus:ring-violet-500 resize-y" />
+                      className={TEXTAREA_CLASS} />
                   </div>
                 </div>
               )}
@@ -341,61 +376,82 @@ export default function LessonPlans() {
               )}
             </div>
           </form>
-
-          <div className="min-w-0">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-semibold text-slate-700">Saved lesson plans</h2>
-              {selectedBatchId && (
-                <button type="button" onClick={() => void refreshArtifacts(selectedBatchId)}
-                  className="text-xs text-violet-700 hover:underline">Refresh</button>
-              )}
-            </div>
-            {listLoading ? (
-              <div className="flex items-center gap-2 text-sm text-slate-500 py-6">
-                <Spinner size={16} /> Loading…
-              </div>
-            ) : artifacts.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-10 text-center rounded-xl border border-slate-100 bg-white">
-                <LessonPlanIcon className="w-8 h-8 text-slate-300 mb-2" />
-                <p className="text-sm text-slate-500">No lesson plans yet for this space.</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {artifacts.map((a) => (
-                  <article key={a.id} className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
-                    <div className="flex items-start gap-3 mb-2">
-                      {/* Violet, matching the identical tile on Assessments and
-                          Games. Sky is MILA's info semantic — a saved lesson
-                          plan is the lecturer's work, not a notice. */}
-                      <div className="h-9 w-9 rounded-lg bg-violet-50 text-violet-600 flex items-center justify-center border border-violet-100">
-                        <LessonPlanIcon className="w-4 h-4" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <h3 className="font-semibold text-slate-900 truncate">{a.title || 'Lesson plan'}</h3>
-                        <p className="text-xs text-slate-500 mt-0.5">Week {a.week ?? '—'} · v{a.version ?? 1}</p>
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2 mb-3">
-                      {a.status && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600 border border-slate-200">
-                          <Clock className="w-3 h-3" />{a.status}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-slate-400 mb-3">{timeAgo(a.updated_at ? new Date(a.updated_at) : null)}</p>
-                    {a.doc_url && (
-                      <a href={a.doc_url} target="_blank" rel="noreferrer"
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50">
-                        <ExternalLink className="w-3.5 h-3.5" /> Open Google Doc
-                      </a>
-                    )}
-                  </article>
-                ))}
-              </div>
-            )}
-          </div>
         </div>
       )}
+
+      {/* Outside the form/run split, so it stays on screen for the whole
+          generation. It used to be the `else` branch of `started`, which meant
+          the moment a lecturer pressed Generate their existing work vanished
+          and only came back when the run finished — the one time they might
+          want to glance at last week's plan is while this week's is being
+          written. */}
+      <div className="mt-6 min-w-0">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold text-slate-700">Saved lesson plans</h2>
+          {/* The bordered button from the Games page, not the violet text
+              link this used to be. Two pages doing the same job with
+              controls of different weight made the lighter one read as a
+              secondary action, which it is not. The icon spins while the
+              fetch is in flight, so the button says whether it worked. */}
+          {selectedBatchId && (
+            <button
+              type="button"
+              onClick={() => void refreshArtifacts(selectedBatchId)}
+              disabled={listLoading}
+              className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              <RefreshCw className={`h-4 w-4 ${listLoading ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
+          )}
+        </div>
+        {listLoading ? (
+          <div className="flex items-center gap-2 text-sm text-slate-500 py-6">
+            <Spinner size={16} /> Loading…
+          </div>
+        ) : artifacts.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-10 text-center rounded-xl border border-slate-100 bg-white">
+            <LessonPlanIcon className="w-8 h-8 text-slate-300 mb-2" />
+            <p className="text-sm text-slate-500">No lesson plans yet for this space.</p>
+          </div>
+        ) : (
+          /* Full-width rows, the shape the Games page already uses for the
+             same job. A three-column grid of small cards made each saved
+             plan a tile to scan across; these are a list to read down, the
+             title gets the whole width, and the one action sits where the
+             eye ends rather than under the text.
+
+             No status pill. Every one of these is `confirmed` in practice
+             — a draft never reaches this list — so the tag was a constant
+             repeated on every row, and neither Assessments nor Games shows
+             one. */
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {artifacts.map((a) => (
+              <article key={a.id} className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
+                <div className="flex items-start gap-3 mb-2">
+                  <div className="h-9 w-9 rounded-lg bg-violet-50 text-violet-600 flex items-center justify-center border border-violet-100">
+                    <LessonPlanIcon className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="font-semibold text-slate-900 truncate">{a.title || 'Lesson plan'}</h3>
+                    <p className="text-xs text-slate-500 mt-0.5">Week {a.week ?? '—'} · v{a.version ?? 1}</p>
+                  </div>
+                </div>
+                {/* No status pill. Everything reaching this list is confirmed,
+                    so the tag was the same word repeated on every card — and
+                    neither Assessments nor Games carried one. */}
+                <p className="text-xs text-slate-400 mb-3">{timeAgo(a.updated_at ? new Date(a.updated_at) : null)}</p>
+                {a.doc_url && (
+                  <a href={a.doc_url} target="_blank" rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-slate-300 text-slate-700 transition-colors hover:border-violet-300 hover:bg-violet-50 hover:text-violet-800">
+                    <ExternalLink className="w-3.5 h-3.5" /> Open Google Doc
+                  </a>
+                )}
+              </article>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

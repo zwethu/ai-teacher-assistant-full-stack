@@ -95,8 +95,15 @@ function CollapsibleRow({
 }) {
   return (
     <div className="rounded-md border border-slate-200/80 bg-white/80">
+      {/* `data-step-head` is the handle `.mila-lane__in/__out` sweep by — its
+          three children, in this order, are what move one after another when a
+          lane changes hands. Declared here rather than left as a bare
+          descendant selector in the stylesheet, so the coupling is visible
+          from both ends and a reshuffle of this row cannot break the motion
+          silently. */}
       <button
         type="button"
+        data-step-head
         onClick={hasDetails ? onToggle : undefined}
         className="flex w-full items-center gap-2 px-2.5 py-2 text-left text-xs"
       >

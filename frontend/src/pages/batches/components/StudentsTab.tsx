@@ -2,6 +2,7 @@ import type { ChangeEvent, FormEvent } from 'react'
 import type { BatchStudent } from '../../../entity/Batch'
 import { Plus, Trash2, Upload, UserPlus, Users } from 'lucide-react'
 import { Spinner, Button } from '../../../design-system'
+import { FIELD_CLASS } from '../../../components/ui/fieldStyles'
 
 type Props = {
   students: BatchStudent[]
@@ -43,7 +44,7 @@ export function StudentsTab({
                 value={studentForm.name}
                 onChange={(e) => setStudentForm((f) => ({ ...f, name: e.target.value }))}
                 placeholder="e.g. Jane Smith"
-                className="block w-full rounded-md border border-slate-300 shadow-sm py-2 px-3 text-sm focus:border-violet-500 focus:ring-violet-500"
+                className={FIELD_CLASS}
               />
             </div>
             <div>
@@ -54,7 +55,7 @@ export function StudentsTab({
                 value={studentForm.email}
                 onChange={(e) => setStudentForm((f) => ({ ...f, email: e.target.value }))}
                 placeholder="e.g. jane@school.edu"
-                className="block w-full rounded-md border border-slate-300 shadow-sm py-2 px-3 text-sm focus:border-violet-500 focus:ring-violet-500"
+                className={FIELD_CLASS}
               />
             </div>
             <Button type="submit" loading={addingStudent} block>

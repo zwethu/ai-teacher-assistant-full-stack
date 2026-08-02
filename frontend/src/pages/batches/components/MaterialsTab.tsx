@@ -7,11 +7,12 @@ import {
   type KeyboardEvent,
   type RefObject,
 } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import type { BatchFile } from '../../../entity/File'
 import type { Chat } from '../../../entity/Chat'
 import axios from 'axios'
 import {
+  AlertCircle,
   Check,
   Clock,
   FileText,
@@ -23,7 +24,6 @@ import {
   Trash2,
   Upload,
   X,
-  BookOpenCheck,
 } from 'lucide-react'
 import {
   createChat,
@@ -35,9 +35,8 @@ import {
 } from '../../../services/chatService'
 import { formatDateTime } from '../../../utils/formatDate'
 import { emitChatCreated } from '../../../utils/chatEvents'
-import { BTN_PRIMARY, BTN_SECONDARY } from '../constants'
+import { BTN_SECONDARY } from '../constants'
 import { IndexStatusBadge } from './IndexStatusBadge'
-import { getCurrentCourseBlueprint, type CourseBlueprint } from '../../../services/courseBlueprintService'
 import { IconButton, Spinner } from '../../../design-system'
 import type { GenerateMode } from '../../chat/components/ComposerSurface'
 import {
@@ -65,8 +64,23 @@ type Props = {
   onFileUpload: (e: ChangeEvent<HTMLInputElement>) => void
   onDeleteFile: (file: BatchFile) => void
   onRefreshFiles: () => void
-  onOpenPlanning: () => void
 }
+
+/**
+ * The openings under the composer.
+ *
+ * Short label, full prompt. The chat page's `SUGGESTIONS` are whole sentences,
+ * which is right for a centred hero at `max-w-lg` and wrong here: four of them
+ * wrapped onto a second row above a floating card, so the card grew a ragged
+ * two-line hat. The label is what has to fit on one line; the prompt is what
+ * the lecturer actually meant.
+ */
+const SESSION_PROMPTS: Array<{ label: string; prompt: string }> = [
+  { label: 'Plan a lesson', prompt: 'Help me plan a lesson on this topic' },
+  { label: 'Create a quiz', prompt: 'Create a quiz for my students' },
+  { label: 'Draft an email', prompt: 'Draft an announcement email' },
+  { label: 'Summarise materials', prompt: 'Summarise the uploaded materials' },
+]
 
 /** A file chosen in the composer but not yet uploaded anywhere. */
 type StagedFile = { id: string; file: File; previewUrl: string }
@@ -106,12 +120,38 @@ function StagedFileTile({ staged, onRemove }: { staged: StagedFile; onRemove: ()
   )
 }
 
+/**
+ * What the badge beside it cannot say — and nothing when there is nothing.
+ *
+ * `IndexStatusBadge` already carries `index_status` in full: Uploading,
+ * Pending, Indexing, Indexed, Failed, Deleting. This line used to restate it,
+ * so a finished file read "Indexed" twice in a row, once as a pill and once as
+ * plain text underneath.
+ *
+ * The only fact the badge cannot carry is the *overlay* — whether MILA can
+ * already use the file while durable indexing catches up. So that is all this
+ * says, in the one term a lecturer has: can it be used yet. "Overlay",
+ * "durable" and "retained temporarily" were the backend's words for its own
+ * two-stage pipeline, and none of them told a lecturer anything they could act
+ * on.
+ */
 export function batchFileStatusLabel(file: BatchFile): string {
-  if (file.overlay_status === 'ready' && file.index_status === 'failed') return 'Ready for immediate use · Durable indexing failed'
-  if (file.overlay_status === 'failed' && ['pending', 'indexing'].includes(file.index_status)) return 'Immediate preview failed · Durable indexing running'
-  if (file.overlay_status === 'retiring') return 'Indexed · Immediate overlay retained temporarily'
-  if (file.overlay_status === 'ready') return 'Ready for immediate use · Indexing for durable search'
-  return file.index_status === 'indexed' ? 'Indexed' : ''
+  // Indexing failed, but the file went in far enough to be read for now.
+  if (file.overlay_status === 'ready' && file.index_status === 'failed') {
+    return 'Usable in chats for now, but it will not be searchable.'
+  }
+  // The reverse: nothing to read from yet, and still working on it.
+  if (file.overlay_status === 'failed' && ['pending', 'indexing'].includes(file.index_status)) {
+    return 'Not usable yet — still processing.'
+  }
+  // Usable already, while the slower pass finishes.
+  if (file.overlay_status === 'ready' && file.index_status !== 'indexed') {
+    return 'Usable now, while it finishes processing.'
+  }
+  // Everything else — including `retiring`, which is the backend retiring its
+  // own temporary copy and means nothing to a lecturer — is fully described by
+  // the badge on its own.
+  return ''
 }
 
 // Per-space indexed-file cap. Mirrors the backend default (COURSE_SPACE_MAX_FILES,
@@ -128,7 +168,6 @@ export function MaterialsTab({
   onFileUpload,
   onDeleteFile,
   onRefreshFiles,
-  onOpenPlanning,
 }: Props) {
   const atFileLimit = files.length >= MAX_COURSE_SPACE_FILES
   const navigate = useNavigate()
@@ -146,7 +185,6 @@ export function MaterialsTab({
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
-  const [blueprint, setBlueprint] = useState<CourseBlueprint | null>(null)
   const [composerMenuOpen, setComposerMenuOpen] = useState(false)
   const [generateMode, setGenerateMode] = useState<GenerateMode | null>(null)
   // Files are staged in the browser and only uploaded on send. Nothing here
@@ -158,6 +196,9 @@ export function MaterialsTab({
   // the case this makes look deliberate rather than abrupt.
   const stagedEntries = useComposerPresence(stagedFiles, (staged) => staged.id)
   const [attachmentErrors, setAttachmentErrors] = useState<string[]>([])
+  const composerRef = useRef<HTMLDivElement | null>(null)
+  // Fallback until the observer reports; roughly an empty composer plus hint.
+  const [composerHeight, setComposerHeight] = useState(150)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const renameInputRef = useRef<HTMLInputElement>(null)
   const composerMenuRef = useRef<HTMLDivElement>(null)
@@ -204,7 +245,29 @@ export function MaterialsTab({
     void loadChats()
   }, [loadChats])
 
-  useEffect(() => { void getCurrentCourseBlueprint(batchId).then(setBlueprint).catch(() => setBlueprint(null)) }, [batchId])
+  /* The composer overlays the scroller, so the scroller has to reserve exactly
+     its height — measured, not assumed, because the suggestion row appears and
+     disappears and a wrapped composer grows. This is the same arrangement the
+     chat page uses (`ChatLayout.tsx`), and copying it is the point: an earlier
+     attempt put the composer in normal flow with `mt-auto`, which pins nothing
+     unless every ancestor resolves a definite height. */
+  useEffect(() => {
+    const node = composerRef.current
+    if (!node || typeof ResizeObserver === 'undefined') return undefined
+    let frame = 0
+    const observer = new ResizeObserver(() => {
+      if (frame) return
+      frame = requestAnimationFrame(() => {
+        frame = 0
+        setComposerHeight(node.offsetHeight)
+      })
+    })
+    observer.observe(node)
+    return () => {
+      if (frame) cancelAnimationFrame(frame)
+      observer.disconnect()
+    }
+  }, [])
 
   useEffect(() => {
     if (!menuOpenId) return
@@ -329,10 +392,6 @@ export function MaterialsTab({
     }
   }
 
-  function openChat(chatId: string) {
-    navigate(`/batches/${batchId}/chats/${chatId}`)
-  }
-
   function startRename(chat: Chat) {
     setRenamingId(chat.chat_id)
     setRenameValue(chat.title)
@@ -363,41 +422,83 @@ export function MaterialsTab({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3">
-      {/* Columns share the same top edge; composer stays pinned below. */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_20rem] lg:overflow-hidden lg:items-stretch">
-        <section className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm lg:h-full">
-          <div className="flex shrink-0 items-center gap-2 border-b border-slate-100 px-4 py-3">
-            <MessageCircle className="h-4 w-4 text-violet-600" />
-            <h3 className="text-sm font-semibold text-slate-700">Chat History</h3>
-          </div>
-          <div className="min-h-0 flex-1 overflow-y-auto">
+    /* Fills the tab so the composer band below has a full-height parent to pin
+       to. Without these classes the whole chain below sizes to its content. */
+    <div className="flex h-full min-h-0 flex-col">
+      {/* The positioned parent the composer band pins to.
+          ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+          `flex-1` here is load-bearing and only works because the root above
+          it is a flex column with a resolved height. That chain broke once
+          already — the root was left as a bare `<div>`, so this wrapper sized
+          to its content and the composer's `bottom-0` landed 456px above the
+          bottom of the screen. Measured, not guessed: `scripts/` has no test
+          for it, so the guard is in `MaterialsTab.structure.test.tsx`. */}
+      <div className="relative min-h-0 flex-1">
+      <div
+        className="grid h-full grid-cols-1 gap-6 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_24rem]"
+        /* Reserves the composer's own height, so the last row of the list
+           scrolls clear of it instead of coming to rest underneath. */
+        style={{ paddingBottom: composerHeight }}
+      >
+        {/* The column stretches; the card inside it does not. That distinction
+            is the whole fix — an earlier version put `lg:h-full` on the card
+            and stretched a panel holding two rows to the full viewport. Here
+            the column takes the height so the composer has somewhere to be
+            pushed to, and the card stays exactly as tall as its rows.
+
+            No `max-w` on the column either. Capping it at `max-w-2xl` left a
+            dead band between the list and the rail wide enough to read as a
+            missing third column. */}
+        <section className="flex min-w-0 flex-col gap-6 pb-2">
+          {/* A real surface, so the list reads as an object rather than as
+              text lying on the page — but one that sizes to its content. The
+              card was never the problem; `lg:h-full` was. A panel holding two
+              rows used to be stretched to the full viewport, and that is where
+              the empty white came from. */}
+          <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm">
+            <h3 className="flex items-center gap-2 border-b border-slate-100 px-4 py-2.5 text-sm font-semibold text-slate-700">
+              <MessageCircle className="h-4 w-4 text-violet-600" />
+              Recent
+            </h3>
             {chatsLoading ? (
-              <div className="flex flex-col items-center justify-center gap-3 py-16">
-                <Spinner size={24} />
-                <p className="text-sm text-slate-500">Loading chats…</p>
+              <div className="flex items-center gap-2 px-4 py-5 text-sm text-slate-500">
+                <Spinner size={16} /> Loading chats…
               </div>
             ) : chats.length === 0 ? (
-              <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
-                <MessageCircle className="mb-2 h-8 w-8 text-slate-300" />
-                <span className="text-sm font-medium text-slate-500">No chats yet.</span>
-                <p className="mt-1 text-xs text-slate-400">
-                  Start a conversation using the input below.
-                </p>
-              </div>
+              <p className="px-4 py-5 text-sm text-slate-500">
+                Nothing yet — your chats about this space will collect here.
+              </p>
             ) : (
               <ul className="divide-y divide-slate-100">
                 {chats.map((chat) => (
-                  <li key={chat.chat_id} className="relative group">
-                    <div className="w-full px-4 py-3 text-left transition-colors hover:bg-violet-50/60">
+                  <li key={chat.chat_id} className="group relative">
+                    {/* The row is a real link, not a `div` with an `onClick`.
+                        Opening a past chat is this tab's first job and it had
+                        no tab stop, no accessible name and no Enter handler —
+                        a keyboard or screen-reader user could not do it at
+                        all. A link rather than a button because it navigates,
+                        which also buys middle-click-to-new-tab: genuinely
+                        useful when comparing two weeks' prep side by side.
+
+                        It sits *behind* the row rather than wrapping it, so
+                        the rename field and the action menu are siblings of
+                        the click target instead of nested inside it — nesting
+                        a text input in a link is invalid, and it was why the
+                        input needed a `stopPropagation` to survive. */}
+                    {renamingId !== chat.chat_id && (
+                      <Link
+                        to={`/batches/${batchId}/chats/${chat.chat_id}`}
+                        /* `aria-label`, not an `sr-only` span. The title is
+                           already on screen in a sibling, so a hidden copy
+                           inside the link had a screen reader read it twice —
+                           and made it ambiguous to anything matching on text. */
+                        aria-label={chat.title}
+                        className="absolute inset-0 z-0 rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
+                      />
+                    )}
+                    <div className="pointer-events-none relative z-10 w-full rounded-xl px-4 py-3 text-left transition-colors group-hover:bg-violet-50/60 group-focus-within:bg-violet-50/60">
                       <div className="flex items-start justify-between gap-3">
-                        <div
-                          className="min-w-0 flex-1 cursor-pointer"
-                          onClick={() => {
-                            if (renamingId === chat.chat_id) return
-                            openChat(chat.chat_id)
-                          }}
-                        >
+                        <div className="min-w-0 flex-1">
                           {renamingId === chat.chat_id ? (
                             <input
                               ref={renameInputRef}
@@ -408,8 +509,8 @@ export function MaterialsTab({
                                 if (e.key === 'Enter') void commitRename()
                                 if (e.key === 'Escape') cancelRename()
                               }}
-                              className="w-full border-b border-violet-400 bg-transparent text-sm font-medium text-slate-900 outline-none"
-                              onClick={(e) => e.stopPropagation()}
+                              aria-label="Rename chat"
+                              className="pointer-events-auto w-full border-b border-violet-400 bg-transparent text-sm font-medium text-slate-900 outline-none"
                             />
                           ) : (
                             <div className="truncate text-sm font-medium text-slate-900">
@@ -428,11 +529,14 @@ export function MaterialsTab({
                               ? formatDateTime(chat.updated_at ?? chat.created_at)
                               : '—'}
                           </span>
+                          {/* `group-focus-within` alongside `group-hover`: the
+                              cluster used to be reachable by keyboard while
+                              rendered at zero opacity. */}
                           <div
-                            className={`relative flex items-center gap-0.5 transition-opacity ${
+                            className={`pointer-events-auto relative flex items-center gap-0.5 transition-opacity ${
                               confirmDeleteId === chat.chat_id || menuOpenId === chat.chat_id
                                 ? 'opacity-100'
-                                : 'opacity-0 group-hover:opacity-100'
+                                : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
                             }`}
                             data-chat-menu
                           >
@@ -507,96 +611,57 @@ export function MaterialsTab({
                 type="button"
                 onClick={() => void loadOlderChats()}
                 disabled={loadingMoreChats}
-                className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex w-full items-center justify-center gap-2 border-t border-slate-100 px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {loadingMoreChats && <Spinner size={14} tone="muted" />}
-                {loadingMoreChats ? 'Loading...' : 'Show older sessions'}
+                {loadingMoreChats ? 'Loading...' : 'Show older chats'}
               </button>
             )}
           </div>
+
+          {/* Floating, not docked.
+              ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+              `mt-auto` puts it at the foot of the column, so on a short list
+              it lands at the bottom of the screen rather than tucked under the
+              last row with a screen of dead space beneath it. `sticky` takes
+              over once the list outgrows the viewport, and `bottom-4` keeps it
+              clear of the edge — flush at `bottom-0` is the grammar of a
+              toolbar bolted to the window.
+
+              Capped at `max-w-3xl` and centred, so it is narrower than the
+              list it floats over. Matching the list's width would make it read
+              as another panel in the stack rather than as a thing on top.
+
+              No band behind it either. `.mila-composer-surface` is already a
+              floating plane: glass at 0.75 opacity, a 28px backdrop blur and a
+              low diffuse shadow, all written for exactly this. Laying a second
+              blurred scrim behind it was covering up the thing that makes it
+              read as floating in the first place. */}
         </section>
 
-        <aside className="flex min-h-0 min-w-0 flex-col gap-4 lg:h-full lg:overflow-y-auto">
-          <div className="shrink-0 rounded-2xl border border-violet-200 bg-violet-50/70 p-4">
-            <div className="flex items-center gap-2 text-sm font-semibold text-violet-900">
-              <BookOpenCheck className="h-4 w-4" />
-              Course Blueprint
-            </div>
-            {blueprint ? (
-              <>
-                <p className="mt-2 text-sm font-medium text-slate-800">{blueprint.title}</p>
-                <p className="mt-1 text-xs text-slate-500">
-                  Version {blueprint.version} · {blueprint.weekly_plan.length} weeks planned
-                </p>
-                <p className="mt-1 text-xs text-slate-400">
-                  Updated {formatDateTime(blueprint.updated_at || blueprint.created_at || '')}
-                </p>
-              </>
-            ) : (
-              <p className="mt-2 text-xs text-slate-600">No active planning memory yet.</p>
-            )}
-            <button
-              type="button"
-              onClick={onOpenPlanning}
-              className={`${BTN_SECONDARY} mt-3 w-full`}
-            >
-              Open Blueprint
-            </button>
-          </div>
+        {/* One block, one job.
+            ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+            This rail used to stack three unrelated things in three different
+            container grammars: a navigation target, an action, and a status
+            list. The navigation target was a 190px tinted card whose whole
+            function was to switch to the Planning tab — the first tab in the
+            strip, forty pixels above it — and it cost exactly the vertical
+            budget that pushed the file list off a 768px laptop. Its facts now
+            live in the batch header, beside the student count, where facts
+            about the batch already are.
 
-          <div className="shrink-0">
-            <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-700">
-              <Upload className="h-4 w-4 text-violet-600" />
-              Upload Materials
+            No nested `overflow-y-auto` either: the rail scrolled inside a
+            page that also scrolled, with no affordance saying so. */}
+        <aside className="min-w-0 self-start rounded-2xl border border-slate-100 bg-white shadow-sm">
+          <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
+            <h3 className="flex min-w-0 items-center gap-2 text-sm font-semibold text-slate-700">
+              <FileText className="h-4 w-4 flex-shrink-0 text-violet-600" />
+              Course materials
+              <span className="text-xs font-normal text-slate-500">
+                {files.length} / {MAX_COURSE_SPACE_FILES}
+              </span>
             </h3>
-            <p className="mb-3 text-xs text-slate-500">
-              PDFs, documents, and text files are indexed for AI search. Up to{' '}
-              {MAX_COURSE_SPACE_FILES} files per space.
-            </p>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".pdf,.txt,.md,.docx,.json"
-              onChange={onFileUpload}
-              disabled={fileUploading || atFileLimit}
-              className="sr-only"
-            />
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={fileUploading || atFileLimit}
-              className={`${BTN_PRIMARY} w-full justify-center`}
-            >
-              {fileUploading ? (
-                <>
-                  <Spinner size={16} />
-                  Uploading…
-                </>
-              ) : (
-                <>
-                  <Upload className="h-4 w-4" />
-                  Upload File
-                </>
-              )}
-            </button>
-            {atFileLimit && (
-              <p className="mt-2 text-xs text-amber-600">
-                {MAX_COURSE_SPACE_FILES}-file limit reached — remove a file to add another.
-              </p>
-            )}
-          </div>
-
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-            <div className="mb-3 flex shrink-0 items-center justify-between gap-2">
-              <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-                <FileText className="h-4 w-4 text-violet-600" />
-                Uploaded Files
-                {files.length > 0 && (
-                  <span className="text-xs font-normal text-slate-400">
-                    ({files.length} / {MAX_COURSE_SPACE_FILES})
-                  </span>
-                )}
-              </h3>
+            <div className="flex flex-shrink-0 items-center gap-1">
               <button
                 type="button"
                 onClick={onRefreshFiles}
@@ -607,18 +672,55 @@ export function MaterialsTab({
               >
                 <RefreshCw className={`h-4 w-4 ${filesLoading ? 'animate-spin' : ''}`} />
               </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                /* `.pptx` was missing and is the format a lecturer is most
+                   likely to reach for. The two pickers on this screen still
+                   differ — this one indexes into the space, the composer's
+                   attaches to one message — but that is now said in words
+                   below rather than left to be discovered. */
+                accept=".pdf,.pptx,.docx,.txt,.md,.markdown,.json"
+                onChange={onFileUpload}
+                disabled={fileUploading || atFileLimit}
+                className="sr-only"
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={fileUploading || atFileLimit}
+                className={`${BTN_SECONDARY} px-2.5 py-1.5 text-xs`}
+              >
+                {fileUploading ? <Spinner size={14} /> : <Upload className="h-3.5 w-3.5" />}
+                {fileUploading ? 'Uploading…' : 'Upload'}
+              </button>
             </div>
-            <div className="min-h-[12rem] flex-1 overflow-y-auto rounded-2xl border border-slate-100 bg-white shadow-sm">
+          </div>
+          <div className="border-b border-slate-100 px-4 py-2.5">
+            {/* Named by consequence, not mechanism. A lecturer who uploads
+                slides through the composer instead believes MILA "has" them,
+                then finds next week's chat does not. */}
+            <p className="text-xs text-slate-500">
+              MILA reads these in every chat about this space. To send a file to one
+              message only, attach it in the composer instead.
+            </p>
+            {atFileLimit && (
+              <p role="status" className="mt-1.5 text-xs font-medium text-amber-700">
+                {MAX_COURSE_SPACE_FILES}-file limit reached — remove one to add another.
+              </p>
+            )}
+          </div>
+          <div>
+            <div className="max-h-[28rem] overflow-y-auto">
               {filesLoading && files.length === 0 ? (
-                <div className="flex flex-col items-center justify-center gap-3 py-12">
-                  <Spinner size={24} />
-                  <p className="text-sm text-slate-500">Loading files…</p>
+                <div className="flex items-center gap-2 px-4 py-4 text-sm text-slate-500">
+                  <Spinner size={16} /> Loading files…
                 </div>
               ) : files.length === 0 ? (
-                <div className="flex flex-col items-center justify-center px-4 py-12 text-center">
-                  <FileText className="mb-2 h-7 w-7 text-slate-300" />
-                  <span className="text-sm font-medium text-slate-500">No files uploaded.</span>
-                </div>
+                <p className="px-4 py-4 text-sm text-slate-500">
+                  No materials yet. Upload a syllabus, slides or reading and MILA will
+                  use them.
+                </p>
               ) : (
                 <ul className="divide-y divide-slate-100">
                   {files.map((f) => (
@@ -634,9 +736,15 @@ export function MaterialsTab({
                           </div>
                           <div className="mt-1">
                             <IndexStatusBadge status={f.index_status} />
-                            <p className="mt-1 text-xs font-medium text-slate-600">
-                              {batchFileStatusLabel(f)}
-                            </p>
+                            {/* Only when it has something the badge does not
+                                say. Rendered unconditionally it left an empty
+                                paragraph holding its own `mt-1` open under
+                                every finished file. */}
+                            {batchFileStatusLabel(f) && (
+                              <p className="mt-1 text-xs font-medium text-slate-600">
+                                {batchFileStatusLabel(f)}
+                              </p>
+                            )}
                             {['uploading', 'pending', 'indexing', 'deleting'].includes(
                               f.index_status,
                             ) && (
@@ -644,13 +752,25 @@ export function MaterialsTab({
                                 {f.index_message || 'Indexing in progress...'}
                               </p>
                             )}
+                            {/* A failed index used to be a raw backend string
+                                in red with no way out — the one recovery is
+                                delete and re-upload, and nothing said so. */}
                             {f.index_error && (
-                              <p className="mt-1 break-words text-xs text-red-600">
-                                {f.index_error}
-                              </p>
+                              <div role="alert" className="mt-1.5 rounded-md bg-red-50 px-2 py-1.5">
+                                <p className="flex items-start gap-1.5 text-xs font-medium text-red-800">
+                                  <AlertCircle className="mt-px h-3.5 w-3.5 flex-shrink-0" />
+                                  Could not index this file.
+                                </p>
+                                <p className="mt-0.5 break-words text-xs text-red-700">
+                                  {f.index_error}
+                                </p>
+                                <p className="mt-1 text-xs text-red-700">
+                                  Delete it and upload again to retry.
+                                </p>
+                              </div>
                             )}
                             {f.overlay_warning && (
-                              <p className="mt-1 break-words text-xs text-amber-700">
+                              <p role="status" className="mt-1 break-words text-xs text-amber-700">
                                 {f.overlay_warning}
                               </p>
                             )}
@@ -680,87 +800,135 @@ export function MaterialsTab({
           </div>
         </aside>
       </div>
+      {/* Pinned to the foot of the column, with the list running beneath it.
+          ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+          Absolutely positioned over the scroller rather than placed in flow —
+          the arrangement `ChatLayout.tsx` already uses, and the reason this
+          finally stays down. `mt-auto` and `sticky` both need every ancestor
+          to resolve a definite height; an overlay needs only a positioned
+          parent, which is the wrapper around the grid.
 
-      <div className="shrink-0 border-t border-slate-200/80 pt-3">
-        <div className="w-full max-w-3xl">
-          {attachmentErrors.map((error) => (
-            <p key={error} className="mb-1 text-xs text-red-600">
-              {error}
-            </p>
-          ))}
-          <ComposerTint active={webSearch}>
-            <ComposerSurface>
-              <ComposerCollapse
-                open={stagedEntries.length > 0}
-                region="attachments"
-                className="px-1.5 pb-1 pt-2"
-              >
-                <div className="flex flex-wrap gap-2">
-                  {stagedEntries.map(({ key, item, leaving }) => (
-                    <div key={key} className={leaving ? 'mila-tile-out' : 'mila-tile-in'}>
-                      <StagedFileTile staged={item} onRemove={() => removeStagedFile(item.id)} />
-                    </div>
+          The band repeats the grid's own template with an empty second cell,
+          so the composer lands over the *left* column exactly, without a magic
+          number tracking the rail's width.
+
+          `pointer-events-none` on the band and `auto` on the card: the band
+          spans the full width and would otherwise swallow clicks on the
+          materials rail behind it. */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_24rem]">
+        <div ref={composerRef} className="pointer-events-auto mx-auto w-full max-w-3xl pb-4">
+              {attachmentErrors.length > 0 && (
+                <div role="alert" className="mb-2 space-y-1">
+                  {attachmentErrors.map((error) => (
+                    <p key={error} className="flex items-start gap-1.5 text-xs text-red-700">
+                      <AlertCircle className="mt-px h-3.5 w-3.5 flex-shrink-0" />
+                      {error}
+                    </p>
                   ))}
                 </div>
-              </ComposerCollapse>
-              <input
-                ref={attachmentInputRef}
-                type="file"
-                multiple
-                accept=".pdf,.docx,.pptx,.txt,.md,.markdown,.csv,.png,.jpg,.jpeg,.webp,.heic,.heif"
-                onChange={handleAttachmentFiles}
-                disabled={creating}
-                className="sr-only"
-              />
-              <textarea
-                ref={textareaRef}
-                rows={1}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onInput={handleTextareaInput}
-                onKeyDown={handleInputKeyDown}
-                placeholder={
-                  modeSpec(generateMode)?.placeholder ?? 'Start a new chat about this batch…'
-                }
-                disabled={creating}
-                className={COMPOSER_TEXTAREA_CLASS}
-              />
-              <ComposerControls>
-                <ComposerAddMenu
-                  menuRef={composerMenuRef}
-                  open={composerMenuOpen}
-                  onOpenChange={setComposerMenuOpen}
-                  onAttach={() => {
-                    setComposerMenuOpen(false)
-                    attachmentInputRef.current?.click()
-                  }}
-                  attachDisabled={creating || stagedFiles.length >= 5}
-                  disabled={creating}
-                  onSelectMode={selectGenerateMode}
-                />
-                <WebSearchToggle
-                  id="batch-chat-web-search"
-                  checked={webSearch}
-                  disabled={creating}
-                  onChange={setWebSearch}
-                />
-                <ComposerModeChip mode={generateMode} onClear={() => setGenerateMode(null)} />
-                <ComposerSpacer />
-                <IconButton
-                  variant="solid"
-                  size="lg"
-                  label="Start chat"
-                  onClick={() => void handleStartChat()}
-                  disabled={(!input.trim() && stagedFiles.length === 0) || creating}
-                >
-                  {creating ? <Spinner tone="inverse" size={16} /> : <Send className="h-4 w-4" />}
-                </IconButton>
-              </ComposerControls>
-            </ComposerSurface>
-          </ComposerTint>
-          <ComposerHint>Enter to start a new chat · Shift+Enter for new line</ComposerHint>
+              )}
+              {/* Openings, above the field they fill and centred with it — but
+                  only until the lecturer has started. Once there is something in
+                  the composer they are noise sitting under her hands, and they
+                  would pad the floating card for the whole session. */}
+              {!input.trim() && stagedFiles.length === 0 && (
+                <div className="no-scrollbar mb-3 flex justify-center gap-2 overflow-x-auto">
+                  {SESSION_PROMPTS.map(({ label, prompt }) => (
+                    <button
+                      key={label}
+                      type="button"
+                      title={prompt}
+                      onClick={() => {
+                        setInput(prompt)
+                        textareaRef.current?.focus()
+                      }}
+                      disabled={creating}
+                      /* `flex-shrink-0` with the row scrolling rather than
+                         wrapping: one line at every width, and on a narrow
+                         screen the tail is reachable by swipe instead of
+                         stacking a second row under the composer. */
+                      className="flex-shrink-0 whitespace-nowrap rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs font-medium text-slate-600 backdrop-blur transition-colors hover:border-violet-300 hover:bg-violet-50 hover:text-violet-800 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <ComposerTint active={webSearch}>
+                <ComposerSurface>
+                  <ComposerCollapse
+                    open={stagedEntries.length > 0}
+                    region="attachments"
+                    className="px-1.5 pb-1 pt-2"
+                  >
+                    <div className="flex flex-wrap gap-2">
+                      {stagedEntries.map(({ key, item, leaving }) => (
+                        <div key={key} className={leaving ? 'mila-tile-out' : 'mila-tile-in'}>
+                          <StagedFileTile staged={item} onRemove={() => removeStagedFile(item.id)} />
+                        </div>
+                      ))}
+                    </div>
+                  </ComposerCollapse>
+                  <input
+                    ref={attachmentInputRef}
+                    type="file"
+                    multiple
+                    accept=".pdf,.docx,.pptx,.txt,.md,.markdown,.csv,.png,.jpg,.jpeg,.webp,.heic,.heif"
+                    onChange={handleAttachmentFiles}
+                    disabled={creating}
+                    className="sr-only"
+                  />
+                  <textarea
+                    ref={textareaRef}
+                    rows={1}
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onInput={handleTextareaInput}
+                    onKeyDown={handleInputKeyDown}
+                    placeholder={
+                      modeSpec(generateMode)?.placeholder ?? 'Start a new chat about this batch…'
+                    }
+                    disabled={creating}
+                    className={COMPOSER_TEXTAREA_CLASS}
+                  />
+                  <ComposerControls>
+                    <ComposerAddMenu
+                      menuRef={composerMenuRef}
+                      open={composerMenuOpen}
+                      onOpenChange={setComposerMenuOpen}
+                      onAttach={() => {
+                        setComposerMenuOpen(false)
+                        attachmentInputRef.current?.click()
+                      }}
+                      attachDisabled={creating || stagedFiles.length >= 5}
+                      disabled={creating}
+                      onSelectMode={selectGenerateMode}
+                    />
+                    <WebSearchToggle
+                      id="batch-chat-web-search"
+                      checked={webSearch}
+                      disabled={creating}
+                      onChange={setWebSearch}
+                    />
+                    <ComposerModeChip mode={generateMode} onClear={() => setGenerateMode(null)} />
+                    <ComposerSpacer />
+                    <IconButton
+                      variant="solid"
+                      size="lg"
+                      label="Start chat"
+                      onClick={() => void handleStartChat()}
+                      disabled={(!input.trim() && stagedFiles.length === 0) || creating}
+                    >
+                      {creating ? <Spinner tone="inverse" size={16} /> : <Send className="h-4 w-4" />}
+                    </IconButton>
+                  </ComposerControls>
+                </ComposerSurface>
+              </ComposerTint>
+              <ComposerHint>Enter to start a new chat · Shift+Enter for new line</ComposerHint>
         </div>
       </div>
+      </div>
+
     </div>
   )
 }

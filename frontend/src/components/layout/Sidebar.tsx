@@ -130,13 +130,27 @@ function navLinkClass(
     ? 'gap-3 px-3 py-2.5 w-full'
     : 'justify-center items-center p-2 w-10 h-10 mx-auto shrink-0'
 
+  /* The main navigation had no focus styling of any kind — a keyboard user
+     tabbing down it saw nothing move. Slate-800 rather than the app's violet
+     for the same reason the batch tabs use it: the active item here is a
+     violet-tinted pill, so a violet ring would say the same thing twice and
+     leave "where I am" indistinguishable from "what I am on".
+
+     No sliding indicator, deliberately. That belongs to a bar whose items
+     share a rail for a mark to travel along; these are separate filled pills
+     with their own borders and elevation, several of them a route change
+     apart, and a measured pill would have to chase both the route and the
+     collapse animation to say what the fill already says. */
+  const focus =
+    'focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-800 focus-visible:ring-offset-2'
+
   if (isActive) {
     const activeBg = showLabels
       ? 'bg-gradient-to-r from-violet-100 to-white'
       : 'bg-violet-100/90'
-    return `relative flex items-center ${layout} text-sm font-medium rounded-xl whitespace-nowrap group text-violet-800 ${activeBg} border border-violet-300 shadow-md -translate-y-0.5 transition-all`
+    return `relative flex items-center ${layout} text-sm font-medium rounded-xl whitespace-nowrap group text-violet-800 ${activeBg} border border-violet-300 shadow-md -translate-y-0.5 transition-all ${focus}`
   }
-  return `flex items-center ${layout} text-sm font-medium rounded-xl whitespace-nowrap group text-slate-600 hover:text-slate-900 hover:bg-gradient-to-r hover:from-white hover:via-violet-50/60 hover:to-white border border-transparent hover:border-slate-200 hover:shadow-sm hover:-translate-y-0.5 transition-all`
+  return `flex items-center ${layout} text-sm font-medium rounded-xl whitespace-nowrap group text-slate-600 hover:text-slate-900 hover:bg-gradient-to-r hover:from-white hover:via-violet-50/60 hover:to-white border border-transparent hover:border-slate-200 hover:shadow-sm hover:-translate-y-0.5 transition-all ${focus}`
 }
 
 interface NavItemsProps {

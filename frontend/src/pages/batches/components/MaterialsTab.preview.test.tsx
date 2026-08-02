@@ -44,7 +44,6 @@ function renderTab() {
         onFileUpload={vi.fn()}
         onDeleteFile={vi.fn()}
         onRefreshFiles={vi.fn()}
-        onOpenPlanning={vi.fn()}
       />
     </MemoryRouter>,
   )

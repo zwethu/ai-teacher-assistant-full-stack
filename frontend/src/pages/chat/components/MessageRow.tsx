@@ -68,6 +68,8 @@ import {
   attachmentFromReference,
 } from './AttachmentPreview'
 import { EXPORT_FORMATS, EXPORT_FORMAT_ICONS } from './exportFormatIcons'
+import { FIELD_CLASS, TEXTAREA_CLASS } from '../../../components/ui/fieldStyles'
+import { DateField } from '../../../components/ui/DateField'
 
 // Referenced prior attachments are conveyed to the agent as an id mention appended to the
 // message (the backend rejects re-sending an already-sent attachment via attachment_ids).
@@ -1626,7 +1628,7 @@ export function EmailActionButtons({
               value={draft.subject}
               onChange={(e) => setDraft((d) => ({ ...d, subject: e.target.value }))}
               disabled={busy !== null}
-              className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-normal text-slate-800 focus:border-violet-500 focus:ring-violet-500 disabled:opacity-60"
+              className={`${FIELD_CLASS} mt-1 font-normal`}
             />
           </label>
           <label className="text-xs font-semibold text-slate-600">
@@ -1636,7 +1638,7 @@ export function EmailActionButtons({
               value={draft.body}
               onChange={(e) => setDraft((d) => ({ ...d, body: e.target.value }))}
               disabled={busy !== null}
-              className="mt-1 block w-full resize-y rounded-md border border-slate-300 px-3 py-2 text-sm font-normal text-slate-800 focus:border-violet-500 focus:ring-violet-500 disabled:opacity-60"
+              className={`${TEXTAREA_CLASS} mt-1 font-normal`}
             />
           </label>
           <p className="text-[11px] text-slate-500">
@@ -1672,12 +1674,13 @@ export function EmailActionButtons({
       )}
       {showSchedule && (
         <div className="flex flex-wrap items-center gap-2">
-          <input
-            type="datetime-local"
+          <DateField
+            withTime
+            className="w-56"
+            aria-label="Send at"
             min={minScheduleLocalValue()}
             value={sendAt}
-            onChange={(e) => setSendAt(e.target.value)}
-            className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+            onChange={setSendAt}
           />
           <button
             type="button"

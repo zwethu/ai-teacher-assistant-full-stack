@@ -23,10 +23,30 @@ import {
   MOOD_OPTIONS,
   MOOD_SELECT_OPTIONS,
 } from '../utils/constants'
+import { SelectField } from '../components/ui/SelectField'
+import { DateField, type DatePreset } from '../components/ui/DateField'
+import { addDays } from '../components/ui/dateValue'
 import { formatDate } from '../utils/formatDate'
 import { Spinner, Button } from '../design-system'
+import { FIELD_CLASS } from '../components/ui/fieldStyles'
 
 const NOTES_PREVIEW_LEN = 140
+
+/* The emoji rides in the label rather than in a separate column: it is part of
+   how the mood reads, and typing "tired" should still find it. `not_selected`
+   stays out — it is what an entry gets when nobody chose, not something anyone
+   picks on purpose. */
+const MOOD_FIELD_OPTIONS = MOOD_SELECT_OPTIONS.map((m) => ({
+  value: m.value,
+  label: `${m.emoji} ${m.label}`,
+}))
+
+/* Backwards, unlike every other date field in the app: you write up a
+   stressful moment that evening or the next morning, not in advance. */
+const JOURNAL_PRESETS: DatePreset[] = [
+  { label: 'Today', resolve: () => new Date() },
+  { label: 'Yesterday', resolve: () => addDays(new Date(), -1) },
+]
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10)
@@ -195,7 +215,7 @@ export default function Wellness() {
             Private reflection check-ins from stressful moments.
           </p>
         </div>
-        <Button type="button" onClick={openAddModal} className="focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-violet-500">
+        <Button type="button" onClick={openAddModal} className="focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-violet-500">
           <Plus className="w-5 h-5 mr-2 -ml-1" />
           Add Entry
         </Button>
@@ -338,40 +358,22 @@ export default function Wellness() {
             </div>
 
             <form onSubmit={handleAdd} className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-                  Mood
-                </label>
-                <select
-                  required
-                  value={form.mood}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, mood: e.target.value }))
-                  }
-                  className="block w-full rounded-md border border-slate-300 shadow-sm py-2.5 px-3 text-sm focus:border-violet-500 focus:ring-violet-500"
-                >
-                  {MOOD_SELECT_OPTIONS.map((m) => (
-                    <option key={m.value} value={m.value}>
-                      {m.emoji} {m.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <SelectField
+                label="Mood"
+                value={form.mood}
+                onChange={(v) => setForm((f) => ({ ...f, mood: v }))}
+                options={MOOD_FIELD_OPTIONS}
+              />
 
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-                  Date
-                </label>
-                <input
-                  type="date"
-                  required
-                  value={form.date}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, date: e.target.value }))
-                  }
-                  className="block w-full rounded-md border border-slate-300 shadow-sm py-2.5 px-3 text-sm focus:border-violet-500 focus:ring-violet-500"
-                />
-              </div>
+              <DateField
+                label="Date"
+                required
+                value={form.date}
+                onChange={(date) => setForm((f) => ({ ...f, date }))}
+                // A journal entry is about a day that has already happened, so
+                // the forward-looking deadline presets would all be wrong here.
+                presets={JOURNAL_PRESETS}
+              />
 
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1.5">
@@ -384,7 +386,7 @@ export default function Wellness() {
                     setForm((f) => ({ ...f, notes: e.target.value }))
                   }
                   placeholder="What happened today? How are you feeling?"
-                  className="block w-full rounded-md border border-slate-300 shadow-sm py-2.5 px-3 text-sm focus:border-violet-500 focus:ring-violet-500"
+                  className={FIELD_CLASS}
                 />
               </div>
 

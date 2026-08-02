@@ -21,6 +21,7 @@ export default function Batches() {
         filesLoading={state.filesLoading}
         artifacts={state.artifacts}
         artifactSummary={state.artifactSummary}
+        games={state.games}
         artifactsLoading={state.artifactsLoading}
         fileUploading={state.fileUploading}
         fileInputRef={state.fileInputRef}
@@ -36,6 +37,7 @@ export default function Batches() {
         handleDeleteFile={state.handleDeleteFile}
         handleRefreshFiles={state.handleRefreshFiles}
         handleDeleteArtifact={state.handleDeleteArtifact}
+        handleDeleteGame={state.handleDeleteGame}
         refreshArtifacts={state.refreshArtifacts}
         isEditOpen={state.isEditOpen}
         editDetails={state.editDetails}

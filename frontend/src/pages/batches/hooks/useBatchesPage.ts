@@ -27,6 +27,7 @@ import {
   syncBatchFileIndexStatus,
   uploadBatchFile,
 } from '../../../services/fileService'
+import { deleteGame, listGames, type GameSession } from '../../../services/gameService'
 import type { BatchDetails, BatchWithCount, CreateStep, DetailTab, StudentRow } from '../types'
 import { parseCsv } from '../utils/parseCsv'
 
@@ -95,6 +96,11 @@ export function useBatchesPage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
+  /* Games are not artifacts. They live in their own `gameSessions` collection
+     with their own id, no version chain and no Drive file, so they arrive from
+     a second call rather than out of `listArtifacts`. The Generated content tab
+     normalises the two into one row shape. */
+  const [games, setGames] = useState<GameSession[]>([])
   const [artifactSummary, setArtifactSummary] = useState<ArtifactSummary | null>(null)
   const [artifactsLoading, setArtifactsLoading] = useState(false)
 
@@ -182,12 +188,16 @@ export function useBatchesPage() {
     if (!selectedBatch) return
     setArtifactsLoading(true)
     try {
-      const [items, summary] = await Promise.all([
+      const [items, summary, gameList] = await Promise.all([
         listArtifacts(selectedBatch.id),
         getArtifactSummary(selectedBatch.id),
+        // Best-effort: a space with no games 404s on nothing, but a games
+        // outage should not blank the artifacts the lecturer came for.
+        listGames(selectedBatch.id).catch(() => [] as GameSession[]),
       ])
       setArtifacts(items)
       setArtifactSummary(summary)
+      setGames(gameList)
     } catch (err) {
       console.error(err)
       showToast('error', getErrorMessage(err, 'Could not load generated content.'))
@@ -237,6 +247,7 @@ export function useBatchesPage() {
       setStudents([])
       setFiles([])
       setArtifacts([])
+      setGames([])
       setArtifactSummary(null)
       if (pollingRef.current) clearInterval(pollingRef.current)
       lastDetailBatchIdRef.current = null
@@ -518,6 +529,25 @@ export function useBatchesPage() {
     }
   }
 
+  async function handleDeleteGame(game: GameSession) {
+    if (!selectedBatch) return
+    if (
+      !window.confirm(
+        `Delete "${game.title}"?\n\nStudents holding the link will no longer be able to play it. This cannot be undone.`,
+      )
+    ) {
+      return
+    }
+    try {
+      await deleteGame(selectedBatch.id, game.gameId)
+      await refreshArtifacts()
+      showToast('success', 'Deleted.')
+    } catch (err) {
+      console.error(err)
+      showToast('error', getErrorMessage(err, 'Could not delete that game.'))
+    }
+  }
+
   async function handleDeleteArtifact(artifact: Artifact) {
     if (!selectedBatch) return
     const metadata = artifact.metadata || {}
@@ -560,6 +590,7 @@ export function useBatchesPage() {
     files,
     filesLoading,
     artifacts,
+    games,
     artifactSummary,
     artifactsLoading,
     fileUploading,
@@ -611,6 +642,7 @@ export function useBatchesPage() {
     handleDeleteFile,
     handleRefreshFiles,
     handleDeleteArtifact,
+    handleDeleteGame,
     refreshArtifacts,
   }
 }

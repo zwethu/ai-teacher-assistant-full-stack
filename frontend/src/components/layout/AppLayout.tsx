@@ -36,7 +36,15 @@ export default function AppLayout() {
               appear once you reach the end, leaving rows flush against the
               window edge for the whole scroll. */}
           <main className="relative flex-1 flex flex-col min-h-0 overflow-hidden focus:outline-none pb-4 md:pb-6">
-            <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
+            {/* `scrollbar-gutter: stable` — the page's own scroller.
+                Tabs and routes differ in height: the Chats tab locks itself to
+                the viewport and never scrolls, while Generated content with a
+                dozen rows does. Without a reserved gutter the scrollbar appears
+                and disappears as you move between them, and every element on
+                the page steps sideways by its width each time. Reserving it
+                always costs those pixels once instead of animating them on
+                every switch. */}
+            <div className="flex-1 flex flex-col min-h-0 overflow-y-auto [scrollbar-gutter:stable]">
               <div className="max-w-7xl mx-auto w-full flex-1 flex flex-col min-h-0 px-4 pt-4 md:px-8 md:pt-6">
                 <Outlet />
               </div>

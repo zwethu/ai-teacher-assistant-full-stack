@@ -11,6 +11,7 @@ import {
 } from '../../services/wellnessService'
 import { formatDate } from '../../utils/formatDate'
 import { Button } from '../../design-system'
+import { TEXTAREA_CLASS } from '../ui/fieldStyles'
 
 const MOODS = [
   { value: 'great', emoji: '😊', label: 'Great' },
@@ -264,7 +265,7 @@ export default function WellnessPopover({
                     className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs border transition-colors ${
                       mood === m.value
                         ? 'border-violet-400 bg-violet-50 text-violet-800'
-                        : 'border-slate-200 hover:border-slate-300'
+                        : 'border-slate-200 hover:border-violet-300 hover:bg-violet-50/60'
                     }`}
                   >
                     <span>{m.emoji}</span>
@@ -277,7 +278,7 @@ export default function WellnessPopover({
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="Optional notes…"
                 rows={2}
-                className="block w-full rounded-lg border border-slate-300 shadow-sm py-2 px-3 text-sm focus:border-violet-500 focus:ring-violet-500 resize-y"
+                className={TEXTAREA_CLASS}
               />
               <Button type="submit" disabled={!mood || submitting} block>
                 Save reflection

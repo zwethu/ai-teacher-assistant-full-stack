@@ -1,10 +1,27 @@
+import { useEffect, useState } from 'react'
+import { BatchTabs } from './BatchTabs'
 import type { Batch } from '../../../entity/Batch'
 import type { BatchStudent } from '../../../entity/Batch'
 import type { BatchFile } from '../../../entity/File'
 import Toast from '../../../components/ui/Toast'
 import type { ToastMessage } from '../../../types'
+import {
+  getCurrentCourseBlueprint,
+  type CourseBlueprint,
+} from '../../../services/courseBlueprintService'
 import { formatDate } from '../../../utils/formatDate'
-import { ArrowLeft, BookOpenCheck, Clock, Pencil, Sparkles, Trash2, Users } from 'lucide-react'
+
+/** Must match `.mila-tabpanel[data-leaving]`'s duration in index.css. */
+const TAB_FADE_OUT_MS = 100
+import {
+  ArrowLeft,
+  BookOpenCheck,
+  MessageCircle,
+  Pencil,
+  Sparkles,
+  Trash2,
+  Users,
+} from 'lucide-react'
 import { BTN_SECONDARY } from '../constants'
 import type { BatchDetails, DetailTab } from '../types'
 import { ArtifactsTab } from './ArtifactsTab'
@@ -12,6 +29,7 @@ import { EditBatchDialog } from './EditBatchDialog'
 import { MaterialsTab } from './MaterialsTab'
 import { StudentsTab } from './StudentsTab'
 import type { Artifact, ArtifactSummary } from '../../../services/artifactService'
+import type { GameSession } from '../../../services/gameService'
 import { PlanningTab } from './PlanningTab'
 
 type Props = {
@@ -26,6 +44,7 @@ type Props = {
   files: BatchFile[]
   filesLoading: boolean
   artifacts: Artifact[]
+  games: GameSession[]
   artifactSummary: ArtifactSummary | null
   artifactsLoading: boolean
   fileUploading: boolean
@@ -42,6 +61,7 @@ type Props = {
   handleDeleteFile: (file: BatchFile) => void
   handleRefreshFiles: () => void
   handleDeleteArtifact: (artifact: Artifact) => void
+  handleDeleteGame: (game: GameSession) => void
   refreshArtifacts: () => void
   isEditOpen: boolean
   editDetails: BatchDetails
@@ -64,6 +84,7 @@ export function BatchDetailView({
   files,
   filesLoading,
   artifacts,
+  games,
   artifactSummary,
   artifactsLoading,
   fileUploading,
@@ -80,6 +101,7 @@ export function BatchDetailView({
   handleDeleteFile,
   handleRefreshFiles,
   handleDeleteArtifact,
+  handleDeleteGame,
   refreshArtifacts,
   isEditOpen,
   editDetails,
@@ -89,10 +111,48 @@ export function BatchDetailView({
   closeEditDialog,
   handleSaveBatchDetails,
 }: Props) {
-  const fillHeight = detailTab === 'materials'
+  /* Sessions fills the viewport; the others size to their content.
+     ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+     Not a reversal of removing it. The original defect was a *card* pinned to
+     `h-full` — a panel holding two rows of chat stretched to the whole screen.
+     What needs the height is the column, so the floating composer has a foot
+     to sit at; the card inside it still sizes to its rows. */
+  /* The panel lags the bar by one fade.
+     The indicator and the tab's own colour respond on the click — that is the
+     feedback for the press. The panel underneath fades out first, swaps while
+     nothing is visible, then fades in, so the two panels are never on screen
+     at once: one of these tabs fetches a chat list on mount, and a true
+     crossfade would fire that behind a panel already on its way out. */
+  const [shownTab, setShownTab] = useState(detailTab)
+  const [tabLeaving, setTabLeaving] = useState(false)
+
+  useEffect(() => {
+    if (detailTab === shownTab) return undefined
+    setTabLeaving(true)
+    const timer = setTimeout(() => {
+      setShownTab(detailTab)
+      setTabLeaving(false)
+    }, TAB_FADE_OUT_MS)
+    return () => clearTimeout(timer)
+  }, [detailTab, shownTab])
+
+  const [blueprint, setBlueprint] = useState<CourseBlueprint | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    void getCurrentCourseBlueprint(selectedBatch.id)
+      .then((value) => !cancelled && setBlueprint(value))
+      .catch(() => !cancelled && setBlueprint(null))
+    return () => {
+      cancelled = true
+    }
+  }, [selectedBatch.id])
 
   return (
-    <div className={fillHeight ? 'flex h-full min-h-0 flex-col overflow-hidden' : 'pb-8'}>
+    <div
+      className={
+        shownTab === 'materials' ? 'flex h-full min-h-0 flex-col overflow-hidden' : 'pb-8'
+      }
+    >
       <Toast toast={toast} onDismiss={() => setToast(null)} />
       <EditBatchDialog
         isEditOpen={isEditOpen}
@@ -103,7 +163,7 @@ export function BatchDetailView({
         handleSaveBatchDetails={handleSaveBatchDetails}
       />
 
-      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 mb-3 shrink-0">
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 mb-3">
         <div className="min-w-0">
           <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-2xl font-bold text-slate-800 tracking-tight">
@@ -121,6 +181,22 @@ export function BatchDetailView({
             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-violet-50 text-violet-700 border border-violet-100">
               {students.length} student{students.length === 1 ? '' : 's'}
             </span>
+            {/* The blueprint's facts, beside the other facts about this batch.
+                They used to be a 190px tinted card in the Sessions rail whose
+                only action was to switch to the Planning tab — the first tab
+                in the strip directly below this line. The facts were worth
+                keeping; the card was not. */}
+            {blueprint && (
+              <button
+                type="button"
+                onClick={() => setDetailTab('planning')}
+                className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-xs font-medium text-slate-600 transition-colors hover:border-violet-300 hover:bg-violet-50 hover:text-violet-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
+                title="Open the Course Blueprint"
+              >
+                <BookOpenCheck className="h-3.5 w-3.5" />
+                Blueprint v{blueprint.version} · {blueprint.weekly_plan.length} weeks
+              </button>
+            )}
           </div>
           <p className="text-sm text-slate-500 mt-1">
             {selectedBatch.course_name && (
@@ -148,65 +224,36 @@ export function BatchDetailView({
         </div>
       </div>
 
-      <div className="mila-tabstrip flex gap-1 mb-3 overflow-x-auto shrink-0">
-        <button
-          type="button"
-          onClick={() => setDetailTab('planning')}
-          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${detailTab === 'planning' ? 'border-violet-600 text-violet-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
-        ><BookOpenCheck className="w-4 h-4" />Planning</button>
-        <button
-          type="button"
-          onClick={() => setDetailTab('students')}
-          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
-            detailTab === 'students'
-              ? 'border-violet-600 text-violet-700'
-              : 'border-transparent text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          <Users className="w-4 h-4" />
-          Students
-        </button>
-        <button
-          type="button"
-          onClick={() => setDetailTab('materials')}
-          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
-            detailTab === 'materials'
-              ? 'border-violet-600 text-violet-700'
-              : 'border-transparent text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          <Clock className="w-4 h-4" />
-          Sessions
-          {files.length > 0 && (
-            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600">
-              {files.length}
-            </span>
-          )}
-        </button>
-        <button
-          type="button"
-          onClick={() => setDetailTab('artifacts')}
-          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
-            detailTab === 'artifacts'
-              ? 'border-violet-600 text-violet-700'
-              : 'border-transparent text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          {/* Not Clock — that is the Sessions tab's mark, two tabs along in
-              the same row. Sparkles is what every Generate button in the app
-              already carries, which is exactly what this tab collects. */}
-          <Sparkles className="w-4 h-4" />
-          Generated content
-          {artifacts.length > 0 && (
-            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600">
-              {artifacts.length}
-            </span>
-          )}
-        </button>
-      </div>
+      <BatchTabs
+        tabs={[
+          { id: 'planning', label: 'Planning', icon: BookOpenCheck },
+          { id: 'students', label: 'Students', icon: Users },
+          /* "Chats", not "Sessions". A session reads as a login session or a
+             class meeting, neither of which this is — and the tab's own copy
+             had already drifted to the honest word ("Show older chats"). Not
+             "History" either: the tab is where a chat is *started*, so naming
+             it for the past would describe half of it. The `materials` id is
+             untouched — it is in the URL as `?tab=materials`. */
+          { id: 'materials', label: 'Chats', icon: MessageCircle },
+          {
+            id: 'artifacts',
+            label: 'Generated content',
+            icon: Sparkles,
+            badge: artifacts.length + games.length,
+          },
+        ]}
+        active={detailTab}
+        onChange={setDetailTab}
+      />
 
-      <div className={fillHeight ? 'flex min-h-0 flex-1 flex-col' : undefined}>
-        {detailTab === 'students' && (
+      <div
+        id={`batch-panel-${shownTab}`}
+        role="tabpanel"
+        aria-labelledby={`batch-tab-${shownTab}`}
+        className={`mila-tabpanel ${shownTab === 'materials' ? 'flex min-h-0 flex-1 flex-col' : ''}`}
+        data-leaving={tabLeaving ? 'true' : undefined}
+      >
+        {shownTab === 'students' && (
           <StudentsTab
             students={students}
             studentsLoading={studentsLoading}
@@ -220,7 +267,7 @@ export function BatchDetailView({
           />
         )}
 
-        {detailTab === 'materials' && (
+        {shownTab === 'materials' && (
           <MaterialsTab
             batchId={selectedBatch.id}
             files={files}
@@ -230,19 +277,20 @@ export function BatchDetailView({
             onFileUpload={handleFileUpload}
             onDeleteFile={handleDeleteFile}
             onRefreshFiles={handleRefreshFiles}
-            onOpenPlanning={() => setDetailTab('planning')}
           />
         )}
 
-        {detailTab === 'planning' && <PlanningTab batchId={selectedBatch.id} />}
+        {shownTab === 'planning' && <PlanningTab batchId={selectedBatch.id} />}
 
-        {detailTab === 'artifacts' && (
+        {shownTab === 'artifacts' && (
           <ArtifactsTab
             artifacts={artifacts}
+            games={games}
             summary={artifactSummary}
             loading={artifactsLoading}
             onRefresh={refreshArtifacts}
             onDelete={handleDeleteArtifact}
+            onDeleteGame={handleDeleteGame}
           />
         )}
       </div>

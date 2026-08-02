@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
 
 import Games from './Games'
+import { fromInputValue } from '../components/ui/dateValue'
 
 const listGames = vi.fn()
 const listArtifacts = vi.fn()
@@ -195,28 +196,53 @@ describe('Games — source picker', () => {
     await waitFor(() => expect(listArtifacts).toHaveBeenCalled())
     await userEvent.click(screen.getByLabelText('Set a deadline'))
 
-    const field = screen.getByLabelText('Deadline') as HTMLInputElement
-    const chosen = new Date(field.value).getTime() - Date.now()
+    // Read from session storage rather than off the field: the field now shows
+    // a localised display string ("Tue 11 Aug 2026, 09:00"), and parsing that
+    // back would be leaning on whatever `new Date(string)` happens to accept.
+    const stored = sessionStorage.getItem('mila:game-deadline:batch-1') ?? ''
+    expect(stored).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/)
+    const chosen = (fromInputValue(stored)?.getTime() ?? 0) - Date.now()
     expect(chosen).toBeGreaterThan(6.5 * 86_400_000)
     expect(chosen).toBeLessThan(7.5 * 86_400_000)
   })
 
+  /**
+   * The picker itself now refuses to *offer* a past date — every day before
+   * `min` is disabled in the grid and a typed one is rejected — so this drives
+   * the one route by which a stale deadline still reaches the form: the
+   * generator restores an in-flight deadline from session storage, and one
+   * left there overnight is in the past by morning.
+   */
   it('refuses a deadline that has already passed', async () => {
+    sessionStorage.setItem('mila:game-deadline:batch-1', '2020-01-01T09:00')
     listArtifacts.mockResolvedValue([lessonPlan])
     renderPage()
     await openSavedWork()
 
     await waitFor(() => expect(screen.getByText('Week 3 — Test Doubles')).toBeTruthy())
     await userEvent.click(screen.getByRole('radio', { name: /Week 3 — Test Doubles/ }))
-    await userEvent.click(screen.getByLabelText('Set a deadline'))
-    // A valid future default must not be what makes the button clickable in the
-    // negative case, so prove it is enabled first.
-    expect(screen.getByRole('button', { name: /Generate game/ }).hasAttribute('disabled')).toBe(false)
-
-    fireEvent.change(screen.getByLabelText('Deadline'), { target: { value: '2020-01-01T09:00' } })
 
     expect(screen.getByText('Pick a date and time in the future.')).toBeTruthy()
     expect(screen.getByRole('button', { name: /Generate game/ }).hasAttribute('disabled')).toBe(true)
+  })
+
+  /** The other half of the same guard: a future deadline blocks nothing. */
+  it('accepts a deadline that is still ahead', async () => {
+    const future = new Date(Date.now() + 7 * 86_400_000)
+    const pad = (n: number) => String(n).padStart(2, '0')
+    sessionStorage.setItem(
+      'mila:game-deadline:batch-1',
+      `${future.getFullYear()}-${pad(future.getMonth() + 1)}-${pad(future.getDate())}T09:00`,
+    )
+    listArtifacts.mockResolvedValue([lessonPlan])
+    renderPage()
+    await openSavedWork()
+
+    await waitFor(() => expect(screen.getByText('Week 3 — Test Doubles')).toBeTruthy())
+    await userEvent.click(screen.getByRole('radio', { name: /Week 3 — Test Doubles/ }))
+
+    expect(screen.queryByText('Pick a date and time in the future.')).toBeNull()
+    expect(screen.getByRole('button', { name: /Generate game/ }).hasAttribute('disabled')).toBe(false)
   })
 
   it('drops an uploaded file when saved work is chosen instead', async () => {

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
-import { ChevronDown, ExternalLink, Plus, Sparkles } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { ChevronDown, ExternalLink, Plus, RefreshCw, Sparkles } from 'lucide-react'
 import type { ToastMessage } from '../types'
 import Toast from '../components/ui/Toast'
 import { getErrorMessage } from '../utils/errors'
@@ -13,6 +13,9 @@ import { PlanHintBanner } from '../components/generation/PlanHintBanner'
 import { listArtifacts, type Artifact } from '../services/artifactService'
 import { timeAgo } from '../utils/formatDate'
 import { artifactIcon } from '../utils/artifactIcons'
+import { SelectField, toOptions } from '../components/ui/SelectField'
+import { NumberField } from '../components/ui/NumberField'
+import { CHECKBOX_CLASS, FIELD_CLASS, FIELD_LABEL_CLASS, TEXTAREA_CLASS } from '../components/ui/fieldStyles'
 import { Button, Spinner } from '../design-system'
 
 const AssessmentIcon = artifactIcon('assessment')
@@ -23,6 +26,9 @@ const QUIZ_MODES: Array<{ value: string; label: string }> = [
   { value: 'short_answer_only', label: 'Short answer only' },
 ]
 const DIFFICULTIES = ['easy', 'medium', 'hard']
+
+// Labels are display-only; the values below go into the agent prompt verbatim.
+const DIFFICULTY_OPTIONS = toOptions(DIFFICULTIES, (d) => d[0].toUpperCase() + d.slice(1))
 
 const INITIAL_FORM = {
   title: '',
@@ -97,6 +103,12 @@ export default function Assessments() {
   // field, so only the week and the topic come across.
   const prefilledFor = useRef('')
 
+  // Course name as the hint, so typing either it or the cohort finds the space.
+  const batchOptions = useMemo(
+    () => batches.map((b) => ({ value: b.id, label: b.batch_name, hint: b.course_name })),
+    [batches],
+  )
+
   useEffect(() => {
     if (!prefill || !selectedBatchId || prefilledFor.current === selectedBatchId) return
     prefilledFor.current = selectedBatchId
@@ -152,6 +164,27 @@ export default function Assessments() {
   }
 
   // Keep the page form-first: the progress panel only appears once a run starts.
+  /* Nothing is persisted as an artifact until the workflow finishes, so
+     discarding costs only the draft. `cancelRun` first when something is
+     genuinely in flight — `reset` alone would leave the backend generating
+     into a run nobody is listening to. */
+  const discardRun = useCallback(() => {
+    if (run.currentRunId) void run.cancelRun()
+    run.reset()
+  }, [run])
+
+  const stage = deriveGenerationStage(run).stage
+  const settled = isWorkflowSettled(stage)
+
+  /* The list is live now rather than hidden behind the run, so it has to pick
+     up what the run just produced — otherwise a lecturer watches a generation
+     finish above a list that still does not contain it. */
+  const settledRef = useRef(false)
+  useEffect(() => {
+    if (settled && !settledRef.current && selectedBatchId) void refreshArtifacts(selectedBatchId)
+    settledRef.current = settled
+  }, [settled, selectedBatchId, refreshArtifacts])
+
   const started = run.messages.length > 0 || Boolean(run.currentRunId)
   const missing = missingRequiredInputs(form, Boolean(selectedBatch))
 
@@ -177,7 +210,7 @@ export default function Assessments() {
             {/* Only once the workflow has finished. It used to appear the moment
                 a run started, so a tap mid-generation — or mid-approval —
                 discarded work in progress with no warning and no undo. */}
-            {isWorkflowSettled(deriveGenerationStage(run).stage) && (
+            {settled && (
               <Button type="button" variant="secondary" size="sm" onClick={() => run.reset()}
                 leadingIcon={<Plus className="h-4 w-4" />}>
                 Generate another
@@ -190,23 +223,28 @@ export default function Assessments() {
               card and two buttons sat in 384px with a third of it empty. */}
           <div
             className={`flex flex-col rounded-xl border border-slate-200 bg-white shadow-sm ${
-              isWorkflowSettled(deriveGenerationStage(run).stage) ? '' : 'min-h-[24rem]'
+              settled ? '' : 'min-h-[24rem]'
             }`}
           >
-            <GenerationRunView batch={selectedBatch} run={run} accent="primary" />
+              <GenerationRunView
+              batch={selectedBatch}
+              run={run}
+              accent="primary"
+              onDiscard={discardRun}
+            />
           </div>
         </div>
       ) : (
         <div className="space-y-6">
           <form onSubmit={handleGenerate} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm space-y-3">
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1">Space (batch)</label>
-              <select required value={selectedBatchId ?? ''} onChange={(e) => setSelectedBatchId(e.target.value)}
-                disabled={batchesLoading}
-                className="block w-full rounded-md border border-slate-300 py-2 px-2 text-sm focus:border-violet-500 focus:ring-violet-500">
-                {batches.map((b) => <option key={b.id} value={b.id}>{b.batch_name} — {b.course_name}</option>)}
-              </select>
-            </div>
+            <SelectField
+              label="Space (batch)"
+              value={selectedBatchId ?? ''}
+              onChange={setSelectedBatchId}
+              options={batchOptions}
+              disabled={batchesLoading}
+              placeholder={batchesLoading ? 'Loading spaces…' : 'Select a space'}
+            />
 
             {/* Filling a required field without saying so is the kind of help
                 that reads as a bug the first time someone notices it. One line,
@@ -218,44 +256,50 @@ export default function Assessments() {
               </p>
             )}
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">Week</label>
-                <input type="number" min={1} required value={form.week}
-                  onChange={(e) => setForm((f) => ({ ...f, week: Number(e.target.value || 1) }))}
-                  className="block w-full rounded-md border border-slate-300 py-2 px-2.5 text-sm focus:border-violet-500 focus:ring-violet-500" />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1"># Questions</label>
-                <input type="number" min={1} max={50} required value={form.totalQuestions}
-                  onChange={(e) => setForm((f) => ({ ...f, totalQuestions: Number(e.target.value || 1) }))}
-                  className="block w-full rounded-md border border-slate-300 py-2 px-2.5 text-sm focus:border-violet-500 focus:ring-violet-500" />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">Mode</label>
-                <select value={form.quizMode} onChange={(e) => setForm((f) => ({ ...f, quizMode: e.target.value }))}
-                  className="block w-full rounded-md border border-slate-300 py-2 px-2 text-sm focus:border-violet-500 focus:ring-violet-500">
-                  {QUIZ_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">Difficulty</label>
-                <select value={form.difficulty} onChange={(e) => setForm((f) => ({ ...f, difficulty: e.target.value }))}
-                  className="block w-full rounded-md border border-slate-300 py-2 px-2 text-sm focus:border-violet-500 focus:ring-violet-500 capitalize">
-                  {DIFFICULTIES.map((d) => <option key={d} value={d}>{d}</option>)}
-                </select>
-              </div>
+              <NumberField
+                label="Week"
+                min={1}
+                required
+                value={form.week}
+                onChange={(week) => setForm((f) => ({ ...f, week }))}
+              />
+              <NumberField
+                label="# Questions"
+                min={1}
+                max={50}
+                required
+                value={form.totalQuestions}
+                onChange={(totalQuestions) => setForm((f) => ({ ...f, totalQuestions }))}
+              />
+              <SelectField
+                label="Mode"
+                value={form.quizMode}
+                onChange={(v) => setForm((f) => ({ ...f, quizMode: v }))}
+                options={QUIZ_MODES}
+              />
+              <SelectField
+                label="Difficulty"
+                value={form.difficulty}
+                onChange={(v) => setForm((f) => ({ ...f, difficulty: v }))}
+                options={DIFFICULTY_OPTIONS}
+              />
               <div className="col-span-2">
                 <label className="mb-1 inline-flex items-center gap-2 text-sm font-semibold text-slate-700">
                   <input type="checkbox" checked={form.hasTimeLimit}
                     onChange={(e) => setForm((f) => ({ ...f, hasTimeLimit: e.target.checked }))}
-                    className="accent-violet-600" />
+                    className={CHECKBOX_CLASS} />
                   Set a time limit
                 </label>
                 {form.hasTimeLimit && (
                   <div className="mt-1 flex items-center gap-2">
-                    <input type="number" min={1} required value={form.timeLimit}
-                      onChange={(e) => setForm((f) => ({ ...f, timeLimit: Number(e.target.value || 1) }))}
-                      className="w-28 rounded-md border border-slate-300 py-2 px-2.5 text-sm focus:border-violet-500 focus:ring-violet-500" />
+                    <NumberField
+                      className="w-28"
+                      aria-label="Time limit in minutes"
+                      min={1}
+                      required
+                      value={form.timeLimit}
+                      onChange={(timeLimit) => setForm((f) => ({ ...f, timeLimit }))}
+                    />
                     <span className="text-sm text-slate-500">minutes</span>
                   </div>
                 )}
@@ -274,25 +318,25 @@ export default function Assessments() {
               {showOptional && (
                 <div className="mt-3 space-y-3 rounded-lg border border-slate-100 bg-slate-50/70 p-3">
                   <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-1">Assessment name</label>
+                    <label className={FIELD_LABEL_CLASS}>Assessment name</label>
                     <input type="text" value={form.title}
                       onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
                       placeholder="Leave blank — agent names it from the course plan or topic"
-                      className="block w-full rounded-md border border-slate-300 py-2 px-2.5 text-sm focus:border-violet-500 focus:ring-violet-500" />
+                      className={FIELD_CLASS} />
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-1">Topic</label>
+                    <label className={FIELD_LABEL_CLASS}>Topic</label>
                     <input type="text" value={form.topic}
                       onChange={(e) => setForm((f) => ({ ...f, topic: e.target.value }))}
                       placeholder="Leave blank to let the agent choose from the course plan"
-                      className="block w-full rounded-md border border-slate-300 py-2 px-2.5 text-sm focus:border-violet-500 focus:ring-violet-500" />
+                      className={FIELD_CLASS} />
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-1">Additional instructions</label>
+                    <label className={FIELD_LABEL_CLASS}>Additional instructions</label>
                     <textarea rows={2} value={form.instructions}
                       onChange={(e) => setForm((f) => ({ ...f, instructions: e.target.value }))}
                       placeholder="Anything else the agent should consider…"
-                      className="block w-full rounded-md border border-slate-300 py-2 px-2.5 text-sm focus:border-violet-500 focus:ring-violet-500 resize-y" />
+                      className={TEXTAREA_CLASS} />
                   </div>
                 </div>
               )}
@@ -316,51 +360,70 @@ export default function Assessments() {
               )}
             </div>
           </form>
-
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-semibold text-slate-700">Saved assessments</h2>
-              {selectedBatchId && (
-                <button type="button" onClick={() => void refreshArtifacts(selectedBatchId)}
-                  className="text-xs text-violet-700 hover:underline">Refresh</button>
-              )}
-            </div>
-            {listLoading ? (
-              <div className="flex items-center gap-2 text-sm text-slate-500 py-6">
-                <Spinner size={16} /> Loading…
-              </div>
-            ) : artifacts.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-10 text-center rounded-xl border border-slate-100 bg-white">
-                <AssessmentIcon className="w-8 h-8 text-slate-300 mb-2" />
-                <p className="text-sm text-slate-500">No assessments yet for this space.</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {artifacts.map((a) => (
-                  <article key={a.id} className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
-                    <div className="flex items-start gap-3 mb-2">
-                      <div className="h-9 w-9 rounded-lg bg-violet-50 text-violet-600 flex items-center justify-center border border-violet-100">
-                        <AssessmentIcon className="w-4 h-4" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <h3 className="font-semibold text-slate-900 truncate">{a.title || 'Quiz'}</h3>
-                        <p className="text-xs text-slate-500 mt-0.5">Week {a.week ?? '—'} · v{a.version ?? 1}</p>
-                      </div>
-                    </div>
-                    <p className="text-xs text-slate-400 mb-3">{timeAgo(a.updated_at ? new Date(a.updated_at) : null)}</p>
-                    {a.form_url && (
-                      <a href={a.form_url} target="_blank" rel="noreferrer"
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50">
-                        <ExternalLink className="w-3.5 h-3.5" /> Open Google Form
-                      </a>
-                    )}
-                  </article>
-                ))}
-              </div>
-            )}
-          </div>
         </div>
       )}
+
+      {/* Outside the form/run split, so it stays on screen for the whole
+          generation. It used to be the `else` branch of `started`, which meant
+          the moment a lecturer pressed Generate their existing work vanished
+          and only came back when the run finished — the one time they might
+          want to glance at last week's plan is while this week's is being
+          written. */}
+      <div className="mt-6">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold text-slate-700">Saved assessments</h2>
+          {/* Matches the Games page and Lesson Plans — see the comment
+              there. The icon spins while the fetch is in flight. */}
+          {selectedBatchId && (
+            <button
+              type="button"
+              onClick={() => void refreshArtifacts(selectedBatchId)}
+              disabled={listLoading}
+              className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              <RefreshCw className={`h-4 w-4 ${listLoading ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
+          )}
+        </div>
+        {listLoading ? (
+          <div className="flex items-center gap-2 text-sm text-slate-500 py-6">
+            <Spinner size={16} /> Loading…
+          </div>
+        ) : artifacts.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-10 text-center rounded-xl border border-slate-100 bg-white">
+            <AssessmentIcon className="w-8 h-8 text-slate-300 mb-2" />
+            <p className="text-sm text-slate-500">No assessments yet for this space.</p>
+          </div>
+        ) : (
+          /* The same row as Lesson Plans and Games — see the note there. */
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {artifacts.map((a) => (
+              <article key={a.id} className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
+                <div className="flex items-start gap-3 mb-2">
+                  <div className="h-9 w-9 rounded-lg bg-violet-50 text-violet-600 flex items-center justify-center border border-violet-100">
+                    <AssessmentIcon className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="font-semibold text-slate-900 truncate">{a.title || 'Quiz'}</h3>
+                    <p className="text-xs text-slate-500 mt-0.5">Week {a.week ?? '—'} · v{a.version ?? 1}</p>
+                  </div>
+                </div>
+                {/* No status pill. Everything reaching this list is confirmed,
+                    so the tag was the same word repeated on every card — and
+                    neither Assessments nor Games carried one. */}
+                <p className="text-xs text-slate-400 mb-3">{timeAgo(a.updated_at ? new Date(a.updated_at) : null)}</p>
+                {a.form_url && (
+                  <a href={a.form_url} target="_blank" rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-slate-300 text-slate-700 transition-colors hover:border-violet-300 hover:bg-violet-50 hover:text-violet-800">
+                    <ExternalLink className="w-3.5 h-3.5" /> Open Google Form
+                  </a>
+                )}
+              </article>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

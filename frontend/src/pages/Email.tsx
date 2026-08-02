@@ -50,6 +50,8 @@ import { listBatches, listBatchStudents } from '../services/batchService'
 import { increaseStress } from '../services/wellnessService'
 import { formatDateTime, timeAgo, toDate } from '../utils/formatDate'
 import { Spinner, Button } from '../design-system'
+import { FIELD_CLASS, TEXTAREA_CLASS } from '../components/ui/fieldStyles'
+import { DateField } from '../components/ui/DateField'
 
 const NOTES_PREVIEW_LEN = 120
 
@@ -794,7 +796,7 @@ export default function Email() {
             <Button
               type="button"
               onClick={openSendModal}
-              className="focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-violet-500"
+              className="focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-violet-500"
             >
               <Send className="w-4 h-4 mr-2" />
               Send Now
@@ -1237,7 +1239,7 @@ export default function Email() {
                       onChange={(e) => setForm((f) => ({ ...f, prompt: e.target.value }))}
                       disabled={generating}
                       placeholder="e.g. Remind students about Friday's quiz and my office hours on Thursday…"
-                      className="block w-full rounded-md border border-slate-300 shadow-sm py-2.5 px-3 text-sm focus:border-violet-500 focus:ring-violet-500 resize-y disabled:opacity-60"
+                      className={TEXTAREA_CLASS}
                     />
                     <p className="text-xs text-slate-400 mt-1">
                       AI writes the subject and body — you review and edit them next.
@@ -1281,7 +1283,7 @@ export default function Email() {
                         setForm((f) => ({ ...f, subject: e.target.value }))
                       }
                       disabled={saving || generating}
-                      className="block w-full rounded-md border border-slate-300 shadow-sm py-2.5 px-3 text-sm focus:border-violet-500 focus:ring-violet-500 disabled:opacity-60"
+                      className={FIELD_CLASS}
                     />
                   </div>
 
@@ -1295,24 +1297,19 @@ export default function Email() {
                       value={form.body}
                       onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))}
                       disabled={saving || generating}
-                      className="block w-full rounded-md border border-slate-300 shadow-sm py-2.5 px-3 text-sm focus:border-violet-500 focus:ring-violet-500 resize-y disabled:opacity-60"
+                      className={TEXTAREA_CLASS}
                     />
                   </div>
 
                   {modalMode === 'schedule' && (
                     <div>
-                      <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-                        Send at
-                      </label>
-                      <input
-                        type="datetime-local"
+                      <DateField
+                        label="Send at"
+                        withTime
                         required
                         min={minScheduleLocal()}
                         value={form.sendAt}
-                        onChange={(e) =>
-                          setForm((f) => ({ ...f, sendAt: e.target.value }))
-                        }
-                        className="block w-full rounded-md border border-slate-300 shadow-sm py-2.5 px-3 text-sm focus:border-violet-500 focus:ring-violet-500"
+                        onChange={(sendAt) => setForm((f) => ({ ...f, sendAt }))}
                       />
                       <p className="text-xs text-slate-500 mt-1">
                         Uses your local timezone. Must be in the future.

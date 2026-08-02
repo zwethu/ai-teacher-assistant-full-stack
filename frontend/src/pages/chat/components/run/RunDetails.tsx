@@ -4,7 +4,7 @@ import type { RunUiState } from '../../runTypes'
 import { normalizeRunRows } from './normalizeRunRows'
 import { formatDuration, runDurationSeconds, runSummaryLabel } from './runDuration'
 import { StepsPanel } from './StepsPanel'
-import { useSettlingRows } from './useSettlingRows'
+import { useRunLanes } from './useRunLanes'
 import { useExitDelay } from '../../../../hooks/useExitDelay'
 import { STEP_EXIT_MS } from './StepsPanel'
 
@@ -37,9 +37,10 @@ export function RunDetails({ run, isFinal, defaultOpen = false }: Props) {
     [run, status],
   )
   const isRunning = status === 'running' && !isFinal
-  // Everything in flight, plus whatever just finished — a step dropped on the
-  // frame its status flips never gets to show the "Done" it earned.
-  const liveRows = useSettlingRows(rows)
+  /* One lane per unit of concurrent work. A step finishing and the next one
+     starting is a lane changing hands, not a row removed and another added —
+     see `useRunLanes` for the measurements that motivated the change. */
+  const liveLanes = useRunLanes(isRunning ? rows : [])
   const liveMounted = useExitDelay(isRunning, STEP_EXIT_MS)
   const [open, setOpen] = useState(defaultOpen)
 
@@ -54,7 +55,7 @@ export function RunDetails({ run, isFinal, defaultOpen = false }: Props) {
   // Steps arriving on screen already say the run is alive, and the fallback
   // polling the warning describes happens either way — so with rows streaming
   // it is a warning about nothing, laid over the evidence contradicting it.
-  const showStallNotice = liveRows.length === 0
+  const showStallNotice = liveLanes.length === 0
   const stallNotice = run.streamError || (run.liveConnected === false
     ? 'Live updates disconnected. I will fetch the final response when ready.'
     : '')
@@ -101,7 +102,7 @@ export function RunDetails({ run, isFinal, defaultOpen = false }: Props) {
          its own `mt-2` into the message for the whole gap between steps. */
       <div className="mt-2 space-y-2 empty:hidden">
         {banners}
-        <StepsPanel rows={isRunning ? liveRows : []} live />
+        <StepsPanel lanes={isRunning ? liveLanes : []} live />
       </div>
     )
   }

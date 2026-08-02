@@ -745,15 +745,146 @@
     }
   }
 
-  /* Faster than the entrance — the lecturer has already read this row — and
-     with no stagger: a departure is not a cascade, and delaying it would hold
-     the space open after the row had visibly gone. */
+  /* The exit is the entrance run backwards — same duration, same curve.
+     ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+
+     It used to leave in 180ms against a 240ms arrival, on the reasoning that
+     a departure should be quicker than an arrival. That is true of a lone row
+     and wrong here, because these rows overlap: one lane closing while
+     another opens changes the container's height by −h·X(t) and +h·E(t) at
+     once, and only identical curves make those cancel. Evaluating the old
+     pairing put the container at 0.891 of a row 30ms in — an 11% notch that
+     appears and recovers inside a third of a second, which is exactly the
+     kind of thing that reads as a glitch without ever being visible long
+     enough to name. Matched, the sum is a flat 1.000 for the whole transition.
+
+     Still no stagger on the way out: a departure is not a cascade, and the
+     delay would hold the space open after the row had visibly gone. */
   .mila-step-row[data-leaving='true'] {
     pointer-events: none;
     grid-template-rows: 0fr;
     opacity: 0;
-    transition-duration: 180ms;
     transition-delay: 0ms;
+  }
+
+  /* A lane changing hands.
+     ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+
+     Both rows sit in the same grid cell, so the outgoing one is weightless —
+     it cannot move anything on its way out, and the lane's height is just the
+     taller of the two. On a sequential run that is the whole animation: no
+     row is inserted or removed between steps, so there is nothing for the
+     height to do and the conversation below never moves.
+
+     It sweeps rather than dissolving. The row's three parts — its icon, its
+     title and its status badge — move one after another, 30ms apart, so a
+     lane changing hands reads as a wave passing across it instead of one
+     picture cross-fading into another. A cross-dissolve between two lines of
+     text in the same place is what "instant" looks like even when the numbers
+     say otherwise: nothing travels, so there is nothing for the eye to follow
+     from the old state to the new one.
+
+     The departure is a pop, not a move.
+     ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+     Two versions of a *translated* exit went wrong the same way, because
+     translation puts pixels somewhere they do not belong. Moving the parts 8px
+     up carried them into the row above — rows sit 6px apart, so it overlapped
+     a line being read. Moving them 10px left put them under a clip, and the
+     content cut against the lane's edge on its way out.
+
+     Scaling has nowhere to go but inward. A part shrinks toward its own centre
+     and disappears inside its own box, so it cannot reach a neighbour, cannot
+     be clipped, and needs no arithmetic against the row gap or the card's
+     padding to stay correct. It is the more literal reading of a step being
+     finished with, too: it collapses rather than travels.
+
+     Still one part at a time — the stagger is what makes it read as the row
+     emptying rather than the row blinking.
+
+     Split by property, and that split is the whole trick. Opacity belongs to
+     the wrapper, which fades the card *and its chrome* — border, background —
+     as one thing; the parts carry only the transform. Fading both would
+     multiply the two, and a part at 50% inside a card at 50% is a quarter
+     opaque a third of the way through a motion meant to feel continuous.
+
+     Asymmetric in time — the arrival is longer and on the shared ease-out, the
+     departure shorter and on an ease-in, so the old step accelerates away
+     while the new one settles. The wrapper's fade spans the *whole* sweep,
+     stagger included, so the card never finishes fading while a part of it is
+     still travelling. */
+  .mila-lane__in {
+    opacity: 1;
+    transition: opacity 300ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @starting-style {
+    .mila-lane__in {
+      opacity: 0;
+    }
+  }
+
+  .mila-lane__out {
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 260ms cubic-bezier(0.4, 0, 1, 1);
+  }
+
+  @starting-style {
+    .mila-lane__out {
+      opacity: 1;
+    }
+  }
+
+  .mila-lane__in [data-step-head] > * {
+    transform: none;
+    transition: transform 240ms cubic-bezier(0.16, 1, 0.3, 1) var(--mila-part-delay, 0ms);
+  }
+
+  @starting-style {
+    .mila-lane__in [data-step-head] > * {
+      transform: translate3d(10px, 0, 0);
+    }
+  }
+
+  .mila-lane__out [data-step-head] > * {
+    /* Far enough to read as collapsing rather than as a wobble, and not so far
+       that the badge's text turns to mush on the way down. */
+    transform: scale(0.6);
+    transition: transform 200ms cubic-bezier(0.4, 0, 1, 1) var(--mila-part-delay, 0ms);
+  }
+
+  /* Without this the departure never animated at all.
+     ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+     The outgoing row is a *newly mounted* copy — it comes into existence
+     already leaving. A transition needs two values and a fresh element has
+     only the one it was born with, so these parts appeared at their end
+     transform on the very first frame and sat there while the wrapper faded
+     around them. That snap is what the motion kept being blamed for, through
+     two different exit directions.
+
+     The wrapper had a starting style from the start, which is why its fade
+     always worked — and why it hid how little else was happening. */
+  @starting-style {
+    .mila-lane__out [data-step-head] > * {
+      transform: none;
+    }
+  }
+
+  /* Icon, then title, then badge — the same order both ways, so it is one
+     sequence rather than two unrelated ones meeting in the middle.
+
+     45ms apart rather than 30. Over a 200ms exit, 30ms read as everything
+     going at once with a slight blur, which is the all-together this exists
+     not to be. Three steps is the whole row and the tail lands at 90ms, still
+     inside the motion it belongs to. */
+  .mila-lane__in [data-step-head] > :nth-child(2),
+  .mila-lane__out [data-step-head] > :nth-child(2) {
+    --mila-part-delay: 45ms;
+  }
+
+  .mila-lane__in [data-step-head] > :nth-child(3),
+  .mila-lane__out [data-step-head] > :nth-child(3) {
+    --mila-part-delay: 90ms;
   }
 
   /* The row's spacing lives inside the collapsing box, so it collapses with it
@@ -858,6 +989,200 @@
     box-shadow: none;
   }
 
+  /* The toast.
+     ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+
+     Rises out of the corner it lives in. The vendored version entered from
+     `translateY(-8px)` while being pinned to the bottom-right, so it slid
+     *down* into place from a direction it could not have come from.
+
+     Resting in the visible state, like the step rows and the menus, so
+     reduced motion is a matter of switching the transition off rather than
+     restoring anything. `@starting-style` supplies the entrance; where it is
+     unsupported the toast simply appears, which is the right way for this to
+     degrade — a notice that never arrives is worse than one that arrives
+     without ceremony.
+
+     Slightly scaled on entry as well as translated: a toast has no
+     neighbours to displace, so it can afford the extra dimension that makes
+     it read as arriving rather than as sliding past. */
+  .mila-toast {
+    opacity: 1;
+    transform: none;
+    transition:
+      opacity 220ms cubic-bezier(0.16, 1, 0.3, 1),
+      transform 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @starting-style {
+    .mila-toast {
+      opacity: 0;
+      transform: translate3d(0, 12px, 0) scale(0.96);
+    }
+  }
+
+  /* Quicker on the way out and on an ease-in — it has been read, and a notice
+     that lingers on its way off screen reads as lag. Down and out, the way it
+     came. */
+  .mila-toast[data-leaving='true'] {
+    pointer-events: none;
+    opacity: 0;
+    transform: translate3d(0, 8px, 0) scale(0.98);
+    transition-duration: 180ms;
+    transition-timing-function: cubic-bezier(0.4, 0, 1, 1);
+  }
+
+  /* The tab bar's active indicator.
+     ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+
+     One bar that travels, rather than four borders switched on and off. The
+     old arrangement made the mark teleport: gone from one tab, back under
+     another, with nothing joining them, so the eye had to re-find it on every
+     switch.
+
+     `transform` and `width` together — the bar has to both move and resize,
+     since the tabs are different widths. Transform is composited; width is
+     not, but it is one 2px-tall element and the alternative (a fixed-width
+     bar) would leave the mark narrower than the tab it belongs to.
+
+     Same exponential ease-out the rest of the app moves on. CSS has no spring,
+     and this curve is the closest thing already in the vocabulary — most of
+     the distance is covered early, so the bar reads as arriving rather than as
+     travelling. */
+  .mila-tab-indicator {
+    transition:
+      transform 280ms cubic-bezier(0.16, 1, 0.3, 1),
+      width 280ms cubic-bezier(0.16, 1, 0.3, 1),
+      opacity 160ms ease-out;
+  }
+
+  /* Panels never hard-cut between tabs.
+     ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+
+     Out, then in, with the swap happening while nothing is visible — so the
+     two panels are never on screen together. That matters here more than in
+     the general case: one of these tabs fetches a chat list on mount, and a
+     true crossfade would mount both and fire that fetch behind a panel on its
+     way out.
+
+     Faster out than in, and no movement on either. A translate would fight the
+     Sessions tab's own composer, which is pinned to the bottom of its column
+     and would appear to slide out of place. */
+  .mila-tabpanel {
+    opacity: 1;
+    transition: opacity 140ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .mila-tabpanel[data-leaving='true'] {
+    opacity: 0;
+    transition-duration: 100ms;
+    transition-timing-function: cubic-bezier(0.4, 0, 1, 1);
+  }
+
+  @starting-style {
+    .mila-tabpanel {
+      opacity: 0;
+    }
+  }
+
+  /* The dropdown popup (`SelectField`).
+     ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+
+     Same construction as `.mila-step-row`: the resting state is the visible
+     one and `@starting-style` supplies the entrance, so reduced motion is a
+     matter of switching the transition off rather than of having to restore
+     anything. It also means an interrupted open — a second click landing
+     80ms in — reverses from where it actually is instead of snapping to a
+     keyframe's `from`.
+
+     It grows from the edge it is attached to, so the popup reads as coming
+     out of the field rather than sliding past it. `transform-origin` and the
+     from-state's direction both follow `data-placement`, which the component
+     sets after measuring the room below. */
+  .mila-menu {
+    opacity: 1;
+    transform: none;
+    transform-origin: top center;
+    transition:
+      opacity 180ms cubic-bezier(0.16, 1, 0.3, 1),
+      transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .mila-menu[data-placement='top'] {
+    transform-origin: bottom center;
+  }
+
+  @starting-style {
+    .mila-menu {
+      opacity: 0;
+      transform: translate3d(0, -6px, 0) scale(0.97);
+    }
+
+    .mila-menu[data-placement='top'] {
+      transform: translate3d(0, 6px, 0) scale(0.97);
+    }
+  }
+
+  /* Faster and on an ease-in, matching every other exit in the app: a thing
+     leaving should accelerate away, not decelerate into nothing. */
+  .mila-menu[data-leaving='true'] {
+    pointer-events: none;
+    opacity: 0;
+    transform: translate3d(0, -4px, 0) scale(0.98);
+    transition-duration: 140ms;
+    transition-timing-function: cubic-bezier(0.4, 0, 1, 1);
+  }
+
+  .mila-menu[data-leaving='true'][data-placement='top'] {
+    transform: translate3d(0, 4px, 0) scale(0.98);
+  }
+
+  /* Options arrive just behind the popup, staggered, so a list reads as a run
+     of rows rather than a printed block. Opacity only — moving each row as
+     well as the container that already moves them doubles the motion and
+     turns a short list into a shuffle.
+
+     The whole stagger is inside the popup's own 180ms: the last uncapped row
+     starts at 144ms and takes 140ms, so the list finishes settling about a
+     tenth of a second after the container does. Any longer and the popup is
+     visibly waiting for its own contents. */
+  .mila-menu__option {
+    opacity: 1;
+    transition: opacity 140ms ease-out var(--mila-menu-delay, 0ms);
+  }
+
+  @starting-style {
+    .mila-menu__option {
+      opacity: 0;
+    }
+  }
+
+  /* No stagger on the way out. A departure is not a cascade, and delaying
+     rows would hold them on screen after the popup around them had gone. */
+  .mila-menu[data-leaving='true'] .mila-menu__option {
+    transition-delay: 0ms;
+  }
+
+  /* The same panel as a bottom sheet, on a phone.
+     ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+
+     `.mila-menu`'s default entrance is a small drop and a slight shrink, which
+     is right for something hanging off a field and wrong for a sheet: a
+     full-width panel pinned to the bottom edge should rise out of that edge,
+     not fall into it at 97% scale. Distance is larger too — the sheet is much
+     bigger than a dropdown, and 6px on a 400px panel reads as a twitch. */
+  @media (width < 40rem) {
+    @starting-style {
+      .mila-menu[data-sheet='true'] {
+        transform: translate3d(0, 16px, 0);
+      }
+    }
+
+    .mila-menu[data-sheet='true'][data-leaving='true'] {
+      transform: translate3d(0, 16px, 0);
+    }
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .mila-composer-tint,
     .mila-chip-slot,
@@ -879,7 +1204,14 @@
        point of resting in the visible state — an earlier version rested
        collapsed, and turning its animation off hid every step. */
     .mila-step-row,
-    .mila-card-in {
+    .mila-card-in,
+    .mila-menu,
+    .mila-menu__option,
+    .mila-lane__in,
+    .mila-lane__in [data-step-head] > *,
+    .mila-tab-indicator,
+    .mila-tabpanel,
+    .mila-toast {
       transition: none;
     }
 
@@ -888,7 +1220,12 @@
        that is on its way out should be visible at all. */
     .mila-composer-out,
     .mila-tile-out,
-    .mila-step-row[data-leaving='true'] {
+    .mila-step-row[data-leaving='true'],
+    .mila-menu[data-leaving='true'],
+    .mila-toast[data-leaving='true'],
+    /* The crossfade's outgoing half has nothing to say once it cannot fade:
+       leaving it stacked on the incoming row would render two steps at once. */
+    .mila-lane__out {
       display: none;
     }
   }

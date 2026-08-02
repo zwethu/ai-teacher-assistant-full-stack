@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { BookOpen, FileQuestion, FlaskConical, Gamepad2, GraduationCap } from 'lucide-react'
+import { BookOpen, FileQuestion, FlaskConical, Gamepad2, GraduationCap, Mail } from 'lucide-react'
 
 import { ARTIFACT_ICONS, artifactIcon, artifactKind } from './artifactIcons'
 import { GENERATE_MODES } from '../pages/chat/components/ComposerSurface'
@@ -23,6 +23,9 @@ describe('artifact icons', () => {
       lab: FlaskConical,
       assessment: FileQuestion,
       game: Gamepad2,
+      // The sidebar's and the composer's mark for email, which only needed to
+      // be here once a surface drew an icon per artifact row.
+      email: Mail,
     })
   })
 

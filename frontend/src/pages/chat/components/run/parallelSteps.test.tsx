@@ -10,7 +10,6 @@ import { RunDetails } from './RunDetails'
 import { StepsPanel } from './StepsPanel'
 import { formatDuration, runDurationSeconds, runSummaryLabel } from './runDuration'
 import { ThinkingPanel } from './ThinkingPanel'
-import { STEP_SETTLE_MS } from './useSettlingRows'
 
 afterEach(() => cleanup())
 
@@ -103,7 +102,7 @@ describe('parallel tool calls', () => {
     expect(screen.getByText('Checking saved materials')).toBeTruthy()
   })
 
-  it('lets a step show its Done badge before it leaves', async () => {
+  it('lets a step show its Done badge, and keeps showing it', async () => {
     vi.useFakeTimers()
     try {
       const { rerender } = render(
@@ -119,20 +118,54 @@ describe('parallel tool calls', () => {
       expect(screen.getByText('Done')).toBeTruthy()
       expect(screen.getByText('Checking saved materials')).toBeTruthy()
 
-      // Then, and only then, it goes — grace window, *then* its exit. Two
-      // advances, not one: the exit timer is scheduled by the effect that runs
-      // when the grace window drops the row, so it does not exist yet at the
-      // start of a single combined jump.
+      // And it stays. The lane holds the last thing the agent did in that slot
+      // until something replaces it, so there is no window during which the
+      // panel has nothing to show and collapses.
       await act(async () => {
-        vi.advanceTimersByTime(STEP_SETTLE_MS + 20)
+        vi.advanceTimersByTime(5_000)
       })
-      await act(async () => {
-        vi.advanceTimersByTime(400)
-      })
-      expect(screen.queryByText('Checking saved materials')).toBeNull()
+      expect(screen.getByText('Checking saved materials')).toBeTruthy()
+      expect(screen.getByText('Done')).toBeTruthy()
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  /**
+   * Concurrency dropping is real information and should be animated; a timer
+   * expiring is not. The old model closed rows 900ms after each settled, which
+   * took a fan-out of three through 3 → 1 → 2 → 1 — the count went back *up*
+   * because one row's completion landed between two expiries.
+   */
+  it('closes the lanes a narrower wave does not need, in one move', () => {
+    const running = [
+      ...toolCall('a', 'Reading the course plan', false),
+      ...toolCall('b', 'Checking saved materials', false),
+      ...toolCall('c', 'Reading a saved quiz', false),
+    ]
+    const fanOut = [
+      ...toolCall('a', 'Reading the course plan', true),
+      ...toolCall('b', 'Checking saved materials', true),
+      ...toolCall('c', 'Reading a saved quiz', true),
+    ]
+    const { container, rerender } = render(<RunDetails run={run(running, 'running')} isFinal={false} />)
+    expect(container.querySelectorAll('.mila-step-row').length).toBe(3)
+
+    // All three finish. The lanes stay — nothing has asked for them yet.
+    rerender(<RunDetails run={run(fanOut, 'running')} isFinal={false} />)
+    expect(container.querySelectorAll('.mila-step-row[data-leaving="true"]').length).toBe(0)
+
+    // One step follows the fan-out. It takes over the oldest lane; the other
+    // two close together, on this frame, rather than on their own timers.
+    rerender(
+      <RunDetails
+        run={run([...fanOut, ...toolCall('d', 'Writing the outline', false)], 'running')}
+        isFinal={false}
+      />,
+    )
+
+    expect(container.querySelectorAll('.mila-step-row[data-leaving="true"]').length).toBe(2)
+    expect(screen.getByText('Writing the outline')).toBeTruthy()
   })
 
   it('does not warn that updates are delayed while steps are streaming', () => {
@@ -164,16 +197,46 @@ describe('parallel tool calls', () => {
         (node as HTMLElement).style.getPropertyValue('--mila-step-delay'),
       )
 
+    const lane = (id: string) => ({ id: `lane-${id}`, row: row(id) })
+
     const { container, rerender } = render(
-      <StepsPanel live rows={[row('a'), row('b'), row('c')]} />,
+      <StepsPanel live lanes={[lane('a'), lane('b'), lane('c')]} />,
     )
     expect(delays(container)).toEqual(['0ms', '45ms', '90ms'])
 
     // A fourth step, arriving by itself later. Staggering by list position
     // would hand it 135ms of delay it did not earn — the cascade belongs to
     // rows that appear together, which is what a parallel fan-out looks like.
-    rerender(<StepsPanel live rows={[row('a'), row('b'), row('c'), row('d')]} />)
+    rerender(<StepsPanel live lanes={[lane('a'), lane('b'), lane('c'), lane('d')]} />)
     expect(delays(container)).toEqual(['0ms', '45ms', '90ms', '0ms'])
+  })
+
+  /**
+   * A commit that both opens and closes lanes moves as one piece.
+   *
+   * The stagger is a delay on the opening height only, so on a mixed commit it
+   * un-pairs the two curves that are meant to cancel: evaluated, a staggered
+   * arrival against an unstaggered departure put the container at 0.174 of a
+   * row rather than a flat 1.000.
+   */
+  it('drops the stagger on a wave that also closes lanes', () => {
+    const lane = (id: string) => ({
+      id: `lane-${id}`,
+      row: { id, kind: 'tool', title: `Step ${id}`, status: 'running' } as NormalizedRunRow,
+    })
+    const delays = (container: HTMLElement) =>
+      [...container.querySelectorAll('.mila-step-row:not([data-leaving])')].map((node) =>
+        (node as HTMLElement).style.getPropertyValue('--mila-step-delay'),
+      )
+
+    const { container, rerender } = render(
+      <StepsPanel live lanes={[lane('a'), lane('b')]} />,
+    )
+    // `a` and `b` go, `c` and `d` arrive, all on one frame.
+    rerender(<StepsPanel live lanes={[lane('c'), lane('d')]} />)
+
+    expect(container.querySelectorAll('.mila-step-row[data-leaving="true"]').length).toBe(2)
+    expect(delays(container)).toEqual(['0ms', '0ms'])
   })
 
   it('holds a step in place when it finishes instead of letting it hop', () => {

@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentRunEvent } from '../../../../services/agentRunStream'
 import type { RunUiState } from '../../runTypes'
 import { RunDetails } from './RunDetails'
-import { STEP_SETTLE_MS } from './useSettlingRows'
 
 beforeEach(() => vi.useFakeTimers())
 afterEach(() => {
@@ -38,34 +37,74 @@ const run = (events: AgentRunEvent[]): RunUiState => ({ status: 'running', event
 const leavingRows = (container: HTMLElement) =>
   container.querySelectorAll('.mila-step-row[data-leaving="true"]')
 
-describe('a step leaving the live view', () => {
-  it('animates out even when it is the last one', () => {
-    // The whole panel used to unmount the instant the row count hit zero,
-    // taking the presence list — and therefore the exit animation — with it.
-    // That happens between every pair of sequential steps, not just at the end.
+describe('a finished step', () => {
+  /**
+   * The defect this model replaced.
+   *
+   * A finished row used to be dropped 900ms after it settled, and the agent
+   * usually thinks for longer than that before its next tool call — so the
+   * panel reached zero rows between every step, collapsed, and reopened. That
+   * is a full row of height moving twice per step, taking the thinking line
+   * and the conversation with it.
+   */
+  it('stays in its lane rather than leaving on a timer', () => {
     const { container, rerender } = render(
       <RunDetails run={run(call('a', 'Checking saved materials', false))} isFinal={false} />,
     )
     expect(screen.getByText('Checking saved materials')).toBeTruthy()
 
-    // It finishes, is held for its "Done" beat, then drops out of the list.
     rerender(<RunDetails run={run(call('a', 'Checking saved materials', true))} isFinal={false} />)
-    act(() => void vi.advanceTimersByTime(STEP_SETTLE_MS + 20))
+    act(() => void vi.advanceTimersByTime(5_000))
 
-    expect(leavingRows(container).length).toBe(1)
+    expect(screen.getByText('Checking saved materials')).toBeTruthy()
+    expect(screen.getByText('Done')).toBeTruthy()
+    expect(leavingRows(container).length).toBe(0)
   })
 
-  it('is gone once its exit has played', () => {
+  /** One lane in, one lane out: the container's height never moves. */
+  it('hands its lane to the next step instead of making room for it', () => {
+    const finished = call('a', 'Checking saved materials', true)
     const { container, rerender } = render(
       <RunDetails run={run(call('a', 'Checking saved materials', false))} isFinal={false} />,
     )
-    rerender(<RunDetails run={run(call('a', 'Checking saved materials', true))} isFinal={false} />)
-    act(() => void vi.advanceTimersByTime(STEP_SETTLE_MS + 20))
-    expect(leavingRows(container).length).toBe(1)
+    rerender(<RunDetails run={run(finished)} isFinal={false} />)
+    expect(container.querySelectorAll('.mila-step-row').length).toBe(1)
+
+    // The next step arrives. Under the old list model this was an insertion —
+    // two rows — followed by a removal once the first one's window expired.
+    rerender(
+      <RunDetails
+        run={run([...finished, ...call('b', 'Reading the course plan', false)])}
+        isFinal={false}
+      />,
+    )
+
+    expect(container.querySelectorAll('.mila-step-row').length).toBe(1)
+    expect(screen.getByText('Reading the course plan')).toBeTruthy()
+    expect(leavingRows(container).length).toBe(0)
+  })
+
+  it('crossfades the step it replaced rather than cutting to it', () => {
+    const finished = call('a', 'Checking saved materials', true)
+    const { container, rerender } = render(
+      <RunDetails run={run(call('a', 'Checking saved materials', false))} isFinal={false} />,
+    )
+    rerender(<RunDetails run={run(finished)} isFinal={false} />)
+    rerender(
+      <RunDetails
+        run={run([...finished, ...call('b', 'Reading the course plan', false)])}
+        isFinal={false}
+      />,
+    )
+
+    // Both are on screen for the length of the crossfade, stacked in one grid
+    // cell so the outgoing one costs no layout.
+    expect(container.querySelector('.mila-lane__out')).toBeTruthy()
+    expect(screen.getByText('Checking saved materials')).toBeTruthy()
 
     act(() => void vi.advanceTimersByTime(400))
 
-    expect(leavingRows(container).length).toBe(0)
+    expect(container.querySelector('.mila-lane__out')).toBeNull()
     expect(screen.queryByText('Checking saved materials')).toBeNull()
   })
 

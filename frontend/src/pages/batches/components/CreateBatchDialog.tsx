@@ -164,7 +164,7 @@ export function CreateBatchDialog(props: Props) {
               <div className="grid grid-cols-2 gap-3">
                 <button
                   type="button"
-                  className="group relative flex flex-col items-center text-center p-4 border-2 border-slate-200 rounded-xl hover:border-violet-500 hover:bg-violet-50/20 transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-violet-500"
+                  className="group relative flex flex-col items-center text-center p-4 border-2 border-slate-200 rounded-xl hover:border-violet-500 hover:bg-violet-50/20 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-violet-500"
                   onClick={() => setCreateStep('csv')}
                 >
                   <div className="w-10 h-10 rounded-lg bg-violet-100 text-violet-600 flex items-center justify-center group-hover:bg-violet-200 transition-colors">
@@ -178,7 +178,7 @@ export function CreateBatchDialog(props: Props) {
 
                 <button
                   type="button"
-                  className="group relative flex flex-col items-center text-center p-4 border-2 border-slate-200 rounded-xl hover:border-green-500 hover:bg-green-50/20 transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+                  className="group relative flex flex-col items-center text-center p-4 border-2 border-slate-200 rounded-xl hover:border-green-500 hover:bg-green-50/20 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-green-500"
                   onClick={() => setCreateStep('manual')}
                 >
                   <div className="w-10 h-10 rounded-lg bg-green-100 text-green-600 flex items-center justify-center group-hover:bg-green-200 transition-colors">

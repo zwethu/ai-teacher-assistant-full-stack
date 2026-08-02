@@ -20,6 +20,13 @@ import {
 import { GenerationAttachments } from '../components/generation/GenerationAttachments'
 import { GenerationRunView } from '../components/generation/GenerationRunView'
 import Toast from '../components/ui/Toast'
+import { SelectField } from '../components/ui/SelectField'
+import { DateField } from '../components/ui/DateField'
+import {
+  CHECKBOX_CLASS,
+  FIELD_CLASS,
+  FIELD_INVALID_CLASS,
+} from '../components/ui/fieldStyles'
 import type { Batch } from '../entity/Batch'
 import { useBatchSelection } from '../hooks/useBatchSelection'
 import { useGenerationRun } from '../hooks/useGenerationRun'
@@ -400,13 +407,13 @@ function GameSchedule({
 
       {editing ? (
         <>
-          <input
-            type="datetime-local"
+          <DateField
+            withTime
+            className="w-56"
             value={value}
             min={toLocalInputValue(new Date())}
-            onChange={(event) => setValue(event.target.value)}
+            onChange={setValue}
             aria-label={`Deadline for ${game.title}`}
-            className="rounded-md border border-slate-300 px-2 py-1 text-xs focus:border-violet-500 focus:ring-violet-500"
           />
           <button
             type="button"
@@ -857,24 +864,20 @@ function GameGenerator({
       {/* The space belongs at the top of the form, not floating in the page
           corner where it aligned with nothing. It is still scope for the whole
           page — the list below names the space it is showing for that reason. */}
-      <div className="mt-4">
-        <label htmlFor="games-batch" className="mb-1.5 block text-sm font-semibold text-slate-700">
-          Space
-        </label>
-        <select
-          id="games-batch"
-          value={batch.id}
-          onChange={(event) => onSelectBatch(event.target.value)}
-          disabled={batchesLoading}
-          className="block w-full max-w-md rounded-md border border-slate-300 bg-white px-3 py-2.5 pr-9 text-sm text-slate-700 focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-500"
-        >
-          {batches.map((option) => (
-            <option key={option.id} value={option.id}>
-              {option.batch_name} — {option.course_name}
-            </option>
-          ))}
-        </select>
-      </div>
+      <SelectField
+        id="games-batch"
+        label="Space"
+        className="mt-4 max-w-md"
+        value={batch.id}
+        onChange={onSelectBatch}
+        options={batches.map((option) => ({
+          value: option.id,
+          label: option.batch_name,
+          hint: option.course_name,
+        }))}
+        disabled={batchesLoading}
+        placeholder={batchesLoading ? 'Loading spaces…' : 'Select a space'}
+      />
 
       {/* Settings next — they arrive with sensible defaults, so the lecturer
           reads rather than works. The one genuinely required input, the source,
@@ -895,9 +898,7 @@ function GameGenerator({
             onChange={(event) => setPairCount(event.target.value)}
             aria-describedby="game-pair-count-hint"
             aria-invalid={!pairsValid}
-            className={`block w-full rounded-md border px-3 py-2.5 text-sm focus:ring-violet-500 ${
-              pairsValid ? 'border-slate-300 focus:border-violet-500' : 'border-red-300 focus:border-red-500'
-            }`}
+            className={pairsValid ? FIELD_CLASS : FIELD_INVALID_CLASS}
           />
           <p
             id="game-pair-count-hint"
@@ -919,7 +920,7 @@ function GameGenerator({
             value={instructions}
             onChange={(event) => setInstructions(event.target.value)}
             placeholder="e.g. focus on the key definitions students confuse"
-            className="block w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm focus:border-violet-500 focus:ring-violet-500"
+            className={FIELD_CLASS}
           />
         </div>
       </div>
@@ -937,7 +938,7 @@ function GameGenerator({
                 setDeadline(toLocalInputValue(new Date(Date.now() + 7 * 86_400_000)))
               }
             }}
-            className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
+            className={CHECKBOX_CLASS}
           />
           <span className="text-sm font-semibold text-slate-700">Set a deadline</span>
         </label>
@@ -949,17 +950,15 @@ function GameGenerator({
 
         {hasDeadline && (
           <div className="mt-3">
-            <input
+            <DateField
               id="game-deadline"
-              type="datetime-local"
+              withTime
+              className="max-w-xs"
               value={deadline}
               min={toLocalInputValue(new Date())}
-              onChange={(event) => setDeadline(event.target.value)}
+              onChange={setDeadline}
               aria-label="Deadline"
-              aria-invalid={!deadlineValid}
-              className={`block w-full max-w-xs rounded-md border px-3 py-2.5 text-sm focus:ring-violet-500 ${
-                deadlineValid ? 'border-slate-300 focus:border-violet-500' : 'border-red-300 focus:border-red-500'
-              }`}
+              invalid={!deadlineValid}
             />
             {!deadlineValid && (
               <p className="mt-1 text-xs text-red-600">Pick a date and time in the future.</p>

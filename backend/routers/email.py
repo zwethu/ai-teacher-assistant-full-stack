@@ -1,12 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from entity.email import (
-    GenerateEmailRequest,
     SaveDraftRequest,
     SendDraftRequest,
     SendEmailRequest,
 )
-from services.email_ai import EmailAiError, generate_email_draft
 from services.gmail_service import GmailSendError, create_draft, send_draft, send_email
 from services.google_workspace.credentials import read_refresh_token
 from utils.firebase_auth import CurrentUser, get_current_user
@@ -27,28 +25,6 @@ def _get_user_refresh_token(uid: str) -> str:
             detail="Google account not connected. Please grant permissions first.",
         )
     return token
-
-
-@router.post("/generate")
-async def generate(
-    payload: GenerateEmailRequest,
-    current_user: CurrentUser = Depends(get_current_user),
-) -> dict[str, str]:
-    """Draft subject + body from a lecturer prompt via Vertex Gemini."""
-    # Signature comes from the verified token, never the client payload.
-    sender_name = str(current_user.get("name") or "").strip()
-    try:
-        return generate_email_draft(
-            prompt=payload.prompt,
-            batch_name=payload.batch_name,
-            course_name=payload.course_name,
-            sender_name=sender_name,
-        )
-    except EmailAiError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=str(exc),
-        ) from exc
 
 
 @router.post("/save-draft")

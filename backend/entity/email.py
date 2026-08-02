@@ -20,12 +20,6 @@ class SendEmailRequest(BaseModel):
     body: str
 
 
-class GenerateEmailRequest(BaseModel):
-    prompt: str
-    batch_name: str = ""
-    course_name: str = ""
-
-
 class SaveDraftRequest(BaseModel):
     to: str
     subject: str

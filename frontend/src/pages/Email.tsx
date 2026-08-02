@@ -365,9 +365,9 @@ export default function Email() {
     setFormError('')
     try {
       const draft = await generateEmailDraft({
+        batchId: selectedBatch.id,
+        recipients: finalRecipients,
         prompt,
-        batch_name: selectedBatch.batch_name,
-        course_name: selectedBatch.course_name,
       })
       setForm((f) => ({ ...f, subject: draft.subject, body: draft.body }))
       setStep('review')

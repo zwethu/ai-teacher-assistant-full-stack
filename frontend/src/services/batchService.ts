@@ -31,6 +31,18 @@ function _apiBatchToBatch(data: Record<string, unknown>, id: string): Batch {
   }
 }
 
+export type UpdateBatchPayload = Partial<
+  Pick<CreateBatchPayload, 'batch_name' | 'course_name' | 'academic_year' | 'term'>
+>
+
+export async function updateBatch(
+  batchId: string,
+  payload: UpdateBatchPayload,
+): Promise<Batch> {
+  const res = await api.patch<Record<string, unknown>>(`/batches/${batchId}`, payload)
+  return _apiBatchToBatch(res.data, String(res.data.batch_id ?? batchId))
+}
+
 export async function createBatch(payload: CreateBatchPayload): Promise<string> {
   const res = await api.post<{ batch_id: string }>('/batches', payload)
   return res.data.batch_id

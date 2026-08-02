@@ -37,6 +37,13 @@ export default function Batches() {
         handleRefreshFiles={state.handleRefreshFiles}
         handleDeleteArtifact={state.handleDeleteArtifact}
         refreshArtifacts={state.refreshArtifacts}
+        isEditOpen={state.isEditOpen}
+        editDetails={state.editDetails}
+        setEditDetails={state.setEditDetails}
+        isSavingEdit={state.isSavingEdit}
+        openEditDialog={state.openEditDialog}
+        closeEditDialog={state.closeEditDialog}
+        handleSaveBatchDetails={state.handleSaveBatchDetails}
       />
     )
   }

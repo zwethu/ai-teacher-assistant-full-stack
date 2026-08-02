@@ -19,6 +19,7 @@ import {
   listBatches,
   listBatchStudents,
   removeStudentFromBatch,
+  updateBatch,
 } from '../../../services/batchService'
 import {
   deleteBatchFile,
@@ -57,6 +58,15 @@ export function useBatchesPage() {
 
   const [selectedBatch, setSelectedBatch] = useState<Batch | null>(null)
   const [detailTab, setDetailTab] = useState<DetailTab>('students')
+
+  const [isEditOpen, setIsEditOpen] = useState(false)
+  const [editDetails, setEditDetails] = useState<BatchDetails>({
+    batch_name: '',
+    course_name: '',
+    academic_year: '',
+    term: '',
+  })
+  const [isSavingEdit, setIsSavingEdit] = useState(false)
   const [searchParams, setSearchParams] = useSearchParams()
 
   // Deep link support: /batches?batch=<id>&tab=planning opens a batch straight
@@ -73,6 +83,7 @@ export function useBatchesPage() {
   }, [searchParams, batches, selectedBatch, setSearchParams])
   const [students, setStudents] = useState<BatchStudent[]>([])
   const [studentsLoading, setStudentsLoading] = useState(false)
+  const lastDetailBatchIdRef = useRef<string | null>(null)
 
   const [studentForm, setStudentForm] = useState({ name: '', email: '' })
   const [addingStudent, setAddingStudent] = useState(false)
@@ -228,8 +239,13 @@ export function useBatchesPage() {
       setArtifacts([])
       setArtifactSummary(null)
       if (pollingRef.current) clearInterval(pollingRef.current)
+      lastDetailBatchIdRef.current = null
       return
     }
+    // Metadata edits replace the selectedBatch object but keep the same id —
+    // don't yank the user back to the Students tab or refetch everything.
+    if (lastDetailBatchIdRef.current === selectedBatch.id) return
+    lastDetailBatchIdRef.current = selectedBatch.id
     setDetailTab('students')
     refreshStudents()
     refreshFiles()
@@ -333,6 +349,49 @@ export function useBatchesPage() {
       }
     }
     reader.readAsText(file)
+  }
+
+  function openEditDialog() {
+    if (!selectedBatch) return
+    setEditDetails({
+      batch_name: selectedBatch.batch_name,
+      course_name: selectedBatch.course_name,
+      academic_year: selectedBatch.academic_year,
+      term: selectedBatch.term,
+    })
+    setIsEditOpen(true)
+  }
+
+  function closeEditDialog() {
+    if (isSavingEdit) return
+    setIsEditOpen(false)
+  }
+
+  async function handleSaveBatchDetails() {
+    if (!selectedBatch) return
+    if (!editDetails.batch_name.trim()) {
+      showToast('error', 'Batch name cannot be empty.')
+      return
+    }
+
+    setIsSavingEdit(true)
+    try {
+      const updated = await updateBatch(selectedBatch.id, {
+        batch_name: editDetails.batch_name.trim(),
+        course_name: editDetails.course_name.trim(),
+        academic_year: editDetails.academic_year.trim(),
+        term: editDetails.term.trim(),
+      })
+      setSelectedBatch(updated)
+      setBatches((prev) => prev.map((b) => (b.id === updated.id ? updated : b)))
+      setIsEditOpen(false)
+      showToast('success', 'Batch details updated.')
+    } catch (err) {
+      console.error(err)
+      showToast('error', getErrorMessage(err, 'Failed to update batch.'))
+    } finally {
+      setIsSavingEdit(false)
+    }
   }
 
   async function handleDeleteBatch(batch: Batch) {
@@ -531,6 +590,13 @@ export function useBatchesPage() {
     batches,
     listLoading,
     listError,
+    isEditOpen,
+    editDetails,
+    setEditDetails,
+    isSavingEdit,
+    openEditDialog,
+    closeEditDialog,
+    handleSaveBatchDetails,
     openCreateDialog,
     closeCreateDialog,
     isDetailsComplete,

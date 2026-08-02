@@ -7,7 +7,7 @@ from google.cloud import firestore
 from google.cloud.firestore import SERVER_TIMESTAMP
 from google.cloud.firestore_v1 import Increment
 
-from entity.Batch import BatchCreate, BatchModel
+from entity.Batch import BatchCreate, BatchModel, BatchUpdate
 from utils.firestore_client import get_firestore
 
 logger = logging.getLogger(__name__)
@@ -110,6 +110,73 @@ def get_batch(batch_id: str, lecturer_id: str) -> BatchModel | None:
     if data.get("lecturer_id") != lecturer_id:
         return None
     return _doc_to_model(doc.id, data)
+
+
+EDITABLE_BATCH_FIELDS = ("batch_name", "course_name", "academic_year", "term")
+
+
+def update_batch(
+    batch_id: str,
+    lecturer_id: str,
+    payload: BatchUpdate,
+) -> BatchModel | None:
+    """Apply a partial metadata edit, verifying lecturer ownership.
+
+    Empty/whitespace-only values are ignored rather than clearing a field.
+    Returns the refreshed model, or None if the batch is missing or not owned.
+    """
+    db = get_firestore()
+    batch_ref = db.collection(BATCHES_COLLECTION).document(batch_id)
+    snap = batch_ref.get()
+    if not snap.exists:
+        return None
+    data = snap.to_dict() or {}
+    if data.get("lecturer_id") != lecturer_id:
+        return None
+
+    updates: dict[str, Any] = {}
+    for field in EDITABLE_BATCH_FIELDS:
+        value = getattr(payload, field)
+        if value is None:
+            continue
+        cleaned = value.strip()
+        if not cleaned or cleaned == str(data.get(field) or ""):
+            continue
+        updates[field] = cleaned
+
+    if updates:
+        updates["updated_at"] = SERVER_TIMESTAMP
+        batch_ref.update(updates)
+        if "batch_name" in updates:
+            _rename_drive_root_folder(
+                lecturer_id,
+                str(data.get("drive_root_folder_id") or ""),
+                updates["batch_name"],
+                batch_id,
+            )
+        data = batch_ref.get().to_dict() or {}
+
+    return _doc_to_model(batch_id, data)
+
+
+def _rename_drive_root_folder(
+    lecturer_id: str,
+    folder_id: str,
+    batch_name: str,
+    batch_id: str,
+) -> None:
+    """Best-effort: keep the 'PNAI - <batch>' Drive folder name in sync. Never fatal —
+    the lecturer may not have Google connected, and the folder is tracked by id."""
+    if not folder_id:
+        return
+    try:
+        from services.google_workspace.drive_folders import rename_batch_root_folder
+
+        rename_batch_root_folder(lecturer_id, folder_id, batch_name)
+    except Exception as exc:
+        logger.warning(
+            "Could not rename Drive root folder for batch %s: %s", batch_id, exc
+        )
 
 
 def add_student_to_batch(

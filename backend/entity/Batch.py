@@ -14,6 +14,15 @@ class BatchCreate(BaseModel):
     students: list[StudentInput] = Field(default_factory=list)
 
 
+class BatchUpdate(BaseModel):
+    """Partial edit of batch metadata — omitted/None fields are left unchanged."""
+
+    batch_name: str | None = None
+    course_name: str | None = None
+    academic_year: str | None = None
+    term: str | None = None
+
+
 class BatchModel(BaseModel):
     batch_id: str
     batch_name: str

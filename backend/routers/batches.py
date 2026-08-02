@@ -2,7 +2,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from entity.Batch import BatchCreate, BatchModel
+from entity.Batch import BatchCreate, BatchModel, BatchUpdate
 from services.batch_service import (
     add_student_to_batch,
     create_batch,
@@ -11,6 +11,7 @@ from services.batch_service import (
     list_batches,
     list_students,
     remove_student_from_batch,
+    update_batch,
 )
 from utils.firebase_auth import CurrentUser, get_current_user
 
@@ -49,6 +50,21 @@ async def get_batch_endpoint(
             detail="Batch not found",
         )
     return batch
+
+
+@router.patch("/{batch_id}", response_model=BatchModel)
+async def update_batch_endpoint(
+    batch_id: str,
+    payload: BatchUpdate,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> BatchModel:
+    updated = update_batch(batch_id, current_user["uid"], payload)
+    if updated is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Batch not found",
+        )
+    return updated
 
 
 @router.delete("/{batch_id}", status_code=status.HTTP_204_NO_CONTENT)

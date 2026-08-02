@@ -48,6 +48,16 @@ def build_batch_root_folder_name(batch_name: str, course_name: str = "") -> str:
     return sanitize_drive_name(f"PNAI - {batch_name or 'Batch'}")
 
 
+def rename_batch_root_folder(uid: str, folder_id: str, batch_name: str) -> None:
+    """Rename the batch's Drive root folder to match a new batch name."""
+    drive = _build_drive_service(uid)
+    drive.files().update(
+        fileId=folder_id,
+        body={"name": build_batch_root_folder_name(batch_name)},
+        fields="id",
+    ).execute()
+
+
 def folder_url(folder_id: str) -> str:
     return f"https://drive.google.com/drive/folders/{folder_id}"
 

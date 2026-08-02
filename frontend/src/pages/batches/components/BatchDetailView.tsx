@@ -4,10 +4,11 @@ import type { BatchFile } from '../../../entity/File'
 import Toast from '../../../components/ui/Toast'
 import type { ToastMessage } from '../../../types'
 import { formatDate } from '../../../utils/formatDate'
-import { ArrowLeft, BookOpenCheck, Clock, Sparkles, Trash2, Users } from 'lucide-react'
+import { ArrowLeft, BookOpenCheck, Clock, Pencil, Sparkles, Trash2, Users } from 'lucide-react'
 import { BTN_SECONDARY } from '../constants'
-import type { DetailTab } from '../types'
+import type { BatchDetails, DetailTab } from '../types'
 import { ArtifactsTab } from './ArtifactsTab'
+import { EditBatchDialog } from './EditBatchDialog'
 import { MaterialsTab } from './MaterialsTab'
 import { StudentsTab } from './StudentsTab'
 import type { Artifact, ArtifactSummary } from '../../../services/artifactService'
@@ -42,6 +43,13 @@ type Props = {
   handleRefreshFiles: () => void
   handleDeleteArtifact: (artifact: Artifact) => void
   refreshArtifacts: () => void
+  isEditOpen: boolean
+  editDetails: BatchDetails
+  setEditDetails: React.Dispatch<React.SetStateAction<BatchDetails>>
+  isSavingEdit: boolean
+  openEditDialog: () => void
+  closeEditDialog: () => void
+  handleSaveBatchDetails: () => Promise<void>
 }
 
 export function BatchDetailView({
@@ -73,12 +81,27 @@ export function BatchDetailView({
   handleRefreshFiles,
   handleDeleteArtifact,
   refreshArtifacts,
+  isEditOpen,
+  editDetails,
+  setEditDetails,
+  isSavingEdit,
+  openEditDialog,
+  closeEditDialog,
+  handleSaveBatchDetails,
 }: Props) {
   const fillHeight = detailTab === 'materials'
 
   return (
     <div className={fillHeight ? 'flex h-full min-h-0 flex-col overflow-hidden' : 'pb-8'}>
       <Toast toast={toast} onDismiss={() => setToast(null)} />
+      <EditBatchDialog
+        isEditOpen={isEditOpen}
+        editDetails={editDetails}
+        setEditDetails={setEditDetails}
+        isSavingEdit={isSavingEdit}
+        closeEditDialog={closeEditDialog}
+        handleSaveBatchDetails={handleSaveBatchDetails}
+      />
 
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 mb-3 shrink-0">
         <div className="min-w-0">
@@ -86,6 +109,15 @@ export function BatchDetailView({
             <h1 className="text-2xl font-bold text-slate-800 tracking-tight">
               {selectedBatch.batch_name}
             </h1>
+            <button
+              type="button"
+              onClick={openEditDialog}
+              className="p-1.5 rounded-md text-slate-400 hover:text-violet-700 hover:bg-violet-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
+              aria-label="Edit batch details"
+              title="Edit batch details"
+            >
+              <Pencil className="w-4 h-4" />
+            </button>
             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-violet-50 text-violet-700 border border-violet-100">
               {students.length} student{students.length === 1 ? '' : 's'}
             </span>

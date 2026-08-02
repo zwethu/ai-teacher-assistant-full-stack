@@ -21,12 +21,10 @@ import { GenerationAttachments } from '../components/generation/GenerationAttach
 import { GenerationRunView } from '../components/generation/GenerationRunView'
 import Toast from '../components/ui/Toast'
 import { SelectField } from '../components/ui/SelectField'
+import { NumberField } from '../components/ui/NumberField'
+import { Collapse } from '../components/ui/Collapse'
 import { DateField } from '../components/ui/DateField'
-import {
-  CHECKBOX_CLASS,
-  FIELD_CLASS,
-  FIELD_INVALID_CLASS,
-} from '../components/ui/fieldStyles'
+import { CHECKBOX_CLASS, FIELD_CLASS } from '../components/ui/fieldStyles'
 import type { Batch } from '../entity/Batch'
 import { useBatchSelection } from '../hooks/useBatchSelection'
 import { useGenerationRun } from '../hooks/useGenerationRun'
@@ -885,20 +883,18 @@ function GameGenerator({
           Sections are separated by rules, not by more borders. */}
       <div className="mt-5 grid max-w-3xl gap-4 border-t border-slate-100 pt-5 sm:grid-cols-[8rem_1fr]">
         <div>
-          <label htmlFor="game-pair-count" className="mb-1.5 block text-sm font-semibold text-slate-700">
-            Number of pairs
-          </label>
-          <input
+          {/* The same control as every other number on the site. It was the
+              last raw `type="number"` left, so this was the one field still
+              drawing the operating system's spinner rather than ours. */}
+          <NumberField
             id="game-pair-count"
-            type="number"
-            inputMode="numeric"
+            label="Number of pairs"
             min={MIN_PAIRS}
             max={MAX_PAIRS}
-            value={pairCount}
-            onChange={(event) => setPairCount(event.target.value)}
-            aria-describedby="game-pair-count-hint"
-            aria-invalid={!pairsValid}
-            className={pairsValid ? FIELD_CLASS : FIELD_INVALID_CLASS}
+            value={pairs}
+            onChange={(value) => setPairCount(Number.isFinite(value) ? String(value) : '')}
+            invalid={!pairsValid}
+            describedBy="game-pair-count-hint"
           />
           <p
             id="game-pair-count-hint"
@@ -948,7 +944,10 @@ function GameGenerator({
             : 'Without one, the game stays open until you close it.'}
         </p>
 
-        {hasDeadline && (
+        {/* The same tick-to-reveal as the assessment's time limit. The calendar
+            inside is why `Collapse` stops clipping once open — a date picker
+            that opens upward has to be able to leave the box. */}
+        <Collapse open={hasDeadline}>
           <div className="mt-3">
             <DateField
               id="game-deadline"
@@ -964,7 +963,7 @@ function GameGenerator({
               <p className="mt-1 text-xs text-red-600">Pick a date and time in the future.</p>
             )}
           </div>
-        )}
+        </Collapse>
       </div>
 
       {/* One slot, two ways to fill it. The earlier version asked the lecturer to

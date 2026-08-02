@@ -15,6 +15,7 @@ import { timeAgo } from '../utils/formatDate'
 import { artifactIcon } from '../utils/artifactIcons'
 import { SelectField, toOptions } from '../components/ui/SelectField'
 import { NumberField } from '../components/ui/NumberField'
+import { Collapse } from '../components/ui/Collapse'
 import { FIELD_CLASS, FIELD_LABEL_CLASS, TEXTAREA_CLASS } from '../components/ui/fieldStyles'
 import { Spinner } from '../design-system'
 
@@ -335,31 +336,31 @@ export default function LessonPlans() {
                 <ChevronDown className={`h-4 w-4 transition-transform ${showOptional ? 'rotate-180' : ''}`} />
                 {showOptional ? 'Hide optional details' : 'Show optional details'}
               </button>
-              {showOptional && (
-                <div className="mt-3 space-y-3 rounded-lg border border-slate-100 bg-slate-50/70 p-3">
-                  <div>
-                    <label className={FIELD_LABEL_CLASS}>Lesson plan name</label>
-                    <input type="text" value={form.title}
-                      onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-                      placeholder="Leave blank — agent names it from the course plan or topic"
-                      className={FIELD_CLASS} />
+              <Collapse open={showOptional}>
+                  <div className="mt-3 space-y-3 rounded-lg border border-slate-100 bg-slate-50/70 p-3">
+                    <div>
+                      <label className={FIELD_LABEL_CLASS}>Lesson plan name</label>
+                      <input type="text" value={form.title}
+                        onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+                        placeholder="Leave blank — agent names it from the course plan or topic"
+                        className={FIELD_CLASS} />
+                    </div>
+                    <div>
+                      <label className={FIELD_LABEL_CLASS}>Topic</label>
+                      <input type="text" value={form.topic}
+                        onChange={(e) => setForm((f) => ({ ...f, topic: e.target.value }))}
+                        placeholder="Leave blank to let the agent choose from the course plan"
+                        className={FIELD_CLASS} />
+                    </div>
+                    <div>
+                      <label className={FIELD_LABEL_CLASS}>Additional instructions</label>
+                      <textarea rows={2} value={form.instructions}
+                        onChange={(e) => setForm((f) => ({ ...f, instructions: e.target.value }))}
+                        placeholder="Anything else the agent should consider…"
+                        className={TEXTAREA_CLASS} />
+                    </div>
                   </div>
-                  <div>
-                    <label className={FIELD_LABEL_CLASS}>Topic</label>
-                    <input type="text" value={form.topic}
-                      onChange={(e) => setForm((f) => ({ ...f, topic: e.target.value }))}
-                      placeholder="Leave blank to let the agent choose from the course plan"
-                      className={FIELD_CLASS} />
-                  </div>
-                  <div>
-                    <label className={FIELD_LABEL_CLASS}>Additional instructions</label>
-                    <textarea rows={2} value={form.instructions}
-                      onChange={(e) => setForm((f) => ({ ...f, instructions: e.target.value }))}
-                      placeholder="Anything else the agent should consider…"
-                      className={TEXTAREA_CLASS} />
-                  </div>
-                </div>
-              )}
+              </Collapse>
             </div>
 
             {selectedBatch && <GenerationAttachments run={run} />}

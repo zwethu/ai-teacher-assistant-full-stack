@@ -186,7 +186,15 @@ describe('Games — source picker', () => {
     renderPage()
 
     await waitFor(() => expect(listArtifacts).toHaveBeenCalled())
-    expect(screen.queryByLabelText('Deadline')).toBeNull()
+    /* The field is mounted but unreachable. `Collapse` keeps its children so
+       the section can animate shut and so a half-filled field survives being
+       collapsed; `inert` is what takes them out of the tab order and the
+       accessibility tree, and a role query is what respects that. Asking
+       `queryByLabelText` here would find the input in the DOM and say nothing
+       about whether a lecturer could get to it. */
+    expect(screen.queryByRole('combobox', { name: 'Deadline' })).toBeNull()
+    const field = screen.getByLabelText('Deadline')
+    expect(field.closest('.mila-collapse')?.hasAttribute('inert')).toBe(true)
     expect(screen.getByText(/stays open until you close it/)).toBeTruthy()
   })
 

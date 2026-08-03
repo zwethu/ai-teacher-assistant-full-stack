@@ -317,21 +317,34 @@ export function GenerationRunView({
               }}
               deadlineAt={gameDeadlineAt}
             />
-            <div className="flex flex-wrap items-center gap-2 pt-1">
-              {runState && <RunInspector run={runState} />}
-              {stage === 'preview' && refineTrigger('Refine this draft')}
-              {exitControl && <span className="ml-auto">{exitControl}</span>}
-            </div>
-            {stage === 'preview' && (
-              <RefineField
-                accent={accent}
-                disabled={run.sending}
-                open={refineOpen}
-                onClose={() => setRefineOpen(false)}
-                placeholder="Ask for changes to the generated draft…"
-                onSubmit={(text) => run.sendFollowUp(text)}
-              />
-            )}
+            {/* Refining a generated draft is a gated refine_full invoke keyed on
+                the card's approved_outline_run_id — single-shot cards (game)
+                have none, so they get no refine affordance rather than a
+                follow-up the generation gate would refuse. */}
+            {(() => {
+              const canRefineDraft = Boolean(
+                activeMessage.metadata?.approved_outline_run_id,
+              )
+              return (
+                <>
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    {runState && <RunInspector run={runState} />}
+                    {stage === 'preview' && canRefineDraft && refineTrigger('Refine this draft')}
+                    {exitControl && <span className="ml-auto">{exitControl}</span>}
+                  </div>
+                  {stage === 'preview' && canRefineDraft && (
+                    <RefineField
+                      accent={accent}
+                      disabled={run.sending}
+                      open={refineOpen}
+                      onClose={() => setRefineOpen(false)}
+                      placeholder="Ask for changes to the generated draft…"
+                      onSubmit={(text) => run.sendFollowUp(text, activeMessage)}
+                    />
+                  )}
+                </>
+              )
+            })()}
           </div>
         )}
 

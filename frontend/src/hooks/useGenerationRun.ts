@@ -632,17 +632,49 @@ export function useGenerationRun(batch: Batch | null, persistKey?: string) {
       )
       const refineMode: GenerationWorkflow | '' =
         refineArtifact === 'quiz' ? 'assessment' : (refineArtifact as GenerationWorkflow)
-      const canRefineOutline =
-        Boolean(refineOf?.run_id) &&
+      const refineModeKnown =
         ['lesson_plan', 'lab', 'assessment', 'course_blueprint'].includes(refineMode)
+      // A full preview card refines the generated artifact (refine_full); an
+      // outline card refines the outline. Both must stay gated workflow invokes:
+      // a plain follow-up would be refused by the agent's generation gate, and
+      // even before that gate existed it produced text-only revisions while the
+      // card and its Export silently kept the old content.
+      const isFullPreviewCard = refineMeta.artifact_preview_card === true
+      const approvedOutlineRunId = String(refineMeta.approved_outline_run_id || '')
+      const canRefineFull =
+        Boolean(refineOf?.run_id) && refineModeKnown && isFullPreviewCard &&
+        Boolean(approvedOutlineRunId)
+      const canRefineOutline =
+        Boolean(refineOf?.run_id) && refineModeKnown && !isFullPreviewCard
 
-      setActivePhase(canRefineOutline ? 'outline' : 'refine')
+      const nextPhase = canRefineFull ? 'full' : canRefineOutline ? 'outline' : 'refine'
+      setActivePhase(nextPhase)
       if (persistIdRef.current) {
-        writeGenerationRun(persistIdRef.current, {
-          activePhase: canRefineOutline ? 'outline' : 'refine',
-        })
+        writeGenerationRun(persistIdRef.current, { activePhase: nextPhase })
       }
       await startRun(chatId, content, async () => {
+        if (canRefineFull && refineOf) {
+          const week =
+            typeof refineMeta.pending_artifact_week === 'number'
+              ? refineMeta.pending_artifact_week
+              : typeof refineMeta.week === 'number'
+                ? refineMeta.week
+                : undefined
+          const data = await invokeAgent({
+            batch_id: batch.id,
+            chat_id: chatId,
+            workflow_type: `${refineMode}.generate`,
+            workflow_stage: 'full',
+            approval_action: 'refine_full',
+            approved_outline_run_id: approvedOutlineRunId,
+            week,
+            pending_artifact: true,
+            save_draft: false,
+            message: content,
+            connectors: { web_search: webSearch },
+          })
+          return data as InvokeResult
+        }
         if (canRefineOutline && refineOf) {
           const data = await invokeAgent({
             batch_id: batch.id,

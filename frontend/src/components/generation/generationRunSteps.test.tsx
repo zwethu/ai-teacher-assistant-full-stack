@@ -264,7 +264,14 @@ describe('the standalone generation card while working', () => {
           messages: [{
             message_id: 'm1', chat_id: 'c1', role: 'assistant',
             content: 'Draft outline', created_at: null, status: 'done', run_id: 'run-1',
-            metadata: { artifact_type: 'lesson_plan', artifact_preview_card: true },
+            // approved_outline_run_id is what makes a finished draft refinable —
+            // real preview cards always carry it (single-shot game cards don't,
+            // and those deliberately get no Refine affordance).
+            metadata: {
+              artifact_type: 'lesson_plan',
+              artifact_preview_card: true,
+              approved_outline_run_id: 'run-0',
+            },
           }],
           runStates: { 'run-1': { status: 'done', events: [], steps: {} } },
         } as unknown as GenerationRunState}

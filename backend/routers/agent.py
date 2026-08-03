@@ -101,10 +101,10 @@ def _validate_invoke_request(body: AgentInvokeRequest) -> None:
     approval_action = body.approval_action or ""
     if workflow_stage not in {"", "outline", "full"}:
         raise HTTPException(status_code=400, detail="workflow_stage must be '', 'outline', or 'full'")
-    if approval_action not in {"", "approve_outline", "refine_outline"}:
+    if approval_action not in {"", "approve_outline", "refine_outline", "refine_full"}:
         raise HTTPException(
             status_code=400,
-            detail="approval_action must be '', 'approve_outline', or 'refine_outline'",
+            detail="approval_action must be '', 'approve_outline', 'refine_outline', or 'refine_full'",
         )
     if approval_action == "refine_outline":
         if workflow_stage != "outline" or not body.approved_outline_run_id:
@@ -112,10 +112,26 @@ def _validate_invoke_request(body: AgentInvokeRequest) -> None:
                 status_code=400,
                 detail="refine_outline requires workflow_stage='outline' and approved_outline_run_id",
             )
+    if approval_action == "refine_full":
+        if (
+            workflow_stage != "full"
+            or not body.pending_artifact
+            or not body.approved_outline_run_id
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "refine_full requires workflow_stage='full', pending_artifact=true, "
+                    "and approved_outline_run_id"
+                ),
+            )
     if workflow_stage == "outline" and body.save_draft:
         raise HTTPException(status_code=400, detail="outline stage cannot save a draft")
     if workflow_stage == "full" and body.pending_artifact:
-        if approval_action != "approve_outline" or not body.approved_outline_run_id:
+        if (
+            approval_action not in {"approve_outline", "refine_full"}
+            or not body.approved_outline_run_id
+        ):
             raise HTTPException(
                 status_code=400,
                 detail="full pending-artifact generation requires an approved outline run",
@@ -232,7 +248,34 @@ async def invoke_agent(
                     "Failed to persist superseded outline metadata run_id=%s",
                     superseded_run_id,
                 )
-    if (body.workflow_stage or "") == "full" and body.pending_artifact:
+    if approval_action == "refine_full":
+        # Revision of the already-generated artifact: fetch (don't claim) the
+        # outline this chat approved earlier — it was consumed by the approve
+        # turn, so its status is "approved" and it is no longer the chat's
+        # latest. Nothing is superseded here; the gateway re-seeds it as the
+        # APPROVED OUTLINE and the pending-artifact branch stages the revised
+        # artifact as a new card.
+        requested_family = "quiz" if (body.workflow_type or "").startswith(("assessment", "quiz")) else (body.workflow_type or "").split(".")[0]
+        approved_outline = get_approvable_outline_run(
+            batch_id=body.batch_id,
+            chat_id=chat_id,
+            run_id=body.approved_outline_run_id,
+            lecturer_id=lecturer_id,
+        )
+        if not approved_outline or not isinstance(
+            approved_outline.get("outline_payload"), dict
+        ):
+            raise HTTPException(status_code=404, detail="Approved outline to revise not found")
+        if str(approved_outline.get("outline_artifact_type") or "") != requested_family:
+            raise HTTPException(
+                status_code=409, detail="Outline artifact type does not match workflow"
+            )
+        if str(approved_outline.get("outline_status") or "") != "approved":
+            raise HTTPException(
+                status_code=409,
+                detail="No generated artifact to revise — approve the outline first",
+            )
+    if (body.workflow_stage or "") == "full" and body.pending_artifact and approval_action == "approve_outline":
         requested_family = "quiz" if (body.workflow_type or "").startswith(("assessment", "quiz")) else (body.workflow_type or "").split(".")[0]
         try:
             approved_outline = claim_approvable_outline_run(

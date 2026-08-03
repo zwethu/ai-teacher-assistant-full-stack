@@ -19,6 +19,7 @@ import { formatDateTime } from '../../../utils/formatDate'
 import { Spinner, Button } from '../../../design-system'
 import { CHECKBOX_CLASS, FIELD_CLASS, TEXTAREA_CLASS } from '../../../components/ui/fieldStyles'
 import { BTN_SECONDARY } from '../constants'
+import { undoable, usePendingUndo } from '../../../components/ui/undoStore'
 
 export function PlanningTab({ batchId }: { batchId: string }) {
   const [current, setCurrent] = useState<CourseBlueprint | null>(null)
@@ -31,6 +32,8 @@ export function PlanningTab({ batchId }: { batchId: string }) {
   const [batch, setBatch] = useState<Batch | null>(null)
   const [generating, setGenerating] = useState(false)
   const run = useGenerationRun(batch, 'course_blueprint')
+  const pendingUndo = usePendingUndo()
+  const visibleHistory = history.filter((item) => !pendingUndo.has(item.blueprint_id))
 
   // Reopen the inline generation panel when a run is active/loaded — e.g. after
   // navigating away and back, the run keeps going in the background.
@@ -75,28 +78,37 @@ export function PlanningTab({ batchId }: { batchId: string }) {
     finally { setSaving(false) }
   }
 
+  /* Archiving and reverting no longer ask. Both were confirming something that
+     is already undoable by construction: the archived version stays in the
+     history below, and reverting explicitly says it keeps history and creates
+     a new version rather than overwriting one. A dialog in front of a
+     reversible action spends the lecturer's attention and buys nothing —
+     worse, it trains them to dismiss the two dialogs that do matter. */
   async function archive() {
-    if (!current || !window.confirm(`Archive Course Blueprint v${current.version}?`)) return
+    if (!current) return
     setSaving(true); setError('')
     try { await archiveCurrentCourseBlueprint(batchId); await refresh() }
     catch { setError('Could not archive the Course Blueprint.') }
     finally { setSaving(false) }
   }
 
-  async function revertVersion(blueprintId: string, version: number) {
-    if (!window.confirm(`Make v${version} the current Course Plan? A new current version is created from it; history is kept.`)) return
+  async function revertVersion(blueprintId: string) {
     setSaving(true); setError('')
     try { await revertToCourseBlueprintVersion(batchId, blueprintId); await refresh() }
     catch { setError('Could not revert to this version.') }
     finally { setSaving(false) }
   }
 
-  async function deleteVersion(blueprintId: string, version: number) {
-    if (!window.confirm(`Permanently delete Course Plan v${version}? This cannot be undone.`)) return
-    setSaving(true); setError('')
-    try { await deleteCourseBlueprintVersion(batchId, blueprintId); await refresh() }
-    catch { setError('Could not delete this version.') }
-    finally { setSaving(false) }
+  // This one is a real deletion, so it gets the undo window instead.
+  function deleteVersion(blueprintId: string, version: number) {
+    undoable({
+      id: blueprintId,
+      message: `Deleted Course Plan v${version}.`,
+      commit: async () => {
+        try { await deleteCourseBlueprintVersion(batchId, blueprintId); await refresh() }
+        catch { setError('Could not delete this version.') }
+      },
+    })
   }
 
   if (loading) return <div className="flex justify-center py-16"><Spinner size={24} /></div>
@@ -109,7 +121,7 @@ export function PlanningTab({ batchId }: { batchId: string }) {
         <div className="mb-5 flex flex-wrap items-start justify-between gap-3"><div><div className="text-xs font-semibold uppercase tracking-wide text-violet-700">Current · Version {current.version}</div><h2 className="mt-1 text-xl font-bold text-slate-900">{current.title}</h2><p className="text-xs text-slate-400">Updated {formatDateTime(current.updated_at || current.created_at || '')}</p></div><div className="flex flex-wrap gap-2"><Button type="button" onClick={() => setGenerating(true)} disabled={!batch} leadingIcon={<Sparkles className="h-4 w-4" />}>Generate</Button><Button type="button" variant="secondary" onClick={beginEdit} leadingIcon={<Pencil className="h-4 w-4" />}>Edit as new version</Button><Button type="button" variant="danger" onClick={archive} disabled={saving} leadingIcon={<Archive className="h-4 w-4" />}>Archive</Button></div></div>
         <BlueprintView blueprint={current}/>
       </section>)}
-    <section><div className="mb-3 flex items-center justify-between"><h2 className="font-semibold text-slate-800">Version history</h2><button onClick={() => void refresh()} className="rounded p-1 text-slate-500"><RefreshCw className="h-4 w-4"/></button></div><div className="space-y-2">{history.length === 0 ? <p className="text-sm text-slate-500">No saved versions yet.</p> : history.map((item)=><details key={item.blueprint_id} className="rounded-xl border border-slate-200 bg-white px-4 py-3"><summary className="cursor-pointer text-sm font-medium text-slate-800">v{item.version} · {item.title} <span className="ml-2 text-xs font-normal text-slate-400">{item.status}</span></summary><div className="mt-4"><BlueprintView blueprint={item}/></div><div className="mt-3 flex flex-wrap gap-2 border-t border-slate-100 pt-3">{item.blueprint_id !== current?.blueprint_id && <button onClick={()=>void revertVersion(item.blueprint_id, item.version)} disabled={saving} className="inline-flex items-center gap-1.5 rounded-md border border-violet-200 px-3 py-1.5 text-xs font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-60"><RotateCcw className="h-3.5 w-3.5"/>Make current</button>}<button onClick={()=>void deleteVersion(item.blueprint_id, item.version)} disabled={saving} className="inline-flex items-center gap-1.5 rounded-md border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-60"><Trash2 className="h-3.5 w-3.5"/>Delete</button></div></details>)}</div></section>
+    <section><div className="mb-3 flex items-center justify-between"><h2 className="font-semibold text-slate-800">Version history</h2><button onClick={() => void refresh()} className="rounded p-1 text-slate-500"><RefreshCw className="h-4 w-4"/></button></div><div className="space-y-2">{visibleHistory.length === 0 ? <p className="text-sm text-slate-500">No saved versions yet.</p> : visibleHistory.map((item)=><details key={item.blueprint_id} className="rounded-xl border border-slate-200 bg-white px-4 py-3"><summary className="cursor-pointer text-sm font-medium text-slate-800">v{item.version} · {item.title} <span className="ml-2 text-xs font-normal text-slate-400">{item.status}</span></summary><div className="mt-4"><BlueprintView blueprint={item}/></div><div className="mt-3 flex flex-wrap gap-2 border-t border-slate-100 pt-3">{item.blueprint_id !== current?.blueprint_id && <button onClick={()=>void revertVersion(item.blueprint_id)} disabled={saving} className="inline-flex items-center gap-1.5 rounded-md border border-violet-200 px-3 py-1.5 text-xs font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-60"><RotateCcw className="h-3.5 w-3.5"/>Make current</button>}<button onClick={()=>deleteVersion(item.blueprint_id, item.version)} disabled={saving} className="inline-flex items-center gap-1.5 rounded-md border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-60"><Trash2 className="h-3.5 w-3.5"/>Delete</button></div></details>)}</div></section>
     {editing && form && <EditBlueprintModal form={form} setForm={setForm} saving={saving} onClose={()=>setEditing(false)} onSave={()=>void saveEdit()}/>}
   </div>
 }

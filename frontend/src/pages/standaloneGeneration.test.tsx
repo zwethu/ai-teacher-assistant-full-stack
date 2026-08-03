@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import LessonPlans from './LessonPlans'
+import { ConfirmHost } from '../components/ui/ConfirmDialog'
+import { resetConfirmStore } from '../components/ui/confirmStore'
 
 const listArtifacts = vi.fn()
 const reset = vi.fn()
@@ -76,7 +78,12 @@ const idle = () => ({
   cancelRun,
 })
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  // An unanswered dialog would otherwise still be in the store when the next
+  // test mounts a host.
+  resetConfirmStore()
+})
 beforeEach(() => {
   listArtifacts.mockReset().mockResolvedValue([
     {
@@ -94,12 +101,25 @@ beforeEach(() => {
   runState = idle()
 })
 
+/* The host comes along, because the discard confirmation is no longer
+   `window.confirm` — it is a real dialog rendered at the app root, and a test
+   that stubbed the browser's would now be asserting against something the page
+   never calls. */
 const renderPage = () =>
   render(
     <MemoryRouter>
       <LessonPlans />
+      <ConfirmHost />
     </MemoryRouter>,
   )
+
+/** Answer the dialog the page just opened. */
+const answerConfirm = async (user: ReturnType<typeof userEvent.setup>, accept: boolean) => {
+  const dialog = await screen.findByRole('alertdialog')
+  await user.click(
+    within(dialog).getByRole('button', { name: accept ? 'Discard' : 'Cancel' }),
+  )
+}
 
 describe('a standalone generation page', () => {
   /**
@@ -201,28 +221,32 @@ describe('a standalone generation page', () => {
     ],
   ])('offers a way out while %s', async (_label, over) => {
     const user = userEvent.setup()
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
     runState = { ...idle(), ...over }
     renderPage()
 
     await user.click(screen.getByRole('button', { name: /Discard/ }))
+    await answerConfirm(user, true)
 
     // Cancel first: `reset` alone would leave the backend generating into a
     // run nobody is listening to.
-    expect(cancelRun).toHaveBeenCalled()
+    await waitFor(() => expect(cancelRun).toHaveBeenCalled())
     expect(reset).toHaveBeenCalled()
-    confirm.mockRestore()
   })
 
   it('asks before throwing the draft away', async () => {
     const user = userEvent.setup()
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     runState = { ...idle(), currentRunId: 'r1', sending: true }
     renderPage()
 
     await user.click(screen.getByRole('button', { name: /Discard/ }))
+    /* Answering the dialog, rather than just leaving it open: with the promise
+       unresolved this passes whether or not cancelling actually stops the
+       discard, which is the whole thing under test. */
+    await answerConfirm(user, false)
+
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
     expect(reset).not.toHaveBeenCalled()
-    confirm.mockRestore()
+    expect(cancelRun).not.toHaveBeenCalled()
   })
 
   /**

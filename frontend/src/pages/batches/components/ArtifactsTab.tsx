@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Copy, ExternalLink, RefreshCw, Trash2 } from 'lucide-react'
 import type { Artifact, ArtifactSummary } from '../../../services/artifactService'
 import { gamePlayUrl, type GameSession } from '../../../services/gameService'
+import { GameRow } from '../../../components/games/GameRow'
 import { SelectField } from '../../../components/ui/SelectField'
 import { CHECKBOX_CLASS } from '../../../components/ui/fieldStyles'
 import { artifactIcon } from '../../../utils/artifactIcons'
@@ -21,6 +22,10 @@ type Props = {
   onRefresh: () => void
   onDelete: (artifact: Artifact) => void
   onDeleteGame: (game: GameSession) => void
+  batchId: string
+  /** A deadline change or a close/reopen, applied in place. */
+  onGameUpdated: (game: GameSession) => void
+  onError: (message: string) => void
 }
 
 const TYPE_OPTIONS = [
@@ -64,6 +69,8 @@ type ContentRow = {
   studentUrl?: string
   /** The row's own extra fact — a game's size and deadline. */
   note?: string
+  /** Present only on a game — the object `GameRow` needs. */
+  game?: GameSession
   /** Absent for a game, which has no other versions to show. */
   versionsKey?: string
   onDelete: () => void
@@ -102,12 +109,16 @@ export function ArtifactsTab({
   onRefresh,
   onDelete,
   onDeleteGame,
+  batchId,
+  onGameUpdated,
+  onError,
 }: Props) {
   const [typeFilter, setTypeFilter] = useState('')
   const [currentOnly, setCurrentOnly] = useState(false)
   const [weekFilter, setWeekFilter] = useState('')
   const [search, setSearch] = useState('')
   const [versionsKey, setVersionsKey] = useState<string | null>(null)
+  const [expandedGameId, setExpandedGameId] = useState<string | null>(null)
 
   const weeks = useMemo(
     () =>
@@ -154,6 +165,9 @@ export function ArtifactsTab({
       url: gamePlayUrl(game.gameId),
       note: gameNote(game),
       onDelete: () => onDeleteGame(game),
+      /* The game itself rides along: a game row is not a flattened artifact,
+         it is the same rich row the standalone Games page draws. */
+      game,
     }))
 
     return [...fromArtifacts, ...fromGames].sort((a, b) => {
@@ -271,6 +285,25 @@ export function ArtifactsTab({
         ) : (
           <div className="divide-y divide-slate-100">
             {filtered.map((row) => {
+              if (row.game) {
+                return (
+                  <div key={row.key}>
+                    <GameRow
+                      batchId={batchId}
+                      game={row.game}
+                      expanded={expandedGameId === row.game.gameId}
+                      onToggleExpanded={() =>
+                        setExpandedGameId(
+                          expandedGameId === row.game!.gameId ? null : row.game!.gameId,
+                        )
+                      }
+                      onUpdated={onGameUpdated}
+                      onDelete={row.onDelete}
+                      onError={onError}
+                    />
+                  </div>
+                )
+              }
               const Icon = artifactIcon(row.type)
               return (
                 <div key={row.key} className="grid grid-cols-1 xl:grid-cols-[1fr_auto] gap-3 p-4">

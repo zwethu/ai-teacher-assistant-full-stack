@@ -29,6 +29,9 @@ import { addDays } from '../components/ui/dateValue'
 import { formatDate } from '../utils/formatDate'
 import { Spinner, Button } from '../design-system'
 import { FIELD_CLASS } from '../components/ui/fieldStyles'
+import { undoable, usePendingUndo } from '../components/ui/undoStore'
+import Toast from '../components/ui/Toast'
+import type { ToastMessage } from '../types'
 
 const NOTES_PREVIEW_LEN = 140
 
@@ -86,6 +89,8 @@ const INITIAL_FORM = {
 export default function Wellness() {
   const { user } = useAuth()
   const [entries, setEntries] = useState<WellnessEntry[]>([])
+  const [toast, setToast] = useState<ToastMessage | null>(null)
+  const pendingUndo = usePendingUndo()
   const [listLoading, setListLoading] = useState(true)
   const [addOpen, setAddOpen] = useState(false)
   const [form, setForm] = useState(INITIAL_FORM)
@@ -123,6 +128,10 @@ export default function Wellness() {
     return unsubscribe
   }, [user?.uid])
 
+  /* Stats stay on the full list: a mood summary that ticks down for ten
+     seconds and then back up would be reporting the undo window, not the
+     journal. Only the rows themselves hide. */
+  const visibleEntries = entries.filter((entry) => !entry.id || !pendingUndo.has(entry.id))
   const moodCounts = useMemo(() => buildMoodCounts(entries), [entries])
   const totalEntries = entries.length
   const moodStats = useMemo(
@@ -185,27 +194,30 @@ export default function Wellness() {
     }
   }
 
-  async function handleDelete(item: WellnessEntry) {
-    if (!item.id) return
-    const meta = getMoodOption(item.mood)
-    if (
-      !window.confirm(
-        `Delete this ${meta.label.toLowerCase()} journal entry from ${formatEntryDate(item)}?`,
-      )
-    ) {
-      return
-    }
-
-    try {
-      await deleteDoc(doc(db, 'wellness', item.id))
-    } catch (err) {
-      console.error(err)
-      window.alert('Failed to delete entry.')
-    }
+  function handleDelete(item: WellnessEntry) {
+    const id = item.id
+    if (!id) return
+    undoable({
+      id,
+      message: `Deleted the entry from ${formatEntryDate(item)}.`,
+      commit: async () => {
+        try {
+          await deleteDoc(doc(db, 'wellness', id))
+        } catch (err) {
+          console.error(err)
+          /* Was `window.alert` — the one blocking alert left in the app, and
+             the only failure a lecturer had to click out of. This page had no
+             toast of its own, so it gets the same one every other page uses. */
+          setToast({ type: 'error', message: 'Failed to delete entry.' })
+        }
+      },
+    })
   }
 
   return (
     <div>
+      <Toast toast={toast} onDismiss={() => setToast(null)} />
+
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-bold text-slate-800 tracking-tight">
@@ -273,7 +285,7 @@ export default function Wellness() {
             <Spinner size={32} />
             <p className="text-sm text-slate-500">Loading journal entries…</p>
           </div>
-        ) : entries.length === 0 ? (
+        ) : visibleEntries.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center px-6">
             <div className="h-16 w-16 bg-slate-50 rounded-full flex items-center justify-center mb-4">
               <BookOpen className="w-8 h-8 text-slate-300" />
@@ -291,7 +303,7 @@ export default function Wellness() {
           </div>
         ) : (
           <div className="p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-            {entries.map((item) => {
+            {visibleEntries.map((item) => {
               const meta = getMoodOption(item.mood)
               const style = getMoodStyle(item.mood)
               return (

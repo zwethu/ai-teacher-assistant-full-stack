@@ -266,15 +266,42 @@ describe('DateField', () => {
     expect(onChange).not.toHaveBeenCalled()
   })
 
-  it('applies a preset', async () => {
-    const user = userEvent.setup()
-    const onChange = vi.fn()
-    render(<Harness onChange={onChange} />)
-    await user.click(field())
-    await user.click(screen.getByRole('button', { name: 'Tomorrow' }))
+  /**
+   * "Tomorrow" names one day — the one after today — and must keep naming it
+   * however many times it is pressed, and whatever is already in the field.
+   * It used to resolve from the selection, so it stepped: pressing it on a
+   * field holding next March meant the day after *that*, and pressing it twice
+   * walked two days out.
+   */
+  it('resolves a preset against the clock, not the value in the field', async () => {
+    /* Only Date — faking timers wholesale would stall userEvent's own. */
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(new Date(2026, 7, 4, 15, 30))
+      const user = userEvent.setup()
+      const onChange = vi.fn()
+      // A selection months away from "now", so a step-relative preset can't
+      // coincidentally land on the right answer.
+      render(<Harness initial="2027-03-20" onChange={onChange} />)
 
-    // Relative to the value in the field, not to the real clock.
-    expect(onChange).toHaveBeenCalledWith('2026-08-05')
+      // A date-only field closes on commit, so each press needs its own open.
+      const press = async (label: string) => {
+        await user.click(field())
+        await user.click(screen.getByRole('button', { name: label }))
+      }
+
+      await press('Tomorrow')
+      expect(onChange).toHaveBeenLastCalledWith('2026-08-05')
+
+      // And again — the second press means the same day, not the day after.
+      await press('Tomorrow')
+      expect(onChange).toHaveBeenLastCalledWith('2026-08-05')
+
+      await press('Next week')
+      expect(onChange).toHaveBeenLastCalledWith('2026-08-11')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('does not open on focus alone', () => {

@@ -52,6 +52,7 @@ import { formatDateTime, timeAgo, toDate } from '../utils/formatDate'
 import { Spinner, Button } from '../design-system'
 import { FIELD_CLASS, TEXTAREA_CLASS } from '../components/ui/fieldStyles'
 import { DateField } from '../components/ui/DateField'
+import { undoable, usePendingUndo } from '../components/ui/undoStore'
 
 const NOTES_PREVIEW_LEN = 120
 
@@ -141,6 +142,7 @@ export default function Email() {
   const [searchParams, setSearchParams] = useSearchParams()
 
   const [emails, setEmails] = useState<EmailRecord[]>([])
+  const pendingUndo = usePendingUndo()
   const [listLoading, setListLoading] = useState(true)
   const [listError, setListError] = useState('')
   const [tab, setTab] = useState<StatusTab>('all')
@@ -642,17 +644,26 @@ export default function Email() {
     }
   }
 
-  async function handleCancelScheduled(item: EmailRecord) {
-    if (!item.id) return
-    if (!window.confirm(`Cancel scheduled email to ${item.to}?`)) return
-    try {
-      await deleteDoc(doc(db, 'emails', item.id))
-      setSelectedId((id) => (id === item.id ? null : id))
-      showToast('success', 'Scheduled email cancelled.')
-    } catch (err) {
-      console.error(err)
-      showToast('error', 'Failed to cancel scheduled email.')
-    }
+  /* Cancelling a send is itself the undo of scheduling one, so asking "are you
+     sure you want to cancel?" is a confirmation of a cancellation. It gets the
+     window instead — and the ten seconds are genuinely useful here, because
+     the row is the only record that the email was ever queued. */
+  function handleCancelScheduled(item: EmailRecord) {
+    const id = item.id
+    if (!id) return
+    setSelectedId((current) => (current === id ? null : current))
+    undoable({
+      id,
+      message: `Cancelled the email to ${item.to}.`,
+      commit: async () => {
+        try {
+          await deleteDoc(doc(db, 'emails', id))
+        } catch (err) {
+          console.error(err)
+          showToast('error', 'Failed to cancel scheduled email.')
+        }
+      },
+    })
   }
 
   function openDetail(item: EmailRecord) {
@@ -757,8 +768,11 @@ export default function Email() {
   }, [emails])
 
   const visibleEmails = useMemo(
-    () => (tab === 'all' ? emails : emails.filter((item) => item.status === tab)),
-    [emails, tab],
+    () =>
+      (tab === 'all' ? emails : emails.filter((item) => item.status === tab)).filter(
+        (item) => !item.id || !pendingUndo.has(item.id),
+      ),
+    [emails, tab, pendingUndo],
   )
 
   // Derived from the live list, so the open detail reflects snapshot updates.

@@ -1,4 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { ConfirmHost } from './components/ui/ConfirmDialog'
+import { UndoHost } from './components/ui/UndoToast'
 import AppLayout from './components/layout/AppLayout'
 import ProtectedRoute from './components/layout/ProtectedRoute'
 import AuthCallback from './pages/AuthCallback'
@@ -51,6 +53,12 @@ export default function App() {
         <Route path="/" element={<Navigate to="/chat" replace />} />
         <Route path="*" element={<Navigate to="/chat" replace />} />
       </Routes>
+
+      {/* Outside `<Routes>` so a pending undo survives navigation — the whole
+          point of holding the delete is that leaving the page must not quietly
+          cancel it, nor lose the way back. */}
+      <ConfirmHost />
+      <UndoHost />
     </BrowserRouter>
   )
 }

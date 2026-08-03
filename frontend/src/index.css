@@ -1032,6 +1032,109 @@
     transition-timing-function: cubic-bezier(0.4, 0, 1, 1);
   }
 
+  /* The undo toast, sharing the toast's arrival exactly — it occupies the same
+     corner and is the same kind of object, so anything else would read as a
+     second notification system. */
+  .mila-undo {
+    opacity: 1;
+    transform: none;
+    transition:
+      opacity 220ms cubic-bezier(0.16, 1, 0.3, 1),
+      transform 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @starting-style {
+    .mila-undo {
+      opacity: 0;
+      transform: translate3d(0, 12px, 0) scale(0.96);
+    }
+  }
+
+  .mila-undo[data-leaving='true'] {
+    pointer-events: none;
+    opacity: 0;
+    transform: translate3d(0, 8px, 0) scale(0.98);
+    transition-duration: 160ms;
+    transition-timing-function: cubic-bezier(0.4, 0, 1, 1);
+  }
+
+  /* The countdown ring drains anticlockwise from twelve o'clock. Linear on
+     purpose: this one is a clock, and easing it would misreport how much time
+     is actually left. `pathLength: 1` renormalises the circle so the dash
+     runs 0 → 1 whatever the radius. */
+  .mila-undo__ring {
+    transform: rotate(-90deg);
+  }
+
+  .mila-undo__drain {
+    stroke-dasharray: 1;
+    animation: mila-undo-drain linear forwards;
+  }
+
+  @keyframes mila-undo-drain {
+    from {
+      stroke-dashoffset: 0;
+    }
+    to {
+      stroke-dashoffset: 1;
+    }
+  }
+
+  /* A confirmation dialog.
+     ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+
+     The backdrop dims and blurs rather than dimming alone: this is the one
+     surface in the app that has to stop the page being usable, and a flat
+     scrim over glass panels still reads as something you could click past.
+
+     Violet-tinted, not neutral black — the same ink the app's shadows are
+     mixed from, so the page recedes into its own palette. */
+  .mila-dialog-backdrop {
+    opacity: 1;
+    background: rgba(35, 25, 60, 0.32);
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
+    transition: opacity 180ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @starting-style {
+    .mila-dialog-backdrop {
+      opacity: 0;
+    }
+  }
+
+  .mila-dialog-backdrop[data-leaving='true'] {
+    opacity: 0;
+    pointer-events: none;
+    transition-duration: 140ms;
+    transition-timing-function: cubic-bezier(0.4, 0, 1, 1);
+  }
+
+  /* Rising very slightly as it arrives, like the menus. A dialog that scales
+     up from nothing draws attention to the animation; one that settles the
+     last few pixels draws attention to the question. */
+  .mila-dialog {
+    opacity: 1;
+    transform: none;
+    transition:
+      opacity 200ms cubic-bezier(0.16, 1, 0.3, 1),
+      transform 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @starting-style {
+    .mila-dialog {
+      opacity: 0;
+      transform: translate3d(0, 10px, 0) scale(0.97);
+    }
+  }
+
+  .mila-dialog[data-leaving='true'] {
+    opacity: 0;
+    transform: translate3d(0, 4px, 0) scale(0.99);
+    transition-duration: 140ms;
+    transition-timing-function: cubic-bezier(0.4, 0, 1, 1);
+  }
+
   /* A form section opening and closing.
      ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
 
@@ -1262,11 +1365,20 @@
     .mila-tab-indicator,
     .mila-tabpanel,
     .mila-toast,
+    .mila-undo,
+    .mila-dialog,
+    .mila-dialog-backdrop,
     /* Safe to switch off outright: `data-open` carries the state, so a closed
        section stays closed and an open one stays open — instantly. */
     .mila-collapse {
       transition: none;
     }
+
+    /* The countdown ring deliberately keeps animating. It is not decoration:
+       it is the only thing telling the lecturer how much of their second
+       chance is left, and freezing it would leave a full ring reporting time
+       that is quietly running out. Reduced motion asks for less movement, not
+       for a clock with no hands. */
 
     /* An exit with no animation would be a tile sitting there for 200ms
        after it was removed, which reads as lag rather than as calm. Nothing
@@ -1276,6 +1388,9 @@
     .mila-step-row[data-leaving='true'],
     .mila-menu[data-leaving='true'],
     .mila-toast[data-leaving='true'],
+    .mila-undo[data-leaving='true'],
+    .mila-dialog[data-leaving='true'],
+    .mila-dialog-backdrop[data-leaving='true'],
     /* The crossfade's outgoing half has nothing to say once it cannot fade:
        leaving it stacked on the incoming row would render two steps at once. */
     .mila-lane__out {

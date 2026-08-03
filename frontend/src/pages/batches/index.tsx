@@ -38,6 +38,7 @@ export default function Batches() {
         handleRefreshFiles={state.handleRefreshFiles}
         handleDeleteArtifact={state.handleDeleteArtifact}
         handleDeleteGame={state.handleDeleteGame}
+        handleGameUpdated={state.handleGameUpdated}
         refreshArtifacts={state.refreshArtifacts}
         isEditOpen={state.isEditOpen}
         editDetails={state.editDetails}

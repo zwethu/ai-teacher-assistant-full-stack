@@ -14,6 +14,7 @@ import {
   Users,
   X,
 } from 'lucide-react'
+import { confirm } from '../ui/confirmStore'
 import { useAuth } from '../../hooks/useAuth'
 import { ARTIFACT_ICONS } from '../../utils/artifactIcons'
 import { getStress, type StressState } from '../../services/wellnessService'
@@ -331,7 +332,16 @@ export default function Sidebar({
   const uid = user?.uid
 
   async function handleSignOut() {
-    if (!window.confirm('Are you sure you want to logout?')) return
+    /* One of the few things left that still asks first. It is not destructive,
+       so there is nothing to undo — but there is unsaved work behind it (a
+       half-written composer, an open draft), and signing back in does not
+       bring that back. */
+    const ok = await confirm({
+      title: 'Sign out of MILA?',
+      body: 'Anything you have typed but not sent will be lost.',
+      confirmLabel: 'Sign out',
+    })
+    if (!ok) return
     await signOut()
   }
 

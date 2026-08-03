@@ -30,6 +30,8 @@ import {
 import { deleteGame, listGames, type GameSession } from '../../../services/gameService'
 import type { BatchDetails, BatchWithCount, CreateStep, DetailTab, StudentRow } from '../types'
 import { parseCsv } from '../utils/parseCsv'
+import { confirm } from '../../../components/ui/confirmStore'
+import { undoable, usePendingUndo } from '../../../components/ui/undoStore'
 
 export function useBatchesPage() {
   const { user } = useAuth()
@@ -101,6 +103,7 @@ export function useBatchesPage() {
      a second call rather than out of `listArtifacts`. The Generated content tab
      normalises the two into one row shape. */
   const [games, setGames] = useState<GameSession[]>([])
+  const pendingUndo = usePendingUndo()
   const [artifactSummary, setArtifactSummary] = useState<ArtifactSummary | null>(null)
   const [artifactsLoading, setArtifactsLoading] = useState(false)
 
@@ -405,14 +408,19 @@ export function useBatchesPage() {
     }
   }
 
+  /* One of only two places in the app that makes you type the name. A batch is
+     the top-level workspace — deleting it takes every student, file, artifact
+     and chat under it — and ten seconds of undo is not a proportionate safety
+     net for something that large. */
   async function handleDeleteBatch(batch: Batch) {
-    if (
-      !window.confirm(
-        `Delete "${batch.batch_name}" and all its students? This cannot be undone.`,
-      )
-    ) {
-      return
-    }
+    const ok = await confirm({
+      title: `Delete "${batch.batch_name}"?`,
+      body: 'This deletes the batch and every student in it. It cannot be undone.',
+      confirmPhrase: batch.batch_name,
+      confirmLabel: 'Delete batch',
+      tone: 'danger',
+    })
+    if (!ok) return
 
     try {
       await deleteBatch(batch.id)
@@ -447,18 +455,26 @@ export function useBatchesPage() {
     }
   }
 
-  async function handleRemoveStudent(student: BatchStudent) {
-    if (!selectedBatch) return
-    if (!window.confirm(`Remove "${student.name}" from this batch?`)) return
-
-    try {
-      await removeStudentFromBatch(selectedBatch.id, student.id)
-      await refreshStudents()
-      showToast('success', 'Student removed.')
-    } catch (err) {
-      console.error(err)
-      showToast('error', getErrorMessage(err, 'Failed to remove student.'))
-    }
+  function handleRemoveStudent(student: BatchStudent) {
+    const batch = selectedBatch
+    if (!batch) return
+    undoable({
+      id: student.id,
+      message: `Removed ${student.name}.`,
+      commit: async () => {
+        try {
+          await removeStudentFromBatch(batch.id, student.id)
+          await refreshStudents()
+        } catch (err) {
+          console.error(err)
+          showToast('error', getErrorMessage(err, 'Failed to remove student.'))
+          /* The row is already back — `usePendingUndo` stopped hiding it the
+             moment the window closed — so this only has to say what went
+             wrong, not restore anything. */
+          await refreshStudents()
+        }
+      },
+    })
   }
 
   async function handleCsvUpload(e: ChangeEvent<HTMLInputElement>) {
@@ -509,73 +525,98 @@ export function useBatchesPage() {
     }
   }
 
-  async function handleDeleteFile(batchFile: BatchFile) {
-    if (!selectedBatch) return
-    if (
-      !window.confirm(
-        `Delete "${batchFile.file_name}"? This will also remove it from the search index.`,
-      )
-    ) {
-      return
-    }
-
-    try {
-      await deleteBatchFile(selectedBatch.id, batchFile.file_id)
-      setFiles((prev) => prev.filter((f) => f.file_id !== batchFile.file_id))
-      showToast('success', 'File deleted.')
-    } catch (err) {
-      console.error(err)
-      showToast('error', getErrorMessage(err, 'Failed to delete file.'))
-    }
+  function handleDeleteFile(batchFile: BatchFile) {
+    const batch = selectedBatch
+    if (!batch) return
+    undoable({
+      id: batchFile.file_id,
+      message: `Deleted "${batchFile.file_name}".`,
+      commit: async () => {
+        try {
+          await deleteBatchFile(batch.id, batchFile.file_id)
+          setFiles((prev) => prev.filter((f) => f.file_id !== batchFile.file_id))
+        } catch (err) {
+          console.error(err)
+          showToast('error', getErrorMessage(err, 'Failed to delete file.'))
+        }
+      },
+    })
   }
 
+  /** A deadline change or a close/reopen, applied in place. */
+  function handleGameUpdated(updated: GameSession) {
+    setGames((prev) => prev.map((game) => (game.gameId === updated.gameId ? updated : game)))
+  }
+
+  /* Games sit beside the Drive-backed artifacts in Generated content and are
+     just as gone once deleted — a student holding the link loses it — so they
+     ask the same way, and get the same ten seconds after. */
   async function handleDeleteGame(game: GameSession) {
-    if (!selectedBatch) return
-    if (
-      !window.confirm(
-        `Delete "${game.title}"?\n\nStudents holding the link will no longer be able to play it. This cannot be undone.`,
-      )
-    ) {
-      return
-    }
-    try {
-      await deleteGame(selectedBatch.id, game.gameId)
-      await refreshArtifacts()
-      showToast('success', 'Deleted.')
-    } catch (err) {
-      console.error(err)
-      showToast('error', getErrorMessage(err, 'Could not delete that game.'))
-    }
+    const batch = selectedBatch
+    if (!batch) return
+    const ok = await confirm({
+      title: `Delete "${game.title}"?`,
+      body: 'Students holding the link will no longer be able to play it.',
+      confirmLabel: 'Delete',
+      tone: 'danger',
+    })
+    if (!ok) return
+    undoable({
+      id: game.gameId,
+      message: `Deleted "${game.title}".`,
+      commit: async () => {
+        try {
+          await deleteGame(batch.id, game.gameId)
+          await refreshArtifacts()
+        } catch (err) {
+          console.error(err)
+          showToast('error', getErrorMessage(err, 'Could not delete that game.'))
+        }
+      },
+    })
   }
 
   async function handleDeleteArtifact(artifact: Artifact) {
-    if (!selectedBatch) return
+    const batch = selectedBatch
+    if (!batch) return
     const metadata = artifact.metadata || {}
     const label =
       artifact.drive_file_name ||
       `v${String(artifact.version || 1).padStart(2, '0')} - ${
         artifact.week ? `Week ${String(artifact.week).padStart(2, '0')} - ` : ''
       }${artifact.title}`
-    const labNote = artifact.type === 'lab' ? '\n\nThis will delete both Lecturer Guide and Student Instructions.' : ''
-    if (
-      !window.confirm(
-        `Delete ${label}?\n\nThis removes it from MILA and permanently deletes the Google Drive file. This cannot be undone.${labNote}`,
-      )
-    ) {
-      return
-    }
+    const labNote =
+      artifact.type === 'lab' ? ' Both the Lecturer Guide and the Student Instructions go.' : ''
+    /* Ask, then hold. This one reaches outside MILA — the Drive file goes with
+       it — so it is worth a beat of thought first; but the ten seconds after
+       are worth more than making anyone type, because they catch the click on
+       the wrong row, which is the mistake that actually happens. */
+    const ok = await confirm({
+      title: `Delete ${label}?`,
+      body: `This removes it from MILA and deletes the Google Drive file.${labNote}`,
+      confirmLabel: 'Delete',
+      tone: 'danger',
+    })
+    if (!ok) return
 
-    try {
-      await deleteArtifact(selectedBatch.id, artifact.id, true)
-      await refreshArtifacts()
-      showToast(
-        'success',
-        metadata.student_doc_id ? 'Deleted, along with its linked Drive files.' : 'Deleted.',
-      )
-    } catch (err) {
-      console.error(err)
-      showToast('error', getErrorMessage(err, 'Could not delete it. Reconnect Google Workspace if Drive deletion failed.'))
-    }
+    undoable({
+      id: artifact.id,
+      message: metadata.student_doc_id
+        ? 'Deleted, along with its linked Drive files.'
+        : `Deleted ${label}.`,
+      commit: async () => {
+        try {
+          await deleteArtifact(batch.id, artifact.id, true)
+          await refreshArtifacts()
+        } catch (err) {
+          console.error(err)
+          showToast(
+            'error',
+            getErrorMessage(err, 'Could not delete it. Reconnect Google Workspace if Drive deletion failed.'),
+          )
+        }
+      },
+    })
   }
 
   return {
@@ -585,12 +626,16 @@ export function useBatchesPage() {
     setSelectedBatch,
     detailTab,
     setDetailTab,
-    students,
+    /* Filtered here, at the boundary, rather than in each tab — and
+       deliberately not where the lists are used internally: the stuck-file
+       sweep above still has to see a file that is mid-undo, because it has not
+       actually been deleted yet. */
+    students: students.filter((student) => !pendingUndo.has(student.id)),
     studentsLoading,
-    files,
+    files: files.filter((file) => !pendingUndo.has(file.file_id)),
     filesLoading,
-    artifacts,
-    games,
+    artifacts: artifacts.filter((artifact) => !pendingUndo.has(artifact.id)),
+    games: games.filter((game) => !pendingUndo.has(game.gameId)),
     artifactSummary,
     artifactsLoading,
     fileUploading,
@@ -643,6 +688,7 @@ export function useBatchesPage() {
     handleRefreshFiles,
     handleDeleteArtifact,
     handleDeleteGame,
+    handleGameUpdated,
     refreshArtifacts,
   }
 }

@@ -50,8 +50,15 @@ import {
 
 export type DatePreset = {
   label: string
-  /** Given the current value (or now), the date the preset means. */
-  resolve: (from: Date) => Date
+  /**
+   * The date the preset means, given the moment it was clicked.
+   *
+   * Deliberately *not* given the field's current value: "Tomorrow" names one
+   * day, the one after today, and it has to keep naming it however many times
+   * it is pressed. Resolving from the selection instead made the chips
+   * step-relative — a second press meant the day after that.
+   */
+  resolve: (now: Date) => Date
 }
 
 /**
@@ -60,9 +67,9 @@ export type DatePreset = {
  * a lecturer actually gives.
  */
 export const DEADLINE_PRESETS: DatePreset[] = [
-  { label: 'Today', resolve: (from) => from },
-  { label: 'Tomorrow', resolve: (from) => addDays(from, 1) },
-  { label: 'Next week', resolve: (from) => addDays(from, 7) },
+  { label: 'Today', resolve: (now) => now },
+  { label: 'Tomorrow', resolve: (now) => addDays(now, 1) },
+  { label: 'Next week', resolve: (now) => addDays(now, 7) },
 ]
 
 export type DateFieldProps = {
@@ -578,7 +585,7 @@ export function DateField({
               key={preset.label}
               type="button"
               onClick={() => {
-                const next = preset.resolve(selected ?? new Date())
+                const next = preset.resolve(new Date())
                 setCursor(next)
                 commitDay(next, true)
               }}

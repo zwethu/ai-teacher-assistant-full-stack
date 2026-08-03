@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type RefObject } from 'react'
 import {
   Check,
   ChevronDown,
-  MoreHorizontal,
   PanelRight,
   Pencil,
   Trash2,
@@ -13,6 +12,7 @@ import { BatchMenuList } from './BatchMenuList'
 import type { Chat } from '../../../entity/Chat'
 import { EXPORT_FORMAT_LABELS, exportChat, type ChatExportFormat } from '../../../services/chatService'
 import { Spinner } from '../../../design-system'
+import { Menu, MenuHeader, MenuItem, MenuSeparator } from '../../../components/ui/Menu'
 import { EXPORT_FORMATS, EXPORT_FORMAT_ICONS } from './exportFormatIcons'
 
 /** Relative for anything recent, absolute once it stops being useful. */
@@ -63,20 +63,19 @@ export function ChatPageHeader({
   onOpenPanel,
   panelOpen,
 }: Props) {
-  const [menuOpen, setMenuOpen] = useState(false)
   const [spaceMenuOpen, setSpaceMenuOpen] = useState(false)
   const [exporting, setExporting] = useState<ChatExportFormat | null>(null)
   const [exportError, setExportError] = useState('')
 
   const lastUpdated = formatLastUpdated(activeChat?.updated_at || activeChat?.created_at)
 
-  async function handleExport(format: ChatExportFormat) {
+  async function handleExport(format: ChatExportFormat, close: () => void) {
     if (!selectedBatch || !activeChat) return
     setExporting(format)
     setExportError('')
     try {
       await exportChat(selectedBatch.id, activeChat.chat_id, format)
-      setMenuOpen(false)
+      close()
     } catch {
       setExportError(`Could not export as ${EXPORT_FORMAT_LABELS[format]}.`)
     } finally {
@@ -84,23 +83,11 @@ export function ChatPageHeader({
     }
   }
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const menuRef = useRef<HTMLDivElement>(null)
   const spaceMenuRef = useRef<HTMLDivElement>(null)
   const isRenaming = !!activeChat && renamingId === activeChat.chat_id
 
+  // Switching chats abandons a half-started delete; the menu closes itself.
   useEffect(() => {
-    if (!menuOpen) return
-    function handleMouseDown(event: MouseEvent) {
-      if (event.target instanceof Element && menuRef.current?.contains(event.target)) return
-      setMenuOpen(false)
-      setConfirmDelete(false)
-    }
-    document.addEventListener('mousedown', handleMouseDown)
-    return () => document.removeEventListener('mousedown', handleMouseDown)
-  }, [menuOpen])
-
-  useEffect(() => {
-    setMenuOpen(false)
     setConfirmDelete(false)
   }, [activeChat?.chat_id])
 
@@ -190,7 +177,7 @@ export function ChatPageHeader({
             <PanelRight className="h-4 w-4" />
           </button>
 
-          <div className="relative" ref={menuRef} data-chat-header-menu>
+          <div className="relative" data-chat-header-menu>
             {confirmDelete ? (
               <div className="flex items-center gap-0.5">
                 <button
@@ -198,7 +185,6 @@ export function ChatPageHeader({
                   onClick={() => {
                     void onDeleteChat(activeChat)
                     setConfirmDelete(false)
-                    setMenuOpen(false)
                   }}
                   className="rounded-full p-2 text-red-500 hover:bg-red-50"
                   aria-label="Confirm delete chat"
@@ -215,81 +201,71 @@ export function ChatPageHeader({
                 </button>
               </div>
             ) : (
-              <>
-                <button
-                  type="button"
-                  onClick={() => setMenuOpen((open) => !open)}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-full text-slate-500 transition-colors hover:bg-white/80 hover:text-slate-800 active:scale-95"
-                  aria-label="Chat actions"
-                  aria-expanded={menuOpen}
-                >
-                  <MoreHorizontal className="h-4 w-4" />
-                </button>
-                {menuOpen && (
-                  <div className="absolute right-0 top-10 z-40 w-56 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-xl">
-                    {lastUpdated && (
-                      <div className="flex items-baseline justify-between gap-3 px-3 py-2">
-                        <span className="text-[11px] text-slate-400">Last updated</span>
-                        <span className="text-[11px] font-medium text-slate-600">{lastUpdated}</span>
+              <Menu
+                label="Chat actions"
+                width="w-60"
+                triggerClassName="hover:bg-white/80"
+              >
+                {lastUpdated && (
+                  <>
+                    <MenuHeader>
+                      <div className="flex items-baseline justify-between gap-3">
+                        <span className="text-xs text-slate-500">Last updated</span>
+                        <span className="text-xs font-medium text-slate-700">{lastUpdated}</span>
                       </div>
-                    )}
-                    <div className="my-1 border-t border-slate-100" />
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onStartRename(activeChat)
-                        setMenuOpen(false)
-                      }}
-                      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-slate-600 hover:bg-violet-50 hover:text-violet-900"
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                      Rename session
-                    </button>
-
-                    <div className="my-1 border-t border-slate-100" />
-                    {/* Exports the whole conversation, not just the last turn. */}
-                    {EXPORT_FORMATS.map((format) => {
-                      const FormatIcon = EXPORT_FORMAT_ICONS[format]
-                      return (
-                        <button
-                          key={format}
-                          type="button"
-                          disabled={exporting !== null}
-                          onClick={() => void handleExport(format)}
-                          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-slate-600 hover:bg-violet-50 hover:text-violet-900 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {exporting === format ? (
-                            <Spinner size={14} />
-                          ) : (
-                            <FormatIcon className="h-3.5 w-3.5 text-violet-600" />
-                          )}
-                          Export as {EXPORT_FORMAT_LABELS[format]}
-                        </button>
-                      )
-                    })}
-
-                    <div className="my-1 border-t border-slate-100" />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setConfirmDelete(true)
-                        setMenuOpen(false)
-                      }}
-                      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-red-500 hover:bg-red-50 hover:text-red-600"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      Delete
-                    </button>
-
-                    {exportError && (
-                      <p className="border-t border-slate-100 px-3 py-2 text-[11px] text-red-600">
-                        {exportError}
-                      </p>
-                    )}
-                  </div>
+                    </MenuHeader>
+                    <MenuSeparator />
+                  </>
                 )}
-              </>
+
+                <MenuItem
+                  icon={<Pencil className="h-4 w-4" />}
+                  onSelect={() => onStartRename(activeChat)}
+                >
+                  Rename session
+                </MenuItem>
+
+                <MenuSeparator />
+                {/* Exports the whole conversation, not just the last turn. */}
+                {EXPORT_FORMATS.map((format) => {
+                  const FormatIcon = EXPORT_FORMAT_ICONS[format]
+                  return (
+                    <MenuItem
+                      key={format}
+                      disabled={exporting !== null}
+                      /* The export runs here, in the open menu, and its spinner
+                         is the only sign it is running — closing on select
+                         would take the feedback away with it. */
+                      keepOpen
+                      icon={
+                        exporting === format ? (
+                          <Spinner size={16} />
+                        ) : (
+                          <FormatIcon className="h-4 w-4 text-violet-600" />
+                        )
+                      }
+                      onSelect={(close) => void handleExport(format, close)}
+                    >
+                      Export as {EXPORT_FORMAT_LABELS[format]}
+                    </MenuItem>
+                  )
+                })}
+
+                <MenuSeparator />
+                <MenuItem
+                  danger
+                  icon={<Trash2 className="h-4 w-4" />}
+                  onSelect={() => setConfirmDelete(true)}
+                >
+                  Delete
+                </MenuItem>
+
+                {exportError && (
+                  <p className="mt-1.5 border-t border-slate-100 px-3.5 py-2 text-xs text-red-600">
+                    {exportError}
+                  </p>
+                )}
+              </Menu>
             )}
           </div>
         </div>

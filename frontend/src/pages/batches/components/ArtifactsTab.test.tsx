@@ -32,7 +32,7 @@ const game = (over: Partial<GameSession> = {}): GameSession =>
     chatId: 'c1',
     runId: 'r1',
     title: 'Testing Terms Match-Up',
-    items: [],
+    items: [{ id: 'i1', term: 'mock', definition: 'a stand-in for a real collaborator' }],
     itemCount: 30,
     modes: [],
     gameModeStats: {},
@@ -51,12 +51,22 @@ function renderTab(over: Partial<Parameters<typeof ArtifactsTab>[0]> = {}) {
     onRefresh: vi.fn(),
     onDelete: vi.fn(),
     onDeleteGame: vi.fn(),
+    batchId: 'b1',
+    onGameUpdated: vi.fn(),
+    onError: vi.fn(),
     ...over,
   }
   return { ...render(<ArtifactsTab {...props} />), props }
 }
 
 const rowFor = (title: string) => screen.getByTitle(title).closest('.grid') as HTMLElement
+
+/* A game is no longer a flattened artifact row: it renders the same `GameRow`
+   the standalone Games page does, so it is found by its heading rather than by
+   the `title` attribute the generic row carries. */
+const gameRow = (title: string) =>
+  screen.getByRole('heading', { name: title }).closest('div.divide-y > div') as HTMLElement
+const queryGame = (title: string) => screen.queryByRole('heading', { name: title })
 
 describe('generated content', () => {
   /**
@@ -67,41 +77,65 @@ describe('generated content', () => {
   it('lists games alongside artifacts', () => {
     renderTab()
     expect(screen.getByTitle('Week 3 — Test Doubles')).toBeTruthy()
-    expect(screen.getByTitle('Testing Terms Match-Up')).toBeTruthy()
+    expect(queryGame('Testing Terms Match-Up')).toBeTruthy()
   })
 
   it('orders everything by when it was made, newest first', () => {
     renderTab()
-    const titles = [...document.querySelectorAll('.truncate.text-sm.font-semibold')].map(
-      (node) => node.textContent,
-    )
+    const titles = [
+      ...document.querySelectorAll('.truncate.text-sm.font-semibold, h3.truncate'),
+    ].map((node) => node.textContent)
     // The game is a day newer than the lesson plan.
     expect(titles).toEqual(['Testing Terms Match-Up', 'Week 3 — Test Doubles'])
   })
 
-  it('gives a game its play link and its size', () => {
+  /**
+   * The tab used to flatten a game into the generic artifact row — a title, a
+   * type chip and the string "30 pairs" — which dropped the results download,
+   * the pair list and the entire deadline band. The same object was two
+   * different objects depending on which page you found it from.
+   */
+  it('gives a game the same row the Games page does', () => {
     renderTab()
-    const row = rowFor('Testing Terms Match-Up')
-    expect(within(row).getByText('30 pairs')).toBeTruthy()
-    expect(within(row).getByRole('link', { name: 'Open' }).getAttribute('href')).toContain('/play/g1')
+    const row = gameRow('Testing Terms Match-Up')
+    expect(within(row).getByRole('button', { name: /30 pairs/ })).toBeTruthy()
+    expect(within(row).getByRole('button', { name: 'Results' })).toBeTruthy()
+    expect(within(row).getByRole('button', { name: /Copy link/ })).toBeTruthy()
+    expect(within(row).getByRole('link', { name: /Open game/ }).getAttribute('href')).toContain(
+      '/play/g1',
+    )
+    // The deadline band, which the flattened row had no room for at all.
+    expect(within(row).getByRole('button', { name: /Close now/ })).toBeTruthy()
   })
 
   it('shows a deadline when the game has one', () => {
     renderTab({ games: [game({ deadlineAt: '2026-08-12T17:00:00Z' })] })
-    expect(screen.getByText(/30 pairs · due/)).toBeTruthy()
+    expect(screen.getByText(/^Due /)).toBeTruthy()
+  })
+
+  it('lets a game be expanded to its pairs in place', async () => {
+    const user = userEvent.setup()
+    renderTab()
+    const row = gameRow('Testing Terms Match-Up')
+    await user.click(within(row).getByRole('button', { name: /30 pairs/ }))
+    expect(within(gameRow('Testing Terms Match-Up')).getByText('mock')).toBeTruthy()
   })
 
   /** A game has no version chain, so a "Versions" button would open nothing. */
   it('offers versions for an artifact but not for a game', () => {
     renderTab()
     expect(within(rowFor('Week 3 — Test Doubles')).getByText('Versions')).toBeTruthy()
-    expect(within(rowFor('Testing Terms Match-Up')).queryByText('Versions')).toBeNull()
+    expect(within(gameRow('Testing Terms Match-Up')).queryByText('Versions')).toBeNull()
   })
 
   it('routes a game deletion to the games API, not the artifact one', async () => {
     const user = userEvent.setup()
     const { props } = renderTab()
-    await user.click(within(rowFor('Testing Terms Match-Up')).getByTitle('Delete'))
+    await user.click(
+      within(gameRow('Testing Terms Match-Up')).getByRole('button', {
+        name: 'Delete Testing Terms Match-Up',
+      }),
+    )
 
     expect(props.onDeleteGame).toHaveBeenCalledWith(expect.objectContaining({ gameId: 'g1' }))
     expect(props.onDelete).not.toHaveBeenCalled()
@@ -113,7 +147,7 @@ describe('generated content', () => {
     await user.click(screen.getByLabelText('Filter by type'))
     await user.click(screen.getByRole('option', { name: 'Games' }))
 
-    expect(screen.getByTitle('Testing Terms Match-Up')).toBeTruthy()
+    expect(queryGame('Testing Terms Match-Up')).toBeTruthy()
     expect(screen.queryByTitle('Week 3 — Test Doubles')).toBeNull()
   })
 
@@ -129,12 +163,12 @@ describe('generated content', () => {
 
     await user.click(screen.getByLabelText('Filter by week'))
     await user.click(screen.getByRole('option', { name: 'Week 3' }))
-    expect(screen.queryByTitle('Testing Terms Match-Up')).toBeNull()
+    expect(queryGame('Testing Terms Match-Up')).toBeNull()
 
     await user.click(screen.getByLabelText('Filter by week'))
     await user.click(screen.getByRole('option', { name: 'All weeks' }))
     await user.click(screen.getByLabelText('Current only'))
-    expect(screen.getByTitle('Testing Terms Match-Up')).toBeTruthy()
+    expect(queryGame('Testing Terms Match-Up')).toBeTruthy()
   })
 
   /** The server-side summary counts artifacts, which games are not. */

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { ChevronDown, ExternalLink, RefreshCw, Sparkles } from 'lucide-react'
+import { ChevronDown, ExternalLink, RefreshCw, Sparkles, Trash2 } from 'lucide-react'
 import type { ToastMessage } from '../types'
 import Toast from '../components/ui/Toast'
 import { getErrorMessage } from '../utils/errors'
@@ -10,12 +10,14 @@ import { GenerationRunView } from '../components/generation/GenerationRunView'
 import { deriveGenerationStage, isWorkflowSettled } from '../components/generation/generationStage'
 import { GenerationAttachments } from '../components/generation/GenerationAttachments'
 import { PlanHintBanner } from '../components/generation/PlanHintBanner'
-import { listArtifacts, type Artifact } from '../services/artifactService'
+import { deleteArtifact, listArtifacts, type Artifact } from '../services/artifactService'
 import { timeAgo } from '../utils/formatDate'
 import { artifactIcon } from '../utils/artifactIcons'
 import { SelectField, toOptions } from '../components/ui/SelectField'
 import { NumberField } from '../components/ui/NumberField'
 import { Collapse } from '../components/ui/Collapse'
+import { confirm } from '../components/ui/confirmStore'
+import { undoable, usePendingUndo } from '../components/ui/undoStore'
 import { FIELD_CLASS, FIELD_LABEL_CLASS, TEXTAREA_CLASS } from '../components/ui/fieldStyles'
 import { Spinner } from '../design-system'
 
@@ -113,6 +115,7 @@ export default function LessonPlans() {
   const [form, setForm] = useState(INITIAL_FORM)
   const [toast, setToast] = useState<ToastMessage | null>(null)
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
+  const pendingUndo = usePendingUndo()
   // Starts true: nothing has been fetched yet, and `false` here reads as
   // "loaded, and there is nothing" — which is what raced the prefill.
   const [listLoading, setListLoading] = useState(true)
@@ -144,6 +147,39 @@ export default function LessonPlans() {
     setToast({ type, message })
     window.setTimeout(() => setToast(null), 5000)
   }, [])
+
+
+  /* Deleting from the standalone page, with the same confirm-then-undo the
+     batch space uses — the artifact and its Drive file are the same object
+     wherever it is reached from. */
+  async function handleDeleteArtifact(artifact: Artifact) {
+    const batchId = selectedBatchId
+    if (!batchId) return
+    const label = artifact.title || 'this lesson plan'
+    const ok = await confirm({
+      title: `Delete ${label}?`,
+      body: 'This removes it from MILA and deletes the Google Doc.',
+      confirmLabel: 'Delete',
+      tone: 'danger',
+    })
+    if (!ok) return
+    undoable({
+      id: artifact.id,
+      message: `Deleted ${label}.`,
+      commit: async () => {
+        try {
+          await deleteArtifact(batchId, artifact.id, true)
+          setArtifacts((prev) => prev.filter((entry) => entry.id !== artifact.id))
+        } catch (err) {
+          showToast('error', getErrorMessage(err, 'Could not delete it.'))
+        }
+      },
+    })
+  }
+
+  /* Rows on their way out sit behind the undo window rather than being
+     spliced away, so an undone card returns to its original position. */
+  const visibleArtifacts = artifacts.filter((a) => !pendingUndo.has(a.id))
 
   const refreshArtifacts = useCallback(async (batchId: string) => {
     setListLoading(true)
@@ -188,14 +224,17 @@ export default function LessonPlans() {
      discarding costs only the draft. `cancelRun` first when something is
      genuinely in flight — `reset` alone would leave the backend generating
      into a run nobody is listening to. */
-  const discardRun = useCallback(() => {
-    if (
-      !window.confirm(
-        'Discard this draft?\n\nNothing has been saved, and you will start again from the form.',
-      )
-    ) {
-      return
-    }
+  const discardRun = useCallback(async () => {
+    /* Still a dialog rather than an undo: there is no row to put back and no
+       API call to hold, and un-cancelling a generation the backend has already
+       stopped is not something the frontend can offer. */
+    const ok = await confirm({
+      title: 'Discard this draft?',
+      body: 'Nothing has been saved, and you will start again from the form.',
+      confirmLabel: 'Discard',
+      tone: 'danger',
+    })
+    if (!ok) return
     if (run.currentRunId) void run.cancelRun()
     run.reset()
   }, [run])
@@ -414,7 +453,7 @@ export default function LessonPlans() {
           <div className="flex items-center gap-2 text-sm text-slate-500 py-6">
             <Spinner size={16} /> Loading…
           </div>
-        ) : artifacts.length === 0 ? (
+        ) : visibleArtifacts.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-10 text-center rounded-xl border border-slate-100 bg-white">
             <LessonPlanIcon className="w-8 h-8 text-slate-300 mb-2" />
             <p className="text-sm text-slate-500">No lesson plans yet for this space.</p>
@@ -431,7 +470,7 @@ export default function LessonPlans() {
              repeated on every row, and neither Assessments nor Games shows
              one. */
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {artifacts.map((a) => (
+            {visibleArtifacts.map((a) => (
               <article key={a.id} className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
                 <div className="flex items-start gap-3 mb-2">
                   <div className="h-9 w-9 rounded-lg bg-violet-50 text-violet-600 flex items-center justify-center border border-violet-100">
@@ -446,12 +485,28 @@ export default function LessonPlans() {
                     so the tag was the same word repeated on every card — and
                     neither Assessments nor Games carried one. */}
                 <p className="text-xs text-slate-400 mb-3">{timeAgo(a.updated_at ? new Date(a.updated_at) : null)}</p>
-                {a.doc_url && (
-                  <a href={a.doc_url} target="_blank" rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-slate-300 text-slate-700 transition-colors hover:border-violet-300 hover:bg-violet-50 hover:text-violet-800">
-                    <ExternalLink className="w-3.5 h-3.5" /> Open Google Doc
-                  </a>
-                )}
+                <div className="mt-3 flex items-center gap-2">
+                  {a.doc_url && (
+                    <a href={a.doc_url} target="_blank" rel="noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-slate-300 text-slate-700 transition-colors hover:border-violet-300 hover:bg-violet-50 hover:text-violet-800">
+                      <ExternalLink className="w-3.5 h-3.5" /> Open Google Doc
+                    </a>
+                  )}
+                  {/* Same flow as everywhere else: ask once, then hold the
+                      delete for the undo window. Pushed to the end of the row
+                      so the destructive control is never the one under the
+                      thumb on the way to opening the document. */}
+                  <button
+                    type="button"
+                    onClick={() => void handleDeleteArtifact(a)}
+                    // slate-400 measures 2.63:1 on white — under the 3:1 floor
+                    // for a graphical control; slate-500 clears it at 4.76:1.
+                    className="ml-auto flex-shrink-0 rounded-md p-2 text-slate-500 transition-colors hover:bg-red-50 hover:text-red-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
+                    aria-label={`Delete ${a.title || 'lesson plan'}`}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
               </article>
             ))}
           </div>

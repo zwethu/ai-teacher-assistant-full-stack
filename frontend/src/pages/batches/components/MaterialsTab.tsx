@@ -17,7 +17,6 @@ import {
   Clock,
   FileText,
   MessageCircle,
-  MoreHorizontal,
   Pencil,
   RefreshCw,
   Send,
@@ -37,6 +36,7 @@ import { formatDateTime } from '../../../utils/formatDate'
 import { emitChatCreated } from '../../../utils/chatEvents'
 import { BTN_SECONDARY } from '../constants'
 import { IndexStatusBadge } from './IndexStatusBadge'
+import { Menu, MenuItem } from '../../../components/ui/Menu'
 import { IconButton, Spinner } from '../../../design-system'
 import type { GenerateMode } from '../../chat/components/ComposerSurface'
 import {
@@ -560,43 +560,31 @@ export function MaterialsTab({
                                 </button>
                               </>
                             ) : (
-                              <>
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setMenuOpenId((value) =>
-                                      value === chat.chat_id ? null : chat.chat_id,
-                                    )
-                                  }
-                                  className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-                                  aria-label="Open chat actions"
+                              /* The panel is portalled, so it escapes this
+                                 card's `overflow-hidden` — the last row's menu
+                                 used to be sliced off at the card's edge — and
+                                 flips upward when there is no room below. */
+                              <Menu
+                                label="Chat actions"
+                                width="w-44"
+                                onOpenChange={(open) =>
+                                  setMenuOpenId(open ? chat.chat_id : null)
+                                }
+                              >
+                                <MenuItem
+                                  icon={<Pencil className="h-4 w-4" />}
+                                  onSelect={() => startRename(chat)}
                                 >
-                                  <MoreHorizontal className="h-3.5 w-3.5" />
-                                </button>
-                                {menuOpenId === chat.chat_id && (
-                                  <div className="absolute right-0 top-7 z-20 w-32 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
-                                    <button
-                                      type="button"
-                                      onClick={() => startRename(chat)}
-                                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-                                    >
-                                      <Pencil className="h-3.5 w-3.5" />
-                                      Rename
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setConfirmDeleteId(chat.chat_id)
-                                        setMenuOpenId(null)
-                                      }}
-                                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-red-500 hover:bg-red-50 hover:text-red-600"
-                                    >
-                                      <Trash2 className="h-3.5 w-3.5" />
-                                      Delete
-                                    </button>
-                                  </div>
-                                )}
-                              </>
+                                  Rename
+                                </MenuItem>
+                                <MenuItem
+                                  danger
+                                  icon={<Trash2 className="h-4 w-4" />}
+                                  onSelect={() => setConfirmDeleteId(chat.chat_id)}
+                                >
+                                  Delete
+                                </MenuItem>
+                              </Menu>
                             )}
                           </div>
                         </div>

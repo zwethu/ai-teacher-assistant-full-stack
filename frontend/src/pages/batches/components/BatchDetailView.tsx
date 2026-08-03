@@ -62,6 +62,7 @@ type Props = {
   handleRefreshFiles: () => void
   handleDeleteArtifact: (artifact: Artifact) => void
   handleDeleteGame: (game: GameSession) => void
+  handleGameUpdated: (game: GameSession) => void
   refreshArtifacts: () => void
   isEditOpen: boolean
   editDetails: BatchDetails
@@ -102,6 +103,7 @@ export function BatchDetailView({
   handleRefreshFiles,
   handleDeleteArtifact,
   handleDeleteGame,
+  handleGameUpdated,
   refreshArtifacts,
   isEditOpen,
   editDetails,
@@ -291,6 +293,9 @@ export function BatchDetailView({
             onRefresh={refreshArtifacts}
             onDelete={handleDeleteArtifact}
             onDeleteGame={handleDeleteGame}
+            batchId={selectedBatch.id}
+            onGameUpdated={handleGameUpdated}
+            onError={(message) => setToast({ type: 'error', message })}
           />
         )}
       </div>

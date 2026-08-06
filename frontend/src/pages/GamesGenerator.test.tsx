@@ -147,39 +147,23 @@ describe('Games — source picker', () => {
     expect(params.webSearch).toBe(false)
   })
 
-  it('asks for 30 pairs by default and sends the chosen count', async () => {
+  it('shows the fixed 30-pair size and sends it with the request', async () => {
     listArtifacts.mockResolvedValue([lessonPlan])
     renderPage()
     await openSavedWork()
 
     await waitFor(() => expect(screen.getByText('Week 3 — Test Doubles')).toBeTruthy())
-    const field = screen.getByLabelText('Number of pairs') as HTMLInputElement
-    expect(field.value).toBe('30')
+    // The count is a read-out, not a field — there is nothing to type into.
+    expect(screen.queryByLabelText('Number of pairs')).toBeNull()
+    expect(screen.getByText('30 pairs')).toBeTruthy()
     // 30 seconds a pair — the standard 30-pair game is a 15-minute round.
     expect(screen.getByText('About 15 min to play')).toBeTruthy()
 
-    await userEvent.clear(field)
-    await userEvent.type(field, '12')
     await userEvent.click(screen.getByRole('radio', { name: /Week 3 — Test Doubles/ }))
     await userEvent.click(screen.getByRole('button', { name: /Generate game/ }))
 
     await waitFor(() => expect(generate).toHaveBeenCalled())
-    expect(generate.mock.calls[0][0].message).toContain('exactly 12 term/definition pairs')
-  })
-
-  it('refuses a pair count the backend would reject', async () => {
-    listArtifacts.mockResolvedValue([lessonPlan])
-    renderPage()
-    await openSavedWork()
-
-    await waitFor(() => expect(screen.getByText('Week 3 — Test Doubles')).toBeTruthy())
-    await userEvent.click(screen.getByRole('radio', { name: /Week 3 — Test Doubles/ }))
-    const field = screen.getByLabelText('Number of pairs')
-    await userEvent.clear(field)
-    await userEvent.type(field, '99')
-
-    expect(screen.getByText('Pick between 4 and 40')).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Generate game/ }).hasAttribute('disabled')).toBe(true)
+    expect(generate.mock.calls[0][0].message).toContain('exactly 30 term/definition pairs')
   })
 
   it('has no deadline until one is asked for', async () => {

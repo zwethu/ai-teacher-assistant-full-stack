@@ -82,6 +82,19 @@ export type ChatMessage = {
   pending?: boolean
   metadata?: Record<string, unknown>
   attachments?: ChatAttachmentSnapshot[]
+  /**
+   * Set only on a message this browser just sent, and carried across the swap
+   * when the backend's copy (with its own `message_id`) replaces the optimistic
+   * one. Two things read it:
+   *
+   *   - it is the React key for the row, so that swap no longer unmounts and
+   *     rebuilds the bubble — which used to re-run its entrance and re-probe
+   *     every attachment thumbnail mid-flight;
+   *   - it is what distinguishes "the lecturer just sent this" from "this came
+   *     back from Firestore", so only the former animates in. A message loaded
+   *     from history never has one.
+   */
+  client_id?: string
 }
 
 export type Chat = {

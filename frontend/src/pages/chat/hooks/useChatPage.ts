@@ -1371,8 +1371,11 @@ export function useChatPage() {
     const chatId = chat.chat_id
     setSending(true)
 
+    const clientId = crypto.randomUUID()
     const optimisticUser: ChatMessage = {
-      message_id: crypto.randomUUID(),
+      message_id: clientId,
+      // Stable across the swap below, unlike message_id — see `ChatMessage`.
+      client_id: clientId,
       chat_id: chatId,
       role: 'user',
       content: message,
@@ -1390,7 +1393,12 @@ export function useChatPage() {
       const result = await invoke()
       if (result.user_message) {
         setMessages((prev) => prev.map((item) => (
-          item.message_id === optimisticUser.message_id ? result.user_message! : item
+          // The backend's copy, wearing the id the row is keyed on: the bubble
+          // is already on screen, and swapping the key would tear it down and
+          // build it again for a message the lecturer cannot tell changed.
+          item.message_id === optimisticUser.message_id
+            ? { ...result.user_message!, client_id: clientId }
+            : item
         )))
       }
       unsubscribeFromRun(result.run_id)

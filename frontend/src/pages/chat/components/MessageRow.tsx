@@ -314,7 +314,22 @@ export const MessageRow = memo(function MessageRow({
         {isUser ? (() => {
           const { body, references, quote } = parseUserMessageContent(msg.content)
           return (
-          <div className="max-w-full">
+          /* Full width of the message column, not shrink-to-fit.
+             ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+             `max-w-full` made this a shrink-to-fit box, so the bubble's own
+             `max-w-[75%]` resolved against *the width of the text it was
+             wrapping* — 75% of "how wide do I want to be" is always narrower
+             than the text, so every message wrapped, and a four-word one still
+             came out on two lines. At `w-full` the percentage resolves against
+             the column, which is what "three quarters of the conversation
+             width" was always meant to mean, and a short message stays on one
+             line because the bubble is free to shrink to its content.
+
+             The entrance rides here rather than on the bubble so the quote, the
+             message and its attachments arrive as one object. Only a message
+             this browser just sent carries `client_id` — history renders at
+             rest, or opening a chat would animate the whole transcript. */
+          <div className={`w-full ${msg.client_id ? 'mila-bubble-in' : ''}`}>
             {/* What the lecturer was replying to, shown above their own words
                 the way a quoted reply reads in any messaging app. */}
             {quote && (

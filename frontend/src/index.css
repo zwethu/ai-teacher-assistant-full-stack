@@ -636,6 +636,43 @@
     }
   }
 
+  /* The message the lecturer just sent.
+     ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+     It appeared at full size in the frame the composer cleared, which is the
+     one moment in the app where something the user *did* has no visible
+     consequence — the text vanished from one place and simply existed in
+     another. This gives the send somewhere to travel from.
+
+     Rising and growing, not just fading: the bubble comes up out of the
+     composer it was typed in, so the origin is the bottom-right corner it is
+     anchored to and the scale is small enough (0.96) to read as arriving
+     rather than as zooming. Transform and opacity only — the turn's floor
+     already reserved this row's height, so there is no layout to ease.
+
+     `backwards`, not `both`. The end frame is the resting state, so a forwards
+     fill would buy nothing and would leave a transform permanently applied to
+     every sent message — enough to make each one a containing block for the
+     quote-reply button that portals over it.
+
+     Applied per message by `client_id`, which only a locally-sent message has:
+     a mount-triggered animation would otherwise run on all fifty rows at once
+     when a chat is opened. */
+  .mila-bubble-in {
+    transform-origin: 100% 100%;
+    animation: mila-bubble-in 320ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  }
+
+  @keyframes mila-bubble-in {
+    from {
+      opacity: 0;
+      transform: translate3d(0, 10px, 0) scale(0.96);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
   /* The workflow chip's slot. Widens and narrows so everything after it in the
      control row — the web-search toggle — moves with the layout instead of
      teleporting when the chip finally unmounts at the end of its fade.
@@ -1348,6 +1385,7 @@
 
     .mila-composer-in,
     .mila-badge-swap,
+    .mila-bubble-in,
     .mila-tile-in {
       animation: none;
     }

@@ -578,7 +578,11 @@ export function ChatMessagesPanel({
   function renderRow(msg: ChatMessage) {
     return (
               <MessageRow
-                key={msg.message_id}
+                /* `client_id` where there is one: a just-sent message keeps its
+                   optimistic identity when the backend's copy lands, so the
+                   bubble that is already on screen is updated rather than
+                   thrown away and rebuilt. */
+                key={msg.client_id || msg.message_id}
                 msg={msg}
                 run={msg.run_id ? runStates[msg.run_id] : undefined}
                 batchId={batchId}

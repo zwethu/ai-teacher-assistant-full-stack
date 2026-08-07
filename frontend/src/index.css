@@ -332,20 +332,38 @@
     z-index: 2;
   }
 
-  /* No ambient loop on the live working note — deliberately.
+  /* The live working note carries a loop again — but it brightens, never dims.
+     ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+     The first attempt pulsed the whole line's opacity between .65 and 1 on the
+     garland's beat. Measured against the transcript's wash that trough is
+     2.36:1 — for half of every cycle the sentence the loop was drawing
+     attention to could not be read. It was removed, and only the per-note
+     arrival was left.
 
-     It used to pulse its opacity between .65 and 1 on the garland's 7.2s beat,
-     borrowed from the design system's own `mt-fade`. Two things retired it.
-     Measured against the transcript's wash that trough is 2.36:1, so for half
-     of every cycle the sentence was below any legibility threshold. And notes
-     arrive often enough that `.mila-thought-swap` — which replays on every new
-     one — already carries the "still working" signal on its own. A loop on top
-     of a frequent transition is two motions answering the same question.
+     What is here instead inverts that. The line rests at slate-600 (6.55:1)
+     and a near-black violet-900 core (12.91:1) flashes through it, so the
+     moving part is a change of weight rather than of visibility — every instant
+     of the loop is *more* legible than the resting line, not less. slate-500
+     was tried as the resting colour, for a wider swing: 4.02:1 on this wash,
+     which the contrast test in `stepMotion.test.ts` rejected. Nothing here
+     touches opacity, which is the whole reason it is safe:
+     `.mila-thought-sweep` moves one property, `background-position`, and
+     `stepMotion.test.ts` holds it to that.
 
-     The garland beside it is the designated liveness mark and still walks its
-     bead. Components that render `Thinking`/`ThinkingRow` keep the design
-     system's own pulse; this only removes the utility that put it on labels
-     outside them. */
+     The flash is inside the letters. `background-clip: text` is what does that
+     — the gradient is painted through the glyph shapes, so the light picks out
+     the strokes of each letter as it passes and nothing lights up between the
+     words. A first version paired this with a soft gold glow on a `::before`
+     behind the line; clipped to a rounded box rather than to the letters, it
+     read as a highlighter pen dragged across the sentence, which is precisely
+     what this is not. There is no layer behind the text any more.
+
+     Gold stays off the glyphs regardless: at 1.43:1 on this wash a gold letter
+     is not a letter. It keeps its place on the mark beside the line, where the
+     insight bead lands last.
+
+     `stepMotion.test.ts` asserts both halves — every stop legible, and no
+     painted layer behind the text. */
 
   /* Thinking notes easing in — on expand, and as each new note streams in.
      Keyed list items only animate when their DOM node is created, so existing
@@ -375,7 +393,69 @@
      Kept separate from .mila-thought-in because this is a swap in a fixed slot,
      not an item entering a list — it travels vertically only, with no scale. */
   .mila-thought-swap {
+    position: relative;
     animation: mila-thought-swap 380ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  /* Gated: with no `background-clip: text` the gradient would paint as a block
+     behind transparent glyphs — an invisible sentence. Unsupported, the note
+     keeps its arrival animation and simply does not shimmer, which is the right
+     way for this to degrade. */
+  @supports (background-clip: text) or (-webkit-background-clip: text) {
+    .mila-thought-swap {
+      /* 260% wide with the flash at the image's middle: at either end of the
+         travel it sits outside the visible window, so the loop's restart
+         happens off-screen and there is no jump to see.
+
+         Hue first, then weight. The letters turn violet a beat before they
+         darken, so what travels reads as a colour rather than as a shadow: the
+         outer stops are a saturated violet-600, the core deepens to violet-900,
+         and the neutral slate either side is what makes the purple obvious.
+         violet-600 is as saturated as this can get and stay legible — the
+         brand's electric purple is 4.20:1 on this wash, just under AA, and the
+         contrast test in `stepMotion.test.ts` refuses it.
+
+         The lit span is 20% of the image, about half the line. An earlier 14%
+         picked out two or three words, which was too tight to register as
+         colour before it had gone. */
+      background-image: linear-gradient(
+        96deg,
+        var(--slate-600) 0%,
+        var(--slate-600) 40%,
+        var(--violet-600) 44%,
+        var(--violet-800) 48%,
+        var(--violet-900) 50%,
+        var(--violet-800) 52%,
+        var(--violet-600) 56%,
+        var(--slate-600) 60%,
+        var(--slate-600) 100%
+      );
+      background-size: 260% 100%;
+      background-repeat: no-repeat;
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      /* The arrival first, then the loop — which starts after it, so a new note
+         lands before the light runs through it. */
+      animation:
+        mila-thought-swap 380ms cubic-bezier(0.16, 1, 0.3, 1) both,
+        mila-thought-sweep 2400ms cubic-bezier(0.4, 0, 0.6, 1) 380ms infinite;
+    }
+  }
+
+  /* 100% → 0% moves the band left-to-right, with reading direction. The hold at
+     the end is the rest between passes: both ends park the band off-screen, so
+     the pause reads as the light having left rather than as a stall. */
+  @keyframes mila-thought-sweep {
+    0% {
+      background-position: 100% 0;
+    }
+    62% {
+      background-position: 0% 0;
+    }
+    100% {
+      background-position: 0% 0;
+    }
   }
 
   @keyframes mila-thought-swap {
@@ -423,6 +503,14 @@
     .mila-thought-swap {
       animation: none;
       filter: none;
+    }
+
+    /* Hand the glyphs back to `color`. Switching the animation off alone would
+       leave the note painted by a gradient it can no longer move — legible, but
+       a stationary two-tone sentence for no reason. */
+    .mila-thought-swap {
+      background-image: none;
+      color: inherit;
     }
   }
 

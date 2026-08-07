@@ -71,19 +71,44 @@ export function useBatchesPage() {
   })
   const [isSavingEdit, setIsSavingEdit] = useState(false)
   const [searchParams, setSearchParams] = useSearchParams()
+  const hydratedFromUrlRef = useRef(false)
+  // Tab asked for by the URL. Applied by the selection effect further down rather
+  // than here, because that effect resets the tab to 'students' for every newly
+  // selected batch and would otherwise clobber it.
+  const pendingTabRef = useRef<DetailTab | null>(null)
 
-  // Deep link support: /batches?batch=<id>&tab=planning opens a batch straight
-  // to a tab (e.g. from the "create a Course Plan" hint on the standalone pages).
+  // `?batch=<id>&tab=<tab>` is the source of truth for which batch is open. Keeping
+  // it in the URL (rather than only in state) is what lets browser Back from a chat
+  // land on that batch's tab instead of the batch list, and lets a refresh or a
+  // shared link restore the same view.
   useEffect(() => {
+    if (hydratedFromUrlRef.current || batches.length === 0) return
+    hydratedFromUrlRef.current = true
     const batchParam = searchParams.get('batch')
-    if (!batchParam || selectedBatch || batches.length === 0) return
+    if (!batchParam) return
     const match = batches.find((b) => b.id === batchParam)
     if (!match) return
-    setSelectedBatch(match)
     const tabParam = searchParams.get('tab') as DetailTab | null
-    if (tabParam) setDetailTab(tabParam)
-    setSearchParams({}, { replace: true })
-  }, [searchParams, batches, selectedBatch, setSearchParams])
+    if (tabParam) pendingTabRef.current = tabParam
+    setSelectedBatch(match)
+  }, [searchParams, batches])
+
+  // Mirror the current selection back into the query string. `replace` on purpose:
+  // opening a batch or switching tabs should not each add a history entry — we want
+  // exactly one entry for "the batches page, on this batch/tab".
+  useEffect(() => {
+    if (!hydratedFromUrlRef.current) return
+    const next = new URLSearchParams(searchParams)
+    if (selectedBatch) {
+      next.set('batch', selectedBatch.id)
+      next.set('tab', detailTab)
+    } else {
+      next.delete('batch')
+      next.delete('tab')
+    }
+    if (next.toString() === searchParams.toString()) return
+    setSearchParams(next, { replace: true })
+  }, [selectedBatch, detailTab, searchParams, setSearchParams])
   const [students, setStudents] = useState<BatchStudent[]>([])
   const [studentsLoading, setStudentsLoading] = useState(false)
   const lastDetailBatchIdRef = useRef<string | null>(null)
@@ -260,7 +285,9 @@ export function useBatchesPage() {
     // don't yank the user back to the Students tab or refetch everything.
     if (lastDetailBatchIdRef.current === selectedBatch.id) return
     lastDetailBatchIdRef.current = selectedBatch.id
-    setDetailTab('students')
+    // A URL-requested tab wins over the default for this one selection.
+    setDetailTab(pendingTabRef.current ?? 'students')
+    pendingTabRef.current = null
     refreshStudents()
     refreshFiles()
     refreshArtifacts()

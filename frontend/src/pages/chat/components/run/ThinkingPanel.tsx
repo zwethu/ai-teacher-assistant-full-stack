@@ -9,6 +9,48 @@ type Props = {
   runStatus: AgentRunStatus
 }
 
+/** How long one mark holds before the other takes over, in ms.
+ *  3.5–7s was the first pairing and read as restless — at the short end the
+ *  mark changed twice inside one thought. */
+export const MARK_DWELL_MS: [number, number] = [9000, 18000]
+
+/**
+ * Which of the two marks is on screen right now.
+ *
+ * The design system ships them as distinct, non-interchangeable animations —
+ * the Spinner's garland strings itself for *loading*, the Thinking mark walks
+ * its gold bead for *agent work*. Alternating them is a deliberate departure
+ * from that rule, asked for directly: a single mark for the length of a long
+ * run reads as one frozen loop, and swapping between the two makes the wait
+ * feel attended to.
+ *
+ * Random rather than fixed, so it never lines up into a metronome, and the
+ * dwell is long enough (3.5–7s) that the swap is an event rather than a
+ * flicker. The crossfade below is what keeps it from being a cut.
+ */
+function useAlternatingMark(active: boolean) {
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!active) {
+      setLoading(false)
+      return undefined
+    }
+    let timer = 0
+    const schedule = () => {
+      const [min, max] = MARK_DWELL_MS
+      timer = window.setTimeout(() => {
+        setLoading((current) => !current)
+        schedule()
+      }, min + Math.random() * (max - min))
+    }
+    schedule()
+    return () => window.clearTimeout(timer)
+  }, [active])
+
+  return loading
+}
+
 function eventRawText(event: AgentRunEvent): string {
   const text = event.detail?.text
   return typeof text === 'string' ? text : ''
@@ -64,9 +106,13 @@ export function ThinkingPanel({ events, runStatus }: Props) {
   }, [isRunning, liveLabel])
 
   const mounted = useExitDelay(isRunning, STEP_EXIT_MS)
+  const label = isRunning ? liveLabel : lastLabel
+  // Only once the agent is actually reporting thoughts. Before that the loader
+  // is not one of two moods, it is the truth: nothing has started thinking yet.
+  const alternating = useAlternatingMark(mounted && isRunning && Boolean(label))
   if (!mounted) return null
 
-  const label = isRunning ? liveLabel : lastLabel
+  const showLoader = !label || alternating
 
   return (
     /* One row for both phases, so the pre-agent loader and the thinking line
@@ -81,25 +127,28 @@ export function ThinkingPanel({ events, runStatus }: Props) {
        it leave on identical terms. */
     <div className="mila-step-row" data-leaving={isRunning ? undefined : 'true'}>
       <div className="-mx-1.5 mt-2 inline-flex max-w-full items-center gap-2 rounded-md px-1.5 py-1 text-left text-[13px] font-medium text-slate-600">
-        {/* Both marks are mounted and crossfaded rather than swapped. They are
-            different animations on purpose — the Spinner's garland strings
-            itself for *loading*, the Thinking mark walks its gold bead for
-            *agent work*, and MILA never interchanges them — so the handover has
-            to read as one becoming the other rather than one being replaced.
-            Stacked absolutely in a fixed 32px box, so neither can shift the
-            row while the other fades. */}
+        {/* Both marks are mounted and crossfaded rather than swapped, so a
+            handover reads as one becoming the other rather than one being
+            replaced. Stacked absolutely in a fixed 32px box, so neither can
+            shift the row while the other fades.
+
+            The loader is in brand tone, not `muted`. Muted paints the thread
+            and every bead slate — including the gold insight bead, which is the
+            one thing in the mark that is not purple — so the wait before the
+            agent speaks, the longest silent moment in the app, was also the one
+            place the brand mark showed up grey. */}
         <span className="relative inline-flex h-8 w-8 flex-shrink-0 items-center justify-center">
           <span
             className="absolute inset-0 inline-flex items-center justify-center transition-opacity duration-300 ease-out"
-            style={{ opacity: label ? 0 : 1 }}
-            aria-hidden={label ? true : undefined}
+            style={{ opacity: showLoader ? 1 : 0 }}
+            aria-hidden={showLoader ? undefined : true}
           >
-            <Spinner size={32} tone="muted" />
+            <Spinner size={32} />
           </span>
           <span
             className="absolute inset-0 inline-flex items-center justify-center transition-opacity duration-300 ease-out"
-            style={{ opacity: label ? 1 : 0 }}
-            aria-hidden={label ? undefined : true}
+            style={{ opacity: showLoader ? 0 : 1 }}
+            aria-hidden={showLoader ? true : undefined}
           >
             <Thinking size={32} />
           </span>

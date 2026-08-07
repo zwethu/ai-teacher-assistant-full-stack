@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import {
+  ArrowLeft,
   Check,
   ChevronDown,
   PanelRight,
@@ -45,6 +46,8 @@ type Props = {
   onDeleteChat: (chat: Chat) => void
   onOpenPanel: () => void
   panelOpen: boolean
+  /** Returns to the current batch's Chats tab. Omitted when there is no batch to go back to. */
+  onBack?: () => void
 }
 
 export function ChatPageHeader({
@@ -62,6 +65,7 @@ export function ChatPageHeader({
   onDeleteChat,
   onOpenPanel,
   panelOpen,
+  onBack,
 }: Props) {
   const [spaceMenuOpen, setSpaceMenuOpen] = useState(false)
   const [exporting, setExporting] = useState<ChatExportFormat | null>(null)
@@ -110,6 +114,16 @@ export function ChatPageHeader({
   // white/35 + blur(24px) saturate(1.5) + a translucent white hairline.
   return (
     <header className="maia-glass-header relative z-30 flex h-14 flex-shrink-0 items-center gap-3 px-4">
+      {onBack ? (
+        <button
+          type="button"
+          onClick={onBack}
+          className="-ml-1 inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-slate-500 transition-colors hover:bg-white/80 hover:text-slate-800 active:scale-95"
+          aria-label={`Back to chats in ${spaceLabel}`}
+        >
+          <ArrowLeft className="h-4 w-4" />
+        </button>
+      ) : null}
       <div className="min-w-0 flex-1">
         {isRenaming ? (
           <input

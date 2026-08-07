@@ -229,6 +229,14 @@ export function ChatLayout(props: Props) {
           onDeleteChat={(chat) => void handleDeleteChat(chat)}
           onOpenPanel={() => openSidePanel(null)}
           panelOpen={sidePanelOpen}
+          onBack={
+            selectedBatch
+              ? () =>
+                  navigate(
+                    `/batches?batch=${encodeURIComponent(selectedBatch.id)}&tab=materials`,
+                  )
+              : undefined
+          }
         />
 
         {!selectedBatch ? (

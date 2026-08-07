@@ -16,3 +16,11 @@ node_modules/
 
 # TypeScript incremental build cache — regenerated on every compile.
 frontend/tsconfig.tsbuildinfo
+
+# Env backups and retired credential files — never commit, even when "legacy".
+# Note *-service-account*.json did NOT match gcp-service-account.json.edu-prod-legacy,
+# because that pattern requires the name to end in .json.
+.env.*
+!.env.example
+*.edu-prod-legacy
+*.backup-*

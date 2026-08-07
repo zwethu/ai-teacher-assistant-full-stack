@@ -327,25 +327,130 @@ describe('cards arriving after the answer', () => {
 })
 
 /**
- * The live working note has no ambient loop, on purpose. Notes arrive often
- * enough that the per-note transition already carries "still working", and the
- * loop it replaced dimmed the sentence to 2.36:1 against the transcript's wash
- * for half of every cycle.
+ * The live working note loops while the agent is thinking. It did not always:
+ * the first version pulsed the whole line's opacity and dimmed it to 2.36:1
+ * against the transcript's wash for half of every cycle, so it was removed
+ * outright. The loop is back by request, built the other way round — the text
+ * rests at full contrast and a *deeper* band travels through it — and what is
+ * asserted here is that constraint, not the absence of motion.
  */
+
+/** Every stop colour named in a `linear-gradient(...)`, as token names. */
+function gradientTokens(rule: string): string[] {
+  const gradient = /background-image:\s*linear-gradient\(([^;]*)\);/s.exec(rule)?.[1] ?? ''
+  return Array.from(gradient.matchAll(/var\(--([a-z0-9-]+)\)/g), (match) => match[1])
+}
+
+/** The design system's own palette, which is where these tokens resolve. */
+const tokens = readFileSync(
+  new URL('../../../../design-system/tokens/colors.css', import.meta.url),
+  'utf8',
+)
+const hexFor = (token: string) =>
+  new RegExp(`--${token}:\\s*(#[0-9a-f]{6})`, 'i').exec(tokens)?.[1] ?? ''
+
+function relativeLuminance(hex: string) {
+  const channels = [1, 3, 5]
+    .map((index) => parseInt(hex.slice(index, index + 2), 16) / 255)
+    .map((value) => (value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4))
+  return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+}
+
+function contrast(a: string, b: string) {
+  const [lighter, darker] = [relativeLuminance(a), relativeLuminance(b)].sort((x, y) => y - x)
+  return (lighter + 0.05) / (darker + 0.05)
+}
+
+/** Every rule written for `selector`, in source order. */
+function blocks(selector: string): string[] {
+  const lines = css.split('\n')
+  const found: string[] = []
+  lines.forEach((line, start) => {
+    if (line.trim() !== `${selector} {`) return
+    let depth = 0
+    for (let i = start; i < lines.length; i += 1) {
+      depth += (lines[i].match(/\{/g) || []).length
+      depth -= (lines[i].match(/\}/g) || []).length
+      if (depth === 0) return found.push(lines.slice(start + 1, i).join('\n'))
+    }
+  })
+  return found
+}
+
+/** The rule that carries the sweep — the one behind the `@supports` gate, not
+ *  the bare rule above it that only holds the per-note arrival, and not the
+ *  reduced-motion rule below that undoes both. */
+const swept = () =>
+  blocks('.mila-thought-swap').find((rule) => rule.includes('background-clip:')) ?? ''
+
 describe('the working note', () => {
-  it('has no ambient loop of its own', () => {
-    expect(css).not.toMatch(/@keyframes mila-live-text/)
-    expect(css).not.toMatch(/\.mila-live-text\s*\{/)
+  it('loops for as long as it is on screen', () => {
+    expect(css).toMatch(/@keyframes mila-thought-sweep/)
+    expect(swept()).toMatch(/mila-thought-sweep[^;]*infinite/)
   })
 
   it('still animates each new note as it arrives', () => {
-    // The one motion left, and the only one needed: it replays on every note.
+    // The arrival and the loop coexist on one element, so they have to share a
+    // single `animation` shorthand — declaring the second in its own rule would
+    // silently replace the first.
     expect(block('.mila-thought-swap')).toMatch(/animation:/)
     expect(css).toMatch(/@keyframes mila-thought-swap/)
+    expect(swept()).toMatch(/mila-thought-swap 380ms/)
   })
 
-  it('does not dim the text it is drawing attention to', () => {
-    // The retired loop's trough. Whatever replaces this must not reintroduce it.
-    expect(block('@keyframes mila-thought-swap')).not.toMatch(/opacity:\s*0\.6/)
+  /**
+   * The structural half of the guarantee. A loop that only moves the gradient
+   * cannot dim anything, whatever colours it is given — which is why the
+   * keyframes are allowed to touch exactly one property.
+   */
+  it('loops without touching opacity, filter or colour', () => {
+    const frames = block('@keyframes mila-thought-sweep')
+    expect(frames).toMatch(/background-position/)
+    expect(frames).not.toMatch(/opacity|filter|[^-]color:/)
+  })
+
+  /**
+   * The colour half. Every stop the band sweeps through is measured against the
+   * transcript's own wash, so a future tweak to a "nicer" lighter violet fails
+   * here rather than quietly recreating the defect that got the first loop
+   * removed. 4.5:1 is AA for text this size.
+   */
+  it('sweeps only through colours that stay legible on the transcript', () => {
+    const wash = hexFor('academic-bg')
+    const stops = gradientTokens(swept())
+    expect(stops.length).toBeGreaterThan(2)
+
+    for (const stop of stops) {
+      const hex = hexFor(stop)
+      expect(hex, `--${stop} is not a design-system colour`).toMatch(/^#[0-9a-f]{6}$/i)
+      expect(contrast(hex, wash), `--${stop} on the transcript wash`).toBeGreaterThanOrEqual(4.5)
+    }
+  })
+
+  /**
+   * Gold is the brand accent and the one colour that cannot be a glyph here:
+   * 1.43:1 on this wash. It stays on the mark beside the line.
+   */
+  it('keeps gold off the glyphs', () => {
+    expect(gradientTokens(swept()).some((token) => token.startsWith('gold'))).toBe(false)
+  })
+
+  /**
+   * The flash is *in* the letters, and the only thing that makes it so is that
+   * nothing is painted behind them. A first version put a soft gold glow on a
+   * `::before` travelling in phase with the band; clipped to a rounded box
+   * rather than to the glyphs, it read as a highlighter pen dragged across the
+   * sentence — the exact effect this is not meant to be.
+   */
+  it('paints nothing behind the text', () => {
+    expect(swept()).toMatch(/background-clip: text/)
+    expect(css).not.toMatch(/\.mila-thought-swap::(before|after)/)
+  })
+
+  it('hands the glyphs back to a solid colour under reduced motion', () => {
+    // Switching the animation off alone would leave the note painted by a
+    // gradient it can no longer move.
+    const reduced = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'))
+    expect(reduced).toMatch(/\.mila-thought-swap \{\s*background-image: none;\s*color: inherit;/)
   })
 })

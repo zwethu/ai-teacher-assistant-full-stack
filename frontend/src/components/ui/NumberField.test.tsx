@@ -100,20 +100,31 @@ describe('NumberField', () => {
 })
 
 describe('number fields across the app', () => {
-  /**
-   * Games was the last raw `type="number"` on the site, so it was the one
-   * field still drawing the platform's spinner beside controls that draw ours.
-   */
+  /** Source with comments stripped, so a commented-out example never trips a check. */
+  function sourceOf(path: string): string {
+    return readFileSync(path, 'utf8')
+      .replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+  }
+
   it.each([
-    ['Games', 'src/pages/Games.tsx'],
     ['Lesson Plans', 'src/pages/LessonPlans.tsx'],
     ['Assessments', 'src/pages/Assessments.tsx'],
   ])('%s uses the shared control', (_name, path) => {
-    const source = readFileSync(path, 'utf8')
-      .replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-
+    const source = sourceOf(path)
     expect(source).toContain('NumberField')
     expect(source).not.toMatch(/type="number"/)
   })
+
+  /**
+   * Games no longer has an editable pair count — it shows a fixed PAIR_COUNT — so
+   * there is no shared control left to require of it. The ban on the platform's
+   * spinner still applies, and is what stops a raw input creeping back in.
+   */
+  it.each([['Games', 'src/pages/Games.tsx']])(
+    '%s never falls back to the platform spinner',
+    (_name, path) => {
+      expect(sourceOf(path)).not.toMatch(/type="number"/)
+    },
+  )
 })

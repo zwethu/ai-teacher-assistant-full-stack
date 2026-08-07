@@ -49,19 +49,26 @@ def main() -> None:
         course_name=str(batch.get("course_name") or ""),
     )
     folder_map = folders["drive_folders"]
+    # The "Other" folder is no longer provisioned, so anything without a home of
+    # its own goes to the batch root rather than crashing on a missing key.
+    root_folder = {
+        "id": str(folders.get("drive_root_folder_id") or ""),
+        "name": str(folders.get("drive_root_folder_name") or ""),
+        "url": str(folders.get("drive_root_folder_url") or ""),
+    }
 
     for doc in batch_ref.collection("artifacts").stream():
         artifact = doc.to_dict() or {}
         artifact_type = str(artifact.get("type") or artifact.get("artifact_type") or "other")
         if artifact_type == "lab":
-            lab_folder = folder_map.get("lab") or folder_map["other"]
+            lab_folder = folder_map.get("lab") or root_folder
             lecturer_folder = folder_map.get("lab_lecturer") or lab_folder
             student_folder = folder_map.get("lab_student") or lab_folder
             folder = lecturer_folder
             suffix = "Lecturer Guide"
         else:
             folder_key = "assessment" if artifact_type == "quiz" else artifact_type
-            folder = folder_map.get(folder_key) or folder_map["other"]
+            folder = folder_map.get(folder_key) or root_folder
             suffix = ""
         name = build_artifact_file_name(
             version=int(artifact.get("version") or 1),

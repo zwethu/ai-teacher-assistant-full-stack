@@ -18,6 +18,8 @@ FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
 BATCHES_COLLECTION = "batches"
 logger = logging.getLogger(__name__)
 
+# Display names for every folder key we know about. Not all of them are
+# provisioned — see FOLDER_KEYS.
 SUBFOLDER_NAMES = {
     "lesson_plan": "Lesson Plans",
     "lab": "Labs",
@@ -27,7 +29,11 @@ SUBFOLDER_NAMES = {
     "other": "Other",
 }
 
-FOLDER_KEYS = ("lesson_plan", "lab", "assessment", "email", "other")
+# The folders actually created under a batch's Drive root. "email" and "other"
+# were dropped: nothing at runtime ever read them, so every batch was paying two
+# extra Drive round-trips to create folders that stayed empty forever. "lab" stays
+# — artifact export routes lecturer guides and student instructions through it.
+FOLDER_KEYS = ("lesson_plan", "lab", "assessment")
 
 LAB_SUBFOLDER_NAMES = {
     "lab_lecturer": "Lecturer Guides",

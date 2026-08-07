@@ -76,7 +76,11 @@ class LabDriveFolderTests(unittest.TestCase):
             )
 
         folders = result["drive_folders"]
-        self.assertEqual(tuple(FOLDER_KEYS), ("lesson_plan", "lab", "assessment", "email", "other"))
+        # Emails/Other are deliberately not provisioned — nothing ever read them.
+        self.assertEqual(tuple(FOLDER_KEYS), ("lesson_plan", "lab", "assessment"))
+        self.assertNotIn("email", folders)
+        self.assertNotIn("other", folders)
+        self.assertNotIn("Emails", [call.args[1] for call in mock_create.call_args_list])
         self.assertEqual(folders["lab"]["name"], "Labs")
         self.assertEqual(folders["lab_lecturer"]["name"], "Lecturer Guides")
         self.assertEqual(folders["lab_student"]["name"], "Student Instructions")

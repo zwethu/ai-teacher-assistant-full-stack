@@ -57,8 +57,12 @@ def get_google_redirect_uri() -> str:
 
 
 def get_google_flow() -> Flow:
-    client_id = os.getenv("GOOGLE_CLIENT_ID")
-    client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
+    # Strip whitespace and any UTF-8 BOM (U+FEFF): a BOM pasted into an env
+    # file ends up in the Basic-auth header of the token exchange, where
+    # requests' latin-1 encoding raises and sign-in silently bounces back
+    # to /login.
+    client_id = (os.getenv("GOOGLE_CLIENT_ID") or "").strip().lstrip("\ufeff").strip()
+    client_secret = (os.getenv("GOOGLE_CLIENT_SECRET") or "").strip().lstrip("\ufeff").strip()
     if not client_id or not client_secret:
         raise ValueError("GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set")
 

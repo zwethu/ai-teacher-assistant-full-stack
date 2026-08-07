@@ -5,3 +5,4 @@ tests
 docs
 .git
 *.pyc
+.env

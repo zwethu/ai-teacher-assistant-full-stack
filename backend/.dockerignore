@@ -6,3 +6,5 @@ docs
 .git
 *.pyc
 .env
+.env
+env.yaml

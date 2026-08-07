@@ -8,4 +8,4 @@ gcp-service-account.json
 dist/
 build/
 .pytest_cache/
-client_secret.json
+client_secret.jsonenv.yaml

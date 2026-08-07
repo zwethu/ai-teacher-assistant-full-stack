@@ -13,7 +13,6 @@ import type { Chat } from '../../../entity/Chat'
 import axios from 'axios'
 import {
   AlertCircle,
-  Check,
   Clock,
   FileText,
   MessageCircle,
@@ -37,6 +36,8 @@ import { emitChatCreated } from '../../../utils/chatEvents'
 import { BTN_SECONDARY } from '../constants'
 import { IndexStatusBadge } from './IndexStatusBadge'
 import { Menu, MenuItem } from '../../../components/ui/Menu'
+import { confirm } from '../../../components/ui/confirmStore'
+import { undoable, usePendingUndo } from '../../../components/ui/undoStore'
 import { IconButton, Spinner } from '../../../design-system'
 import type { GenerateMode } from '../../chat/components/ComposerSurface'
 import {
@@ -182,9 +183,10 @@ export function MaterialsTab({
   // Matches the chat page's default so the toggle means the same thing here.
   const [webSearch, setWebSearch] = useState(true)
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
+  // Chats inside their undo window: hidden here, still on the server.
+  const pendingUndo = usePendingUndo()
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [composerMenuOpen, setComposerMenuOpen] = useState(false)
   const [generateMode, setGenerateMode] = useState<GenerateMode | null>(null)
   // Files are staged in the browser and only uploaded on send. Nothing here
@@ -396,7 +398,6 @@ export function MaterialsTab({
     setRenamingId(chat.chat_id)
     setRenameValue(chat.title)
     setMenuOpenId(null)
-    setConfirmDeleteId(null)
     setTimeout(() => renameInputRef.current?.focus(), 50)
   }
 
@@ -414,11 +415,34 @@ export function MaterialsTab({
     setRenamingId(null)
   }
 
-  async function doDelete(chat: Chat) {
-    await deleteChat(batchId, chat.chat_id)
-    setChats((prev) => prev.filter((item) => item.chat_id !== chat.chat_id))
-    setConfirmDeleteId(null)
-    setMenuOpenId(null)
+  /* Ask, then hold — the same flow as every other delete in the app. The row
+     used to swap its menu button for a tick and a cross, two small targets
+     side by side where the left one deleted the conversation outright. */
+  /* What the list shows: everything except the chats waiting out their undo
+     window. `chats` itself is untouched, so undoing simply stops hiding one. */
+  const visibleChats = chats.filter((chat) => !pendingUndo.has(chat.chat_id))
+
+  async function handleDeleteChat(chat: Chat) {
+    const ok = await confirm({
+      title: `Delete "${chat.title}"?`,
+      body: 'Every message in this conversation goes with it.',
+      confirmLabel: 'Delete',
+      tone: 'danger',
+    })
+    if (!ok) return
+
+    undoable({
+      id: chat.chat_id,
+      message: `Deleted "${chat.title}".`,
+      commit: async () => {
+        try {
+          await deleteChat(batchId, chat.chat_id)
+          setChats((prev) => prev.filter((item) => item.chat_id !== chat.chat_id))
+        } catch (err) {
+          console.error(err)
+        }
+      },
+    })
   }
 
   return (
@@ -464,13 +488,13 @@ export function MaterialsTab({
               <div className="flex items-center gap-2 px-4 py-5 text-sm text-slate-500">
                 <Spinner size={16} /> Loading chats…
               </div>
-            ) : chats.length === 0 ? (
+            ) : visibleChats.length === 0 ? (
               <p className="px-4 py-5 text-sm text-slate-500">
                 Nothing yet — your chats about this space will collect here.
               </p>
             ) : (
               <ul className="divide-y divide-slate-100">
-                {chats.map((chat) => (
+                {visibleChats.map((chat) => (
                   <li key={chat.chat_id} className="group relative">
                     {/* The row is a real link, not a `div` with an `onClick`.
                         Opening a past chat is this tab's first job and it had
@@ -534,32 +558,13 @@ export function MaterialsTab({
                               rendered at zero opacity. */}
                           <div
                             className={`pointer-events-auto relative flex items-center gap-0.5 transition-opacity ${
-                              confirmDeleteId === chat.chat_id || menuOpenId === chat.chat_id
+                              menuOpenId === chat.chat_id
                                 ? 'opacity-100'
                                 : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
                             }`}
                             data-chat-menu
                           >
-                            {confirmDeleteId === chat.chat_id ? (
-                              <>
-                                <button
-                                  type="button"
-                                  onClick={() => void doDelete(chat)}
-                                  className="rounded p-1 text-red-500 hover:bg-red-50 hover:text-red-600"
-                                  aria-label="Confirm delete chat"
-                                >
-                                  <Check className="h-3.5 w-3.5" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setConfirmDeleteId(null)}
-                                  className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-                                  aria-label="Cancel delete chat"
-                                >
-                                  <X className="h-3.5 w-3.5" />
-                                </button>
-                              </>
-                            ) : (
+                            {
                               /* The panel is portalled, so it escapes this
                                  card's `overflow-hidden` — the last row's menu
                                  used to be sliced off at the card's edge — and
@@ -580,12 +585,12 @@ export function MaterialsTab({
                                 <MenuItem
                                   danger
                                   icon={<Trash2 className="h-4 w-4" />}
-                                  onSelect={() => setConfirmDeleteId(chat.chat_id)}
+                                  onSelect={() => void handleDeleteChat(chat)}
                                 >
                                   Delete
                                 </MenuItem>
                               </Menu>
-                            )}
+                            }
                           </div>
                         </div>
                       </div>
@@ -594,7 +599,7 @@ export function MaterialsTab({
                 ))}
               </ul>
             )}
-            {hasMoreChats && !chatsLoading && chats.length > 0 && (
+            {hasMoreChats && !chatsLoading && visibleChats.length > 0 && (
               <button
                 type="button"
                 onClick={() => void loadOlderChats()}

@@ -1,12 +1,10 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import {
   ArrowLeft,
-  Check,
   ChevronDown,
   PanelRight,
   Pencil,
   Trash2,
-  X,
 } from 'lucide-react'
 import type { Batch } from '../../../entity/Batch'
 import { BatchMenuList } from './BatchMenuList'
@@ -86,14 +84,8 @@ export function ChatPageHeader({
       setExporting(null)
     }
   }
-  const [confirmDelete, setConfirmDelete] = useState(false)
   const spaceMenuRef = useRef<HTMLDivElement>(null)
   const isRenaming = !!activeChat && renamingId === activeChat.chat_id
-
-  // Switching chats abandons a half-started delete; the menu closes itself.
-  useEffect(() => {
-    setConfirmDelete(false)
-  }, [activeChat?.chat_id])
 
   useEffect(() => {
     if (!spaceMenuOpen) return
@@ -191,96 +183,74 @@ export function ChatPageHeader({
             <PanelRight className="h-4 w-4" />
           </button>
 
+          {/* Delete asks in a dialog and holds for ten seconds afterwards, so
+              this button no longer turns into a tick and a cross. */}
           <div className="relative" data-chat-header-menu>
-            {confirmDelete ? (
-              <div className="flex items-center gap-0.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    void onDeleteChat(activeChat)
-                    setConfirmDelete(false)
-                  }}
-                  className="rounded-full p-2 text-red-500 hover:bg-red-50"
-                  aria-label="Confirm delete chat"
-                >
-                  <Check className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setConfirmDelete(false)}
-                  className="rounded-full p-2 text-slate-400 hover:bg-slate-100"
-                  aria-label="Cancel delete chat"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-            ) : (
-              <Menu
-                label="Chat actions"
-                width="w-60"
-                triggerClassName="hover:bg-white/80"
+            <Menu
+              label="Chat actions"
+              width="w-60"
+              triggerClassName="hover:bg-white/80"
+            >
+              {lastUpdated && (
+                <>
+                  <MenuHeader>
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className="text-xs text-slate-500">Last updated</span>
+                      <span className="text-xs font-medium text-slate-700">{lastUpdated}</span>
+                    </div>
+                  </MenuHeader>
+                  <MenuSeparator />
+                </>
+              )}
+
+              <MenuItem
+                icon={<Pencil className="h-4 w-4" />}
+                onSelect={() => onStartRename(activeChat)}
               >
-                {lastUpdated && (
-                  <>
-                    <MenuHeader>
-                      <div className="flex items-baseline justify-between gap-3">
-                        <span className="text-xs text-slate-500">Last updated</span>
-                        <span className="text-xs font-medium text-slate-700">{lastUpdated}</span>
-                      </div>
-                    </MenuHeader>
-                    <MenuSeparator />
-                  </>
-                )}
+                Rename session
+              </MenuItem>
 
-                <MenuItem
-                  icon={<Pencil className="h-4 w-4" />}
-                  onSelect={() => onStartRename(activeChat)}
-                >
-                  Rename session
-                </MenuItem>
+              <MenuSeparator />
+              {/* Exports the whole conversation, not just the last turn. */}
+              {EXPORT_FORMATS.map((format) => {
+                const FormatIcon = EXPORT_FORMAT_ICONS[format]
+                return (
+                  <MenuItem
+                    key={format}
+                    disabled={exporting !== null}
+                    /* The export runs here, in the open menu, and its spinner
+                       is the only sign it is running — closing on select
+                       would take the feedback away with it. */
+                    keepOpen
+                    icon={
+                      exporting === format ? (
+                        <Spinner size={16} />
+                      ) : (
+                        <FormatIcon className="h-4 w-4 text-violet-600" />
+                      )
+                    }
+                    onSelect={(close) => void handleExport(format, close)}
+                  >
+                    Export as {EXPORT_FORMAT_LABELS[format]}
+                  </MenuItem>
+                )
+              })}
 
-                <MenuSeparator />
-                {/* Exports the whole conversation, not just the last turn. */}
-                {EXPORT_FORMATS.map((format) => {
-                  const FormatIcon = EXPORT_FORMAT_ICONS[format]
-                  return (
-                    <MenuItem
-                      key={format}
-                      disabled={exporting !== null}
-                      /* The export runs here, in the open menu, and its spinner
-                         is the only sign it is running — closing on select
-                         would take the feedback away with it. */
-                      keepOpen
-                      icon={
-                        exporting === format ? (
-                          <Spinner size={16} />
-                        ) : (
-                          <FormatIcon className="h-4 w-4 text-violet-600" />
-                        )
-                      }
-                      onSelect={(close) => void handleExport(format, close)}
-                    >
-                      Export as {EXPORT_FORMAT_LABELS[format]}
-                    </MenuItem>
-                  )
-                })}
+              <MenuSeparator />
+              <MenuItem
+                danger
+                icon={<Trash2 className="h-4 w-4" />}
+                onSelect={() => void onDeleteChat(activeChat)}
+              >
+                Delete
+              </MenuItem>
 
-                <MenuSeparator />
-                <MenuItem
-                  danger
-                  icon={<Trash2 className="h-4 w-4" />}
-                  onSelect={() => setConfirmDelete(true)}
-                >
-                  Delete
-                </MenuItem>
-
-                {exportError && (
-                  <p className="mt-1.5 border-t border-slate-100 px-3.5 py-2 text-xs text-red-600">
-                    {exportError}
-                  </p>
-                )}
-              </Menu>
-            )}
+              {exportError && (
+                <p className="mt-1.5 border-t border-slate-100 px-3.5 py-2 text-xs text-red-600">
+                  {exportError}
+                </p>
+              )}
+            </Menu>
           </div>
         </div>
       )}

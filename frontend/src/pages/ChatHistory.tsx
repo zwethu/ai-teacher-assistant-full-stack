@@ -2,15 +2,15 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import {
-  Check,
   MessageCircle,
   MoreHorizontal,
   Pencil,
   Trash2,
-  X,
 } from 'lucide-react'
 import { invalidateSessionsCache, useAllSessions, type SessionItem } from '../hooks/useAllSessions'
 import { deleteChat, updateChatTitle } from '../services/chatService'
+import { confirm } from '../components/ui/confirmStore'
+import { undoable, usePendingUndo } from '../components/ui/undoStore'
 import { formatDateTime, timeAgo } from '../utils/formatDate'
 import { Spinner } from '../design-system'
 
@@ -26,7 +26,8 @@ export default function ChatHistory() {
   const [menuPos, setMenuPos] = useState({ top: 0, right: 0 })
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  // Sessions inside their undo window: hidden here, still on the server.
+  const pendingUndo = usePendingUndo()
   const renameInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -71,7 +72,6 @@ export default function ChatHistory() {
     setRenamingId(session.chat_id)
     setRenameValue(session.title)
     setMenuOpenId(null)
-    setConfirmDeleteId(null)
     setTimeout(() => renameInputRef.current?.focus(), 50)
   }
 
@@ -96,16 +96,35 @@ export default function ChatHistory() {
     }
   }
 
-  async function doDelete(session: SessionItem) {
-    try {
-      await deleteChat(session.batch_id, session.chat_id)
-      invalidateSessionsCache()
-      setConfirmDeleteId(null)
-      setMenuOpenId(null)
-      await refresh(true)
-    } catch (err) {
-      console.error(err)
-    }
+  /* Ask, then hold — the same flow as every other delete in the app. The row
+     used to swap its menu button for a tick and a cross, two small targets
+     side by side where the left one deleted the conversation outright. */
+  /* `sessions` itself is untouched, so undoing simply stops hiding one. */
+  const visibleSessions = sessions.filter((session) => !pendingUndo.has(session.chat_id))
+
+  async function handleDelete(session: SessionItem) {
+    setMenuOpenId(null)
+    const ok = await confirm({
+      title: `Delete "${session.title}"?`,
+      body: 'Every message in this conversation goes with it.',
+      confirmLabel: 'Delete',
+      tone: 'danger',
+    })
+    if (!ok) return
+
+    undoable({
+      id: session.chat_id,
+      message: `Deleted "${session.title}".`,
+      commit: async () => {
+        try {
+          await deleteChat(session.batch_id, session.chat_id)
+          invalidateSessionsCache()
+          await refresh(true)
+        } catch (err) {
+          console.error(err)
+        }
+      },
+    })
   }
 
   return (
@@ -123,7 +142,7 @@ export default function ChatHistory() {
             <Spinner size={32} />
             <p className="text-sm text-slate-500">Loading sessions…</p>
           </div>
-        ) : sessions.length === 0 ? (
+        ) : visibleSessions.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center px-6">
             <MessageCircle className="w-8 h-8 text-slate-300 mb-3" />
             <h3 className="text-sm font-medium text-slate-900">No sessions yet</h3>
@@ -133,7 +152,7 @@ export default function ChatHistory() {
           </div>
         ) : (
           <ul className="divide-y divide-slate-100">
-            {sessions.map((chat) => (
+            {visibleSessions.map((chat) => (
               <li key={chat.chat_id} className="group relative">
                 <div className="flex w-full items-center gap-3 px-5 py-3 transition-colors hover:bg-violet-50/50">
                   <div className="grid h-9 w-9 flex-shrink-0 place-items-center rounded-lg bg-violet-50 text-violet-500 transition-colors group-hover:bg-violet-100">
@@ -187,27 +206,7 @@ export default function ChatHistory() {
                   </div>
 
                   <div className="flex flex-shrink-0 items-center gap-0.5" data-session-menu>
-                    {confirmDeleteId === chat.chat_id ? (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => void doDelete(chat)}
-                          className="rounded-md p-1.5 text-red-500 hover:bg-red-50 hover:text-red-600"
-                          aria-label="Confirm delete session"
-                        >
-                          <Check className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setConfirmDeleteId(null)}
-                          className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-                          aria-label="Cancel delete session"
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
-                      </>
-                    ) : (
-                      <>
+                    <>
                         <button
                           type="button"
                           onClick={(e) => toggleMenu(chat.chat_id, e.currentTarget)}
@@ -233,10 +232,7 @@ export default function ChatHistory() {
                               </button>
                               <button
                                 type="button"
-                                onClick={() => {
-                                  setConfirmDeleteId(chat.chat_id)
-                                  setMenuOpenId(null)
-                                }}
+                                onClick={() => void handleDelete(chat)}
                                 className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-red-500 hover:bg-red-50 hover:text-red-600"
                               >
                                 <Trash2 className="h-3.5 w-3.5" />
@@ -245,8 +241,7 @@ export default function ChatHistory() {
                             </div>,
                             document.body,
                           )}
-                      </>
-                    )}
+                    </>
                   </div>
                 </div>
               </li>

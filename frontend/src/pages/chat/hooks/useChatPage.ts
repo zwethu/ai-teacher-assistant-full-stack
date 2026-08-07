@@ -14,6 +14,8 @@ import { useLocation, useNavigate, useParams, useSearchParams } from 'react-rout
 import type { Batch } from '../../../entity/Batch'
 import type { Chat, ChatAttachment, ChatAttachmentListItem, ChatMessage } from '../../../entity/Chat'
 import { useAuth } from '../../../hooks/useAuth'
+import { confirm } from '../../../components/ui/confirmStore'
+import { undoable, usePendingUndo } from '../../../components/ui/undoStore'
 import { getBatchById, listBatches } from '../../../services/batchService'
 import {
   createChat,
@@ -276,6 +278,10 @@ export function useChatPage() {
 
   const [chats, setChats] = useState<Chat[]>([])
   const [chatsLoading, setChatsLoading] = useState(false)
+  // Chats inside their undo window. They are still here, and still on the
+  // server — only hidden — so undoing is nothing more than this set letting go
+  // of the id.
+  const pendingUndo = usePendingUndo()
   // Sidebar paging. Mirrors the message side: optimistic `true`, falsified only
   // by a page shorter than asked for. The ref is the in-flight guard — the
   // sidebar can fire several scroll events before React re-renders.
@@ -1887,8 +1893,26 @@ export function useChatPage() {
     cancelRename()
   }
 
+  /**
+   * Ask, then hold — the flow every other destructive action in the app uses.
+   *
+   * It replaced a pair of tick/cross glyphs that appeared in place of the
+   * menu button: two 14px targets a few pixels apart, one of which deleted the
+   * conversation immediately and permanently, with nothing naming what was
+   * about to go. The dialog says which chat, and the ten seconds afterwards
+   * catch the answer the dialog cannot — that it was the wrong row.
+   */
   async function handleDeleteChat(chat: Chat) {
     if (!selectedBatch) return
+    const batchId = selectedBatch.id
+    const ok = await confirm({
+      title: `Delete "${chat.title}"?`,
+      body: 'Every message in this conversation goes with it.',
+      confirmLabel: 'Delete',
+      tone: 'danger',
+    })
+    if (!ok) return
+
     const isActiveChat = activeChat?.chat_id === chat.chat_id
     const runIds = new Set<string>()
     if (chat.active_run_id) runIds.add(chat.active_run_id)
@@ -1897,13 +1921,9 @@ export function useChatPage() {
       collectRunIds(messages, activeChat).forEach((runId) => runIds.add(runId))
     }
 
-    try {
-      await deleteChat(selectedBatch.id, chat.chat_id)
-    } catch (err) {
-      console.error(err)
-      return
-    }
-
+    // The screen lets go of the chat straight away — a run that is still
+    // streaming into a conversation nobody can see would go on writing state
+    // for the length of the undo window.
     runIds.forEach((runId) => unsubscribeFromRun(runId))
     setRunStates((prev) => {
       const next = { ...prev }
@@ -1912,7 +1932,6 @@ export function useChatPage() {
       })
       return next
     })
-    setChats((prev) => prev.filter((c) => c.chat_id !== chat.chat_id))
     if (isActiveChat) {
       setActiveChat(null)
       setMessages([])
@@ -1921,7 +1940,26 @@ export function useChatPage() {
       navigate('/chat')
     }
     cancelRename()
-    emitChatCreated()
+
+    undoable({
+      id: chat.chat_id,
+      message: `Deleted "${chat.title}".`,
+      // Deleting the chat you are reading takes you out of it, so undoing has
+      // to put you back — landing on an empty chat page with the conversation
+      // quietly restored in a list behind it is not an undo anyone can see.
+      onUndo: () => {
+        if (isActiveChat) navigate(chatPath(chat.batch_id, chat.chat_id))
+      },
+      commit: async () => {
+        try {
+          await deleteChat(batchId, chat.chat_id)
+          setChats((prev) => prev.filter((c) => c.chat_id !== chat.chat_id))
+          emitChatCreated()
+        } catch (err) {
+          console.error(err)
+        }
+      },
+    })
   }
 
   const showWelcome =
@@ -1948,7 +1986,10 @@ export function useChatPage() {
         navigate('/chat')
       }
     },
-    chats,
+    // Filtered at the boundary, not in state: the hook's own bookkeeping —
+    // paging, the next-chat lookup — should still see a chat that has not
+    // actually been deleted yet.
+    chats: chats.filter((chat) => !pendingUndo.has(chat.chat_id)),
     chatsLoading,
     hasMoreChats,
     loadingMoreChats,

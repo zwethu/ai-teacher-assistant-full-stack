@@ -1,57 +1,226 @@
 {
   "indexes": [
     {
-      "collectionGroup": "chunks",
-      "queryScope": "COLLECTION_GROUP",
+      "collectionGroup": "batches",
+      "queryScope": "COLLECTION",
       "fields": [
-        {"fieldPath": "batch_id", "order": "ASCENDING"},
-        {"fieldPath": "chat_id", "order": "ASCENDING"},
-        {"fieldPath": "lecturer_id", "order": "ASCENDING"},
-        {"fieldPath": "expires_at", "order": "ASCENDING"}
+        {
+          "fieldPath": "lecturer_id",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "created_at",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
-      "collectionGroup": "chunks",
-      "queryScope": "COLLECTION_GROUP",
+      "collectionGroup": "batches",
+      "queryScope": "COLLECTION",
       "fields": [
-        {"fieldPath": "batch_id", "order": "ASCENDING"},
-        {"fieldPath": "chat_id", "order": "ASCENDING"},
-        {"fieldPath": "lecturer_id", "order": "ASCENDING"},
-        {"fieldPath": "attachment_id", "order": "ASCENDING"},
-        {"fieldPath": "expires_at", "order": "ASCENDING"}
+        {
+          "fieldPath": "uid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "chats",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "lecturer_id",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "created_at",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "chats",
       "queryScope": "COLLECTION_GROUP",
       "fields": [
-        {"fieldPath": "type", "order": "ASCENDING"},
-        {"fieldPath": "updated_at", "order": "ASCENDING"}
+        {
+          "fieldPath": "type",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updated_at",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "chunks",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        {
+          "fieldPath": "batch_id",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "chat_id",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "lecturer_id",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "attachment_id",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "expires_at",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "chunks",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        {
+          "fieldPath": "batch_id",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "chat_id",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "lecturer_id",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "expires_at",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "emails",
       "queryScope": "COLLECTION",
       "fields": [
-        {"fieldPath": "status", "order": "ASCENDING"},
-        {"fieldPath": "send_at", "order": "ASCENDING"}
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "send_at",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "gameSessions",
       "queryScope": "COLLECTION",
       "fields": [
-        {"fieldPath": "batchId", "order": "ASCENDING"},
-        {"fieldPath": "lecturerId", "order": "ASCENDING"}
+        {
+          "fieldPath": "batchId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "lecturerId",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "wellness",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "uid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "date",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "wellness_journal",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "uid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "created_at",
+          "order": "ASCENDING"
+        }
       ]
     }
   ],
   "fieldOverrides": [
-    {"collectionGroup": "attachments", "fieldPath": "expires_at", "indexes": [{"order": "ASCENDING", "queryScope": "COLLECTION_GROUP"}]},
-    {"collectionGroup": "files", "fieldPath": "index_status", "indexes": [{"order": "ASCENDING", "queryScope": "COLLECTION_GROUP"}]},
-    {"collectionGroup": "runs", "fieldPath": "status", "indexes": [{"order": "ASCENDING", "queryScope": "COLLECTION_GROUP"}]},
-    {"collectionGroup": "files", "fieldPath": "overlay_status", "indexes": [{"order": "ASCENDING", "queryScope": "COLLECTION_GROUP"}]},
-    {"collectionGroup": "attachments", "fieldPath": "embedding_status", "indexes": [{"order": "ASCENDING", "queryScope": "COLLECTION_GROUP"}]},
-    {"collectionGroup": "attachments", "fieldPath": "ocr_status", "indexes": [{"order": "ASCENDING", "queryScope": "COLLECTION_GROUP"}]}
+    {
+      "collectionGroup": "attachments",
+      "fieldPath": "expires_at",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "files",
+      "fieldPath": "index_status",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "runs",
+      "fieldPath": "status",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "files",
+      "fieldPath": "overlay_status",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "attachments",
+      "fieldPath": "embedding_status",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "attachments",
+      "fieldPath": "ocr_status",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        }
+      ]
+    }
   ]
 }

@@ -24,3 +24,5 @@ frontend/tsconfig.tsbuildinfo
 !.env.example
 *.edu-prod-legacy
 *.backup-*
+*-legacy
+*.legacy

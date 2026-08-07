@@ -46,10 +46,16 @@ from routers.files import router as files_router
 from routers.game import router as game_router
 from services.maintenance_scheduler import shutdown_scheduler, start_scheduler
 
-_frontend_url = (os.getenv("FRONTEND_URL") or "http://localhost:5173").rstrip("/")
-_cors_origins = list(
-    dict.fromkeys([_frontend_url, "http://localhost:5173"]),
-)
+# Comma-separated list of allowed browser origins. Local dev works with the
+# default; production sets CORS_ALLOWED_ORIGINS=https://milamfu.com,https://www.milamfu.com
+_cors_origins = [
+    origin.strip().rstrip("/")
+    for origin in os.getenv(
+        "CORS_ALLOWED_ORIGINS",
+        "http://localhost:5173,http://localhost:8000",
+    ).split(",")
+    if origin.strip()
+]
 
 app = FastAPI(title="AI Teacher Assistant API")
 

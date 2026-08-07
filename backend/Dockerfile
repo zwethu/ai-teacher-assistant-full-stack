@@ -6,11 +6,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PORT=8080
 
-COPY pyproject.toml README.md ./
-COPY main.py ./
-COPY routers ./routers
-COPY services ./services
-COPY utils ./utils
+COPY . .
 
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir .

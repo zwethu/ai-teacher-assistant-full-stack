@@ -13,7 +13,13 @@ CurrentUser = dict[str, Any]
 
 
 def init_firebase() -> firebase_admin.App:
-    """Initialize Firebase Admin once using the service account key file."""
+    """Initialize Firebase Admin once, preferring a key file and falling back to ADC.
+
+    Firebase now lives in the same GCP project as everything else, so no key is
+    required: locally ADC comes from `gcloud auth application-default login`, and on
+    Cloud Run it is the attached runtime service account. A key file is still honoured
+    when present, which keeps pointing at a different Firebase project possible.
+    """
     global _app
     if _app is not None:
         return _app
@@ -27,17 +33,29 @@ def init_firebase() -> firebase_admin.App:
         fallback = backend_dir / "serviceAccountKey.json"
         if fallback.is_file():
             resolved = fallback
-    if not resolved.is_file():
-        raise RuntimeError(
-            "FIREBASE_SERVICE_ACCOUNT must point to a valid service account JSON file"
-        )
 
-    os.environ["FIREBASE_SERVICE_ACCOUNT"] = str(resolved)
-    cred = credentials.Certificate(str(resolved))
     options: dict[str, str] = {}
     project_id = (os.getenv("FIREBASE_PROJECT_ID") or "").strip()
     if project_id:
         options["projectId"] = project_id
+
+    if resolved.is_file():
+        os.environ["FIREBASE_SERVICE_ACCOUNT"] = str(resolved)
+        cred = credentials.Certificate(str(resolved))
+    else:
+        # No key on disk — this is the expected path in production.
+        # ApplicationDefault() raises a clear DefaultCredentialsError if ADC is absent
+        # too, so a genuinely unauthenticated environment still fails loudly.
+        cred = credentials.ApplicationDefault()
+        # create_custom_token() has to SIGN a JWT, which ADC alone cannot do: a user
+        # credential has no private key, and off-GCP there is no metadata server to
+        # discover a service account from. Naming one here makes firebase_admin sign
+        # through the IAM SignBlob API instead. The caller needs
+        # roles/iam.serviceAccountTokenCreator on that account — on Cloud Run the
+        # runtime SA signs as itself; locally your ADC user needs the same role.
+        signer = (os.getenv("FIREBASE_SERVICE_ACCOUNT_ID") or "").strip()
+        if signer:
+            options["serviceAccountId"] = signer
 
     _app = firebase_admin.initialize_app(cred, options or None)
     return _app

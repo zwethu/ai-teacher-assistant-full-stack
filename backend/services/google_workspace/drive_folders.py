@@ -51,7 +51,10 @@ def sanitize_drive_name(name: str) -> str:
 
 def build_batch_root_folder_name(batch_name: str, course_name: str = "") -> str:
     del course_name
-    return sanitize_drive_name(f"PNAI - {batch_name or 'Batch'}")
+    # Lecturer-facing name in their own Drive, so it carries the product name:
+    # MILA, not the old PNAI. Batches created before the rename keep their old
+    # folder name until something calls rename_batch_root_folder().
+    return sanitize_drive_name(f"MILA - {batch_name or 'Batch'}")
 
 
 def rename_batch_root_folder(uid: str, folder_id: str, batch_name: str) -> None:

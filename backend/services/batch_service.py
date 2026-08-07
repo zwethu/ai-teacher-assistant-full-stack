@@ -165,7 +165,7 @@ def _rename_drive_root_folder(
     batch_name: str,
     batch_id: str,
 ) -> None:
-    """Best-effort: keep the 'PNAI - <batch>' Drive folder name in sync. Never fatal —
+    """Best-effort: keep the 'MILA - <batch>' Drive folder name in sync. Never fatal —
     the lecturer may not have Google connected, and the folder is tracked by id."""
     if not folder_id:
         return

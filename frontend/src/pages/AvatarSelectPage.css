@@ -35,11 +35,15 @@
   box-shadow: var(--g-shadow-lg);
 }
 
+/* The 46px side padding is the corner controls' keep-out zone: the back disc
+   and the music toggle are absolutely positioned at 18px, and a centred title
+   with a long nickname in it will otherwise run straight under both. */
 .avatar-select-title {
-  font-size: 1.7rem;
+  font-size: clamp(1.2rem, 5.2vw, 1.7rem);
   font-weight: 900;
   color: var(--g-cocoa-900);
   margin: 0;
+  padding: 0 46px;
   text-align: center;
 }
 
@@ -68,7 +72,20 @@
 }
 
 @media (max-width: 520px) {
-  .avatar-select-grid { grid-template-columns: 1fr; }
+  .avatar-select-grid { grid-template-columns: 1fr; gap: 12px; }
+  .avatar-select-bg { padding: 16px 12px; }
+  .avatar-select-card { padding: 22px 16px 20px; border-radius: 24px; }
+  /* Discs stay 38px — that is already small for a fingertip — they just move
+     further into the corners to give the title more room. */
+  .avatar-select-card .play-back-btn { top: 12px; left: 12px; }
+  .avatar-select-card .music-toggle { top: 12px; right: 12px; }
+  .avatar-select-title { padding: 0 42px; }
+  /* Both pets on one column: a full-size Lottie each would push the continue
+     button two screens down. */
+  .avatar-lottie-wrap { width: 112px; height: 112px; }
+  .avatar-option { padding: 14px 12px 12px; }
+  .avatar-option-blurb { min-height: 0; }
+  .avatar-continue-btn { width: 100%; padding: 14px 20px; font-size: 1.05rem; }
 }
 
 /* height: 100% + the grid's default stretch keeps both cards the same height,

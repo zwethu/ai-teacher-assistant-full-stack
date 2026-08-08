@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Medal } from '@phosphor-icons/react';
+import { ArrowLeft, Medal } from '@phosphor-icons/react';
 import { signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
 import { auth } from '../lib/firebase';
 import {
@@ -113,6 +113,10 @@ export default function PlayEntryPage() {
   async function handleGoogleSignIn() {
     try {
       const provider = new GoogleAuthProvider();
+      // Force the account chooser. Without it Google silently reuses the one
+      // account already signed into the browser, so "use a different account"
+      // would land the student straight back on the screen they left.
+      provider.setCustomParameters({ prompt: 'select_account' });
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
       if (!user.email || !session) return;
@@ -144,8 +148,17 @@ export default function PlayEntryPage() {
   async function handleSignOut() {
     await signOut(auth);
     setStep('login');
+    // Everything below is keyed to the account that just left. Clearing it
+    // matters most on a shared phone: without it the next student inherits the
+    // previous one's nickname and attempt record in memory.
     setUserEmail('');
     setUserUid('');
+    setNickname('');
+    setNicknameInput('');
+    setNicknameError('');
+    setStoredAttempt(null);
+    setCertOpen(false);
+    setAvatar(null);
   }
 
   // ─── Render ──────────────────────────────────────────────────
@@ -237,6 +250,14 @@ export default function PlayEntryPage() {
             </button>
           )}
           <p className="play-footer-hint">Lost your certificate? Grab it again anytime ✨</p>
+
+          {/* The one screen with no way onward and no back step to return to:
+              buddy/mode select can route back to the nickname screen, and that
+              screen's own back signs out. Here the only wrong turn worth undoing
+              is the account itself, so it gets the explicit control. */}
+          <button className="play-secondary-btn" onClick={handleSignOut}>
+            Sign in with a different account
+          </button>
         </div>
 
         {certOpen && storedAttempt && (
@@ -286,18 +307,37 @@ export default function PlayEntryPage() {
     return (
       <div className="play-entry-bg">
         <div className="play-card">
+          {/* Root of the back chain: buddy select returns here, and here the
+              previous step really is the sign-in screen — so back = sign out.
+              Without it a student who picked the wrong Google account has no
+              way off this screen. */}
+          <button
+            type="button"
+            className="play-back-btn"
+            onClick={handleSignOut}
+            disabled={saving}
+            aria-label="Back to sign in with a different account"
+            title="Back to sign in with a different account"
+          >
+            <ArrowLeft size={18} weight="bold" />
+          </button>
           <CatSprite mood="idle" />
           <h2 className="play-title">What's your name?</h2>
           <p className="play-subtitle">Choose a nickname — your cat will remember it! 🐾</p>
           <div className="play-input-wrap">
+            {/* No `name` attribute, and autofill off: this is a shared-device
+                flow, so the browser must not offer the last student's nickname
+                (or the device owner's saved names) to the next player. */}
             <input
               className="play-nickname-input"
               type="text"
-              placeholder="e.g. StarStudent, Zwe..."
+              placeholder="e.g. StarStudent, MoonCat..."
               value={nicknameInput}
               onChange={e => { setNicknameInput(e.target.value); setNicknameError(''); }}
               onKeyDown={e => e.key === 'Enter' && handleNicknameSubmit()}
               maxLength={20}
+              autoComplete="off"
+              spellCheck={false}
               autoFocus
             />
             {nicknameError && <p className="play-input-error">{nicknameError}</p>}

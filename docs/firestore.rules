@@ -6,17 +6,30 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    // Staff. Being signed in is NOT the same thing: students sign into this
+    // same project to play their game, so every teacher-side collection has to
+    // ask for the role, not just for a user.
+    //
+    // The claim is stamped by the OAuth callback (backend/routers/auth.py) from
+    // the `lecturers` allowlist, which only the Admin SDK can read. A student's
+    // token simply has no `role`, so this is false for them.
+    function isLecturer() {
+      return signedIn() && request.auth.token.role == 'lecturer';
+    }
+
     // Documents scoped by a top-level "uid" field (must match the signed-in user).
+    // Every collection using these three is teacher-side, so the lecturer check
+    // lives here rather than being repeated at each match block.
     function isOwner() {
-      return signedIn() && resource.data.uid == request.auth.uid;
+      return isLecturer() && resource.data.uid == request.auth.uid;
     }
 
     function isOwnerOnCreate() {
-      return signedIn() && request.resource.data.uid == request.auth.uid;
+      return isLecturer() && request.resource.data.uid == request.auth.uid;
     }
 
     function isOwnerOnUpdate() {
-      return signedIn()
+      return isLecturer()
         && resource.data.uid == request.auth.uid
         && request.resource.data.uid == request.auth.uid;
     }
@@ -48,8 +61,15 @@ service cloud.firestore {
       return signedIn() && docId.matches('.*_' + request.auth.uid);
     }
 
+    // The lecturer allowlist itself. Admin SDK and the Firebase console only:
+    // reading it would expose a roster of staff addresses, and writing it would
+    // be a button that promotes you to teacher.
+    match /lecturers/{email} {
+      allow read, write: if false;
+    }
+
     match /users/{userId} {
-      allow read, create, update, delete: if signedIn() && request.auth.uid == userId;
+      allow read, create, update, delete: if isLecturer() && request.auth.uid == userId;
 
       // Secrets (e.g. the Google OAuth refresh token) live under users/{uid}/private/*.
       // Admin SDK only — never readable/writable by the client, even by the owner.
@@ -121,7 +141,7 @@ service cloud.firestore {
 
     // Stress score per user (document id = Firebase Auth uid).
     match /user_stress/{uid} {
-      allow read, create, update, delete: if signedIn() && request.auth.uid == uid;
+      allow read, create, update, delete: if isLecturer() && request.auth.uid == uid;
     }
 
     // Post-breathing journal entries (scoped by uid field).

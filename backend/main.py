@@ -32,8 +32,10 @@ _configure_gcp_credentials()
 
 logging.basicConfig(level=logging.INFO)
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+from utils.deps import require_lecturer
 
 from routers.agent import router as agent_router
 from routers.artifacts import router as artifacts_router
@@ -67,15 +69,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Everything the browser calls is teacher-side work: the student game reads and
+# writes Firestore directly and never touches this API. So the lecturer check
+# goes on the INCLUDE rather than on each endpoint — a route added tomorrow is
+# then protected by default instead of protected if someone remembers to.
+#
+# `auth` is excluded because it is how you get a role in the first place, and
+# `tasks` because its callers are Cloud Tasks/Scheduler, which carry an OIDC
+# token and no user at all (it verifies that itself).
+_lecturer_only = [Depends(require_lecturer)]
+
 app.include_router(auth_router, prefix="", tags=["auth"])
-app.include_router(batches_router)
-app.include_router(artifacts_router)
-app.include_router(files_router)
-app.include_router(chats_router)
-app.include_router(course_blueprint_router)
-app.include_router(game_router)
-app.include_router(email_router, prefix="", tags=["email"])
-app.include_router(agent_router, prefix="/agent", tags=["agent"])
+app.include_router(batches_router, dependencies=_lecturer_only)
+app.include_router(artifacts_router, dependencies=_lecturer_only)
+app.include_router(files_router, dependencies=_lecturer_only)
+app.include_router(chats_router, dependencies=_lecturer_only)
+app.include_router(course_blueprint_router, dependencies=_lecturer_only)
+app.include_router(game_router, dependencies=_lecturer_only)
+app.include_router(email_router, prefix="", tags=["email"], dependencies=_lecturer_only)
+app.include_router(agent_router, prefix="/agent", tags=["agent"], dependencies=_lecturer_only)
 
 from routers.tasks import router as tasks_router  # noqa: E402
 app.include_router(tasks_router)

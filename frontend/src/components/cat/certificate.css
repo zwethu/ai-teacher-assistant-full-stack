@@ -135,7 +135,31 @@
   max-height: 70vh;
   overflow: auto;
 }
-.cert-modal-actions { display: flex; gap: 12px; }
+
+/* ─── Scale-to-fit wrapper ───
+   The certificate has to stay 640px wide — that width is what makes the PNG
+   export come out clean — so on a phone it is scaled down rather than reflowed.
+   A transform doesn't affect layout, so the wrapper reserves the SCALED box
+   itself; without that the modal would still size itself for 640px and leave a
+   dead margin. --cert-scale / --cert-height are set by CertificateModal.
+   The export cancels the transform on its clone, so the file is always 640px. */
+.cert-fit {
+  width: calc(640px * var(--cert-scale, 1));
+  height: calc(var(--cert-height, 0px) * var(--cert-scale, 1));
+  overflow: hidden;
+}
+.cert-fit > .certificate {
+  transform: scale(var(--cert-scale, 1));
+  transform-origin: top left;
+}
+
+.cert-modal-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; }
+
+@media (max-width: 560px) {
+  .cert-modal { padding: 14px; border-radius: 20px; gap: 12px; }
+  .cert-scroll { max-height: 62vh; }
+  .cert-download-btn, .cert-close-btn { flex: 1 1 auto; justify-content: center; }
+}
 .cert-download-btn {
   padding: 12px 30px;
   border: none;

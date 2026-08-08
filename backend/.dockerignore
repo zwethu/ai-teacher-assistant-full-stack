@@ -7,3 +7,12 @@ docs
 *.pyc
 .env
 env.yaml
+
+# Service-account keys must never enter the image. Beyond the obvious — a private
+# key baked into every layer — a key file here silently WINS over ADC in
+# init_firebase(), which is how the backend ended up writing to a different
+# Firebase project than the browser reads. On Cloud Run the runtime service
+# account is the credential; nothing needs to be shipped.
+serviceAccountKey.json
+gcp-service-account.json
+client_secret.json

@@ -21,6 +21,33 @@ service cloud.firestore {
         && request.resource.data.uid == request.auth.uid;
     }
 
+    // Player-scoped game documents (gameRuns, attempts) are one-per-player-per-
+    // game and share the id `{assessmentId}_{uid}`. Ownership and id shape are
+    // therefore the same test for both; only their lifecycles differ, which is
+    // why the write rules below still diverge.
+    function ownsPlayerDoc(data) {
+      return signedIn() && data.playerUid == request.auth.uid;
+    }
+
+    // Checking the id, not just the field, is what stops a player writing a
+    // well-formed document into someone else's slot.
+    function idIsPlayerScoped(docId, data) {
+      return docId == data.assessmentId + '_' + request.auth.uid;
+    }
+
+    // Reading one of these documents has to be gated on the ID, not on the data.
+    // `resource` is null for a document that has never been written, and reading
+    // `resource.data` off null is an ERROR — which denies. Both of these are read
+    // before they exist by design: the entry page asks "have you played yet?" and
+    // the timed run asks "have you started yet?". Gating on data would answer both
+    // with a permission error that the app can only render as a broken link.
+    //
+    // The id is trustworthy precisely because the create rules below refuse any id
+    // that is not `{assessmentId}_{callerUid}`.
+    function idBelongsToCaller(docId) {
+      return signedIn() && docId.matches('.*_' + request.auth.uid);
+    }
+
     match /users/{userId} {
       allow read, create, update, delete: if signedIn() && request.auth.uid == userId;
 
@@ -45,12 +72,34 @@ service cloud.firestore {
       allow delete: if isOwner();
 
       match /students/{studentId} {
+        // lecturer_id, NOT uid: that is the field the backend actually writes on
+        // a batch document. Reading a field that does not exist is an ERROR in
+        // rules, not `false`, and an erroring expression denies the request — so
+        // the old `.data.uid` spelling made every read here fail, including the
+        // student enrolment check below.
         function batchOwner() {
           return signedIn()
-            && get(/databases/$(database)/documents/batches/$(batchId)).data.uid
+            && get(/databases/$(database)/documents/batches/$(batchId)).data.lecturer_id
                == request.auth.uid;
         }
-        allow get, list: if batchOwner();
+
+        function ownRosterRow() {
+          return signedIn()
+            && resource.data.email_normalized == request.auth.token.email.lower();
+        }
+
+        allow get: if batchOwner();
+        // A student entering a game has to be able to answer one question about
+        // this roster: "am I on it?". The rule is per-document, so the only query
+        // Firestore will accept is one already filtered to their own address —
+        // `checkStudentAccess` filters on email_normalized, which both roster
+        // write paths populate. Nobody can read anyone else's row this way.
+        //
+        // The student check goes FIRST deliberately. `||` evaluates left to right,
+        // so putting the get()-based owner check first means any future breakage
+        // in it (a renamed field, a deleted batch) takes the student flow down
+        // with it — which is exactly what happened once already.
+        allow list: if ownRosterRow() || batchOwner();
         allow create: if batchOwner();
         allow update, delete: if batchOwner();
       }
@@ -107,23 +156,61 @@ service cloud.firestore {
     //   · the doc can never be deleted, since deleting it and re-creating is
     //     the same reset by another route
     match /gameRuns/{runId} {
-      function ownRun(data) {
-        return signedIn() && data.playerUid == request.auth.uid;
-      }
+      // See idBelongsToCaller: the first load of a run reads this before it exists.
+      allow get: if idBelongsToCaller(runId);
 
-      allow get: if ownRun(resource.data);
-
-      allow create: if ownRun(request.resource.data)
-        && runId == request.resource.data.assessmentId + '_' + request.auth.uid
+      allow create: if ownsPlayerDoc(request.resource.data)
+        && idIsPlayerScoped(runId, request.resource.data)
         && request.resource.data.startedAt  == request.time
         && request.resource.data.lastSeenAt == request.time;
 
       // Resuming only ever touches lastSeenAt.
-      allow update: if ownRun(resource.data)
+      allow update: if ownsPlayerDoc(resource.data)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastSeenAt'])
         && request.resource.data.lastSeenAt == request.time;
 
       allow delete: if false;
+    }
+
+    // The game a student plays. Created and edited only by the backend (Admin
+    // SDK), which is why every write below is shut except the play counter.
+    //
+    // `get` is open because the entry page loads the session BEFORE auth: on a
+    // fresh page load Firebase restores the sign-in token asynchronously, so a
+    // signedIn() gate here would deny genuine students who simply lost the race.
+    // The cost is that a link-holder can read `items` (the answers) without
+    // playing — bounded by the fact that the client must load those items into
+    // the browser anyway for the game to run at all.
+    match /gameSessions/{gameId} {
+      allow get: if true;
+
+      // The player app increments gameModeStats.<mode> when a mode is chosen.
+      // Nothing else on the document is the client's to touch — least of all
+      // `items`, `status` or `deadlineAt`.
+      allow update: if signedIn()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['gameModeStats']);
+
+      allow create, delete, list: if false;
+    }
+
+    // Nickname and avatar, keyed by Firebase Auth uid.
+    match /players/{uid} {
+      allow get, create, update: if signedIn() && request.auth.uid == uid;
+      allow list, delete: if false;
+    }
+
+    // A finished run. One document per player per game, id `{assessmentId}_{uid}`.
+    match /attempts/{attemptId} {
+      // See idBelongsToCaller: every first-time player reads this before it exists.
+      allow get: if idBelongsToCaller(attemptId);
+
+      allow create: if ownsPlayerDoc(request.resource.data)
+        && idIsPlayerScoped(attemptId, request.resource.data);
+
+      // No update path. saveAttempt uses setDoc, so "play once" is enforced here
+      // rather than by the UI — a second submission is a write to an existing
+      // document, and that is exactly what this denies.
+      allow update, delete, list: if false;
     }
 
     // Written only by the backend (Admin SDK). Block all client access.

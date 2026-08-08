@@ -517,7 +517,7 @@ export default function CatGame({
   // the player on a full-time countdown that then snaps to the truth, and would
   // start measuring their planning delay against a puzzle they can't submit yet.
   if (syncing) {
-    return <PageSpinner label="Starting your round…" tips={[]} />;
+    return <PageSpinner label="Starting your round…" tips={[]} avatar={avatar} />;
   }
 
   // The closed door. Deliberately NOT a playable board with a local clock —

@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react'
 import { PawPrint } from '@phosphor-icons/react'
-import Lottie from '../cat/LottieBox'
-import loadingAnimation from '../../assets/animations/Animal care Loading.json'
+import type { AvatarType } from '../../types/catGame.types'
 import './PageSpinner.css'
 
 interface PageSpinnerProps {
   label?: string
   /** Lines cycled under the label. Pass [] to show none. */
   tips?: string[]
+  /** Which pet the player picked. Drives the one accent colour on this screen:
+   *  pink for the cat, blue for the dog. Defaults to cat, same as the game. */
+  avatar?: AvatarType
 }
 
 const DEFAULT_TIPS = [
@@ -18,7 +20,11 @@ const DEFAULT_TIPS = [
 
 const TIP_INTERVAL_MS = 3200
 
-export default function PageSpinner({ label = 'Loading…', tips = DEFAULT_TIPS }: PageSpinnerProps) {
+export default function PageSpinner({
+  label = 'Loading…',
+  tips = DEFAULT_TIPS,
+  avatar = 'cat',
+}: PageSpinnerProps) {
   const [tipIndex, setTipIndex] = useState(0)
 
   // A still screen reads as "frozen" after a few seconds. Rotating copy is the
@@ -29,15 +35,13 @@ export default function PageSpinner({ label = 'Loading…', tips = DEFAULT_TIPS 
     return () => clearInterval(id)
   }, [tips.length])
 
+  // The theme class goes on the outer element so every token below it — bar,
+  // track, paws — recomputes against the chosen pet's ramp.
   return (
-    <div className="loader-screen">
+    <div className={`loader-screen theme-${avatar}`}>
       {/* One live region for the whole card: screen readers get the label, and
-          the decorative animation/paws stay out of the announcement. */}
+          the decorative bar/paws stay out of the announcement. */}
       <div className="loader-card" role="status" aria-live="polite" aria-label={label}>
-        <div className="loader-lottie" aria-hidden="true">
-          <Lottie animationData={loadingAnimation as object} loop autoplay />
-        </div>
-
         <p className="loader-label">{label}</p>
 
         <div className="loader-bar" aria-hidden="true" />

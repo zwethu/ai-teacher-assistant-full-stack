@@ -32,7 +32,10 @@ export async function checkStudentAccess(
   email: string
 ): Promise<boolean> {
   const studentsRef = collection(db, 'batches', batchId, 'students');
-  const q = query(studentsRef, where('email', '==', email));
+  // email_normalized, not email: the roster stores the address as the lecturer
+  // typed it, and Google hands back a lowercase one. Matching on the raw field
+  // means a student rostered as "Somchai@..." is told they are not enrolled.
+  const q = query(studentsRef, where('email_normalized', '==', email.toLowerCase()));
   const snap = await getDocs(q);
   return !snap.empty;
 }

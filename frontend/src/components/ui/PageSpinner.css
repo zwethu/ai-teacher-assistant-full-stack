@@ -30,13 +30,6 @@
   animation: loaderIn 0.4s ease;
 }
 
-.loader-lottie {
-  width: 160px;
-  height: 160px;
-  margin-bottom: 2px;
-}
-.loader-lottie > * { width: 100% !important; height: 100% !important; }
-
 .loader-label {
   margin: 0;
   font-size: 1.05rem;
@@ -53,7 +46,9 @@
   height: 8px;
   margin-top: 10px;
   border-radius: 6px;
-  background: var(--g-cream-200);
+  /* Light brand tint, not cream — the track is the same surface family as the
+     rest of the flow, and cream read as brown next to it. */
+  background: var(--g-rose-200);
   overflow: hidden;
 }
 .loader-bar::after {
@@ -62,7 +57,9 @@
   inset: 0 auto 0 0;
   width: 40%;
   border-radius: 6px;
-  background: linear-gradient(90deg, var(--g-rose-300), var(--g-rose-500), var(--g-rose-300));
+  /* One flat brand colour. `--g-accent` is pink at :root and blue inside
+     .theme-dog, so the bar follows the pet the player picked. */
+  background: var(--g-accent);
   animation: loaderSlide 1.4s ease-in-out infinite;
 }
 
@@ -73,7 +70,7 @@
   justify-content: center;
   gap: 10px;
   margin-top: 12px;
-  color: var(--g-peach-400);
+  color: var(--g-accent);
 }
 .loader-paw {
   animation: pawStep 1.2s ease-in-out infinite;

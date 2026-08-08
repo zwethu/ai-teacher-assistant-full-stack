@@ -310,6 +310,33 @@ def mark_agent_run_cancelled(*, batch_id: str, chat_id: str, run_id: str) -> boo
     return True
 
 
+def chat_has_recent_cancelled_run(
+    *, batch_id: str, chat_id: str, within_seconds: int = 90
+) -> bool:
+    """True when a run on this chat was stopped in the last *within_seconds*.
+
+    Stop cannot abort the Agent Engine invocation in flight, so for a short
+    window after a cancel the session is still being written to by the orphaned
+    run, and a new run started into it fails on arrival. This is how the new
+    run's failure handler tells that collision apart from a genuine error — the
+    only caller, so the read only happens when a run has already failed.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    docs = (
+        _chat_ref(batch_id, chat_id)
+        .collection("runs")
+        .where("status", "==", "cancelled")
+        .stream()
+    )
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=within_seconds)
+    for doc in docs:
+        cancelled_at = (doc.to_dict() or {}).get("cancelled_at")
+        if cancelled_at is not None and cancelled_at >= cutoff:
+            return True
+    return False
+
+
 def is_agent_run_cancelled(*, batch_id: str, chat_id: str, run_id: str) -> bool:
     """True when the lecturer stopped this run; the worker uses it to discard."""
     snap = _run_ref(batch_id, chat_id, run_id).get()

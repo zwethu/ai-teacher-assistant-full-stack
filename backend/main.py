@@ -21,10 +21,32 @@ def _configure_gcp_credentials() -> None:
     if path.is_file():
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(path.resolve())
         logging.getLogger(__name__).info("Using GCP credentials: %s", path)
-    else:
+        return
+
+    # No key file is the NORMAL state everywhere but legacy local setups: local
+    # dev uses `gcloud auth application-default login` and Cloud Run uses the
+    # runtime service account via the metadata server. This used to warn
+    # "uploads will fail" unconditionally — on every boot of a correctly
+    # configured process — so prove the claim before making it.
+    try:
+        import google.auth
+
+        credentials, project = google.auth.default()
+        identity = getattr(credentials, "service_account_email", None) or type(
+            credentials
+        ).__name__
+        logging.getLogger(__name__).info(
+            "No GCP key file; using Application Default Credentials (%s, project=%s)",
+            identity,
+            project,
+        )
+    except Exception as exc:
         logging.getLogger(__name__).warning(
-            "GCP credentials file not found (tried %s). GCS/Vertex uploads will fail.",
+            "No GCP credentials at all (no key file at %s, and ADC failed: %s). "
+            "GCS/Vertex uploads WILL fail — run `gcloud auth application-default login` "
+            "or attach a runtime service account.",
             raw,
+            exc,
         )
 
 

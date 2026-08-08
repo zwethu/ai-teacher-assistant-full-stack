@@ -45,11 +45,16 @@ from fastapi import BackgroundTasks, HTTPException, status
 from entity.Batch import BatchModel
 from entity.CourseBlueprint import CourseBlueprintContent
 from entity.GameSession import MAX_GAME_ITEMS, MIN_GAME_ITEMS
-from services.agent_engine_client import get_agent_engine_resource_name, stream_agent_response
+from services.agent_engine_client import (
+    get_agent_engine_resource_name,
+    is_transient_engine_error,
+    stream_agent_response,
+)
 from services.agent_platform_sessions import get_agent_session_state
 from services.agent_artifact_context import build_agent_artifact_manifest
 from services.artifact_sync_service import preflight_sync_artifacts_for_agent_run
 from services.agent_sessions import (
+    chat_has_recent_cancelled_run,
     is_agent_run_cancelled,
     claim_run_dispatch,
     create_agent_run_record,
@@ -105,6 +110,14 @@ logger = logging.getLogger(__name__)
 # How often the streaming loop checks whether the lecturer pressed Stop.
 # Responsive enough to feel immediate, cheap enough to not matter.
 CANCEL_POLL_SECONDS = 1.5
+# Back-off before retrying a run that failed on arrival right after a Stop —
+# long enough for the orphaned invocation to wind down (measured ~10s once the
+# fast-cancel watcher drops the stream), short enough to feel like a pause.
+COLLISION_RETRY_DELAYS = (8, 15)
+# Back-off for transient engine failures (429/quota/5xx) at arrival. Capacity
+# blips usually clear inside a minute or two; ~2 minutes of patience total,
+# with the Stop button live throughout as the way out.
+TRANSIENT_RETRY_DELAYS = (20, 40, 60)
 
 
 def _normalize_connectors(connectors: dict | None) -> dict[str, bool]:
@@ -1634,6 +1647,30 @@ def _web_search_message_metadata(
 # Background task
 # ---------------------------------------------------------------------------
 
+async def _sleep_unless_cancelled(
+    delay_seconds: float, *, batch_id: str, chat_id: str, run_id: str
+) -> bool:
+    """Wait out a retry backoff, giving up early if the lecturer stops the run.
+
+    Returns True when the run was cancelled during the wait. Checks before the
+    first sleep so a zero delay still honours an already-set flag, then polls
+    every ~2s — the same cadence the agent-side check uses.
+    """
+    deadline = time.monotonic() + delay_seconds
+    while True:
+        try:
+            if await asyncio.to_thread(
+                is_agent_run_cancelled, batch_id=batch_id, chat_id=chat_id, run_id=run_id
+            ):
+                return True
+        except Exception as poll_exc:
+            logger.warning("cancel poll during backoff failed run_id=%s: %s", run_id, poll_exc)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        await asyncio.sleep(min(2.0, remaining))
+
+
 async def _run_agent_background(
     *,
     run_id: str,
@@ -1645,6 +1682,8 @@ async def _run_agent_background(
     user_message: str,
     session_state: dict[str, Any],
     session_assume_exists: bool = False,
+    _collision_retries: int = len(COLLISION_RETRY_DELAYS),
+    _transient_retries: int = len(TRANSIENT_RETRY_DELAYS),
 ) -> None:
     """Stream the Agent Engine response, persist the result, update run status.
 
@@ -1694,59 +1733,98 @@ async def _run_agent_background(
             chat_id=chat_id,
         )
 
-    # Stop is a real interrupt, not just a discard: the agent response is an
-    # async stream, so breaking out of this loop closes the generator and drops
-    # the upstream connection, which stops generation rather than letting it run
-    # to completion. The flag is polled on a timer instead of per chunk — a
-    # Firestore read per token would cost more than the tokens saved — and off
-    # the event loop so the read never stalls streaming.
-    cancel_poll_deadline = time.monotonic() + CANCEL_POLL_SECONDS
+    # Stop is a real interrupt, not just a discard: breaking out of this loop
+    # closes the generator and drops the upstream connection. The flag is polled
+    # on a timer — a Firestore read per token would cost more than the tokens
+    # saved — and off the event loop so the read never stalls streaming.
+    #
+    # The poll is a concurrent watcher RACED against the stream, not a check
+    # inside the chunk loop. Chunks are final response text, and during the
+    # tool-running phase — most of a workflow run — nothing is yielded, so an
+    # in-loop check only ran once the workflow was already finishing. Measured
+    # on a live stop: the flag was written at 05:14:25 and the loop first saw it
+    # at 05:15:23, after the orphaned run had executed its entire outline
+    # workflow. The race sees the flag within CANCEL_POLL_SECONDS regardless of
+    # whether the stream is saying anything.
     cancelled_mid_stream = False
+    cancel_seen = asyncio.Event()
+
+    async def _watch_for_cancel() -> None:
+        while True:
+            await asyncio.sleep(CANCEL_POLL_SECONDS)
+            if await asyncio.to_thread(
+                is_agent_run_cancelled, batch_id=batch_id, chat_id=chat_id, run_id=run_id
+            ):
+                cancel_seen.set()
+                return
 
     try:
-        # aclosing() so breaking out of the loop deterministically finalises the
-        # generator and tears the upstream connection down there and then,
-        # rather than leaving it to garbage collection.
-        async with aclosing(
-            stream_agent_response(
-                user_message=user_message,
-                session_id=agent_session_id,
-                lecturer_id=lecturer_id,
-                session_state=session_state,
-                session_assume_exists=session_assume_exists,
-            )
-        ) as agent_stream:
-            # Ripping the stream out from under the SDK can surface as an error
-            # from aclose()/the iterator. When the lecturer asked for the stop,
-            # that is expected teardown noise, not a failed run.
-            async for chunk in agent_stream:
-                if time.monotonic() >= cancel_poll_deadline:
-                    cancel_poll_deadline = time.monotonic() + CANCEL_POLL_SECONDS
-                    if await asyncio.to_thread(
-                        is_agent_run_cancelled, batch_id=batch_id, chat_id=chat_id, run_id=run_id
-                    ):
+        watcher_task = asyncio.create_task(_watch_for_cancel())
+        cancel_wait_task = asyncio.create_task(cancel_seen.wait())
+        try:
+            # aclosing() so breaking out deterministically finalises the
+            # generator and tears the upstream connection down there and then,
+            # rather than leaving it to garbage collection.
+            async with aclosing(
+                stream_agent_response(
+                    user_message=user_message,
+                    session_id=agent_session_id,
+                    lecturer_id=lecturer_id,
+                    session_state=session_state,
+                    session_assume_exists=session_assume_exists,
+                )
+            ) as agent_stream:
+                # Ripping the stream out from under the SDK can surface as an
+                # error from aclose()/the iterator. When the lecturer asked for
+                # the stop, that is expected teardown noise, not a failed run.
+                stream_iter = agent_stream.__aiter__()
+                while True:
+                    next_task = asyncio.create_task(stream_iter.__anext__())
+                    await asyncio.wait(
+                        {next_task, cancel_wait_task},
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    if not next_task.done():
+                        # Stop won the race. Settle the in-flight __anext__
+                        # BEFORE aclosing() runs — aclose() on a generator whose
+                        # anext is still executing raises "already running".
+                        next_task.cancel()
+                        try:
+                            await next_task
+                        except (asyncio.CancelledError, Exception):
+                            pass
                         cancelled_mid_stream = True
                         break
-                if not chunk:
-                    continue
-                final_text_parts.append(chunk)
-                write_stream_delta(
-                    run_id,
-                    chunk_index,
-                    chunk,
-                    source="agent_engine",
-                    mode="native",
-                    upstream_event_kind="final_text",
-                )
-                chunk_index += 1
-                streamed_length += len(chunk)
-                write_stream_meta(
-                    run_id,
-                    done=False,
-                    chunk_count=chunk_index,
-                    final_length=streamed_length,
-                    response_started=True,
-                )
+                    try:
+                        chunk = next_task.result()
+                    except StopAsyncIteration:
+                        break
+                    if cancel_seen.is_set():
+                        cancelled_mid_stream = True
+                        break
+                    if not chunk:
+                        continue
+                    final_text_parts.append(chunk)
+                    write_stream_delta(
+                        run_id,
+                        chunk_index,
+                        chunk,
+                        source="agent_engine",
+                        mode="native",
+                        upstream_event_kind="final_text",
+                    )
+                    chunk_index += 1
+                    streamed_length += len(chunk)
+                    write_stream_meta(
+                        run_id,
+                        done=False,
+                        chunk_count=chunk_index,
+                        final_length=streamed_length,
+                        response_started=True,
+                    )
+        finally:
+            watcher_task.cancel()
+            cancel_wait_task.cancel()
 
         if cancelled_mid_stream:
             logger.info(
@@ -2100,6 +2178,122 @@ async def _run_agent_background(
                 logger.warning("Cancel finalisation failed run_id=%s: %s", run_id, cancel_exc)
             return
         logger.error("gateway background failed run_id=%s: %s", run_id, exc)
+
+        # The run may have raised BECAUSE it was stopped — the agent-side
+        # cancel callback ends the invocation, and mid-teardown errors can beat
+        # the watcher's next poll. A cancelled run settles as cancelled however
+        # its stream ended; it must never fall into the retry below, which
+        # would resurrect a run the lecturer just killed.
+        try:
+            if await asyncio.to_thread(
+                is_agent_run_cancelled, batch_id=batch_id, chat_id=chat_id, run_id=run_id
+            ):
+                logger.info("run_id=%s raised during a cancel; settling cancelled", run_id)
+                emit_backend_event(
+                    "run.cancelled",
+                    status="cancelled",
+                    title="Request cancelled",
+                    kind="message",
+                )
+                finalize_open_run_steps(run_id, "cancelled")
+                set_run_status(run_id, "cancelled")
+                return
+        except Exception as own_cancel_exc:
+            logger.warning("own-cancel probe failed run_id=%s: %s", run_id, own_cancel_exc)
+
+        # Two failures at arrival are not the run's own fault, and both are
+        # worth waiting out rather than reporting:
+        #
+        #   · Collision — a Stop moments ago left an orphaned invocation still
+        #     writing to the shared session, and a new run started into it dies
+        #     on its first call. Measured live: cancel at 05:14:25, resend
+        #     failed 05:15:14→17, orphan wound down 05:15:23, identical retry
+        #     succeeded 05:15:40.
+        #   · Transient — 429/quota/5xx from the model service, which usually
+        #     clears within a minute or two.
+        #
+        # Both retry only when nothing streamed (`chunk_index == 0`): once text
+        # has flowed the session accepted the run, and retrying would generate
+        # the answer twice. Collision is checked first — it is the more
+        # specific cause, and a 429 seconds after a Stop is far more likely to
+        # be the orphan than real capacity pressure.
+        collision_suspect = False
+        transient_suspect = False
+        if chunk_index == 0:
+            try:
+                collision_suspect = await asyncio.to_thread(
+                    chat_has_recent_cancelled_run, batch_id=batch_id, chat_id=chat_id
+                )
+            except Exception as probe_exc:
+                logger.warning("recent-cancel probe failed run_id=%s: %s", run_id, probe_exc)
+            transient_suspect = not collision_suspect and is_transient_engine_error(exc)
+
+        retry_delay: int | None = None
+        if collision_suspect and _collision_retries > 0:
+            retry_delay = COLLISION_RETRY_DELAYS[len(COLLISION_RETRY_DELAYS) - _collision_retries]
+            retry_title = "Waiting for your stopped request to wind down"
+            retry_kind = "message"
+            next_retries = {"_collision_retries": _collision_retries - 1}
+        elif transient_suspect and _transient_retries > 0:
+            retry_delay = TRANSIENT_RETRY_DELAYS[len(TRANSIENT_RETRY_DELAYS) - _transient_retries]
+            # kind="thinking" is what puts this on the live thinking line the
+            # lecturer is already watching — message-kind events render nowhere.
+            retry_title = (
+                "The AI service is at capacity — retrying automatically. "
+                "Press Stop to give up."
+            )
+            retry_kind = "thinking"
+            next_retries = {"_transient_retries": _transient_retries - 1}
+
+        if retry_delay is not None:
+            logger.info(
+                "run_id=%s failed on arrival (%s) — retrying in %ds",
+                run_id,
+                "recent cancel" if collision_suspect else "transient engine error",
+                retry_delay,
+            )
+            emit_backend_event(
+                "run.retrying",
+                status="running",
+                title=retry_title,
+                kind=retry_kind,
+                detail={"delay_seconds": retry_delay},
+            )
+            # The backoff is the one stretch of a run's life the cancel watcher
+            # does not cover — the stream is gone. Sleeping blind here held the
+            # run for the full delay after the lecturer pressed Stop, then
+            # retried a request nobody wanted.
+            if await _sleep_unless_cancelled(
+                retry_delay, batch_id=batch_id, chat_id=chat_id, run_id=run_id
+            ):
+                logger.info("run_id=%s cancelled during retry backoff", run_id)
+                emit_backend_event(
+                    "run.cancelled",
+                    status="cancelled",
+                    title="Request cancelled",
+                    kind="message",
+                )
+                finalize_open_run_steps(run_id, "cancelled")
+                set_run_status(run_id, "cancelled")
+                return
+            retry_budgets = {
+                "_collision_retries": _collision_retries,
+                "_transient_retries": _transient_retries,
+                **next_retries,
+            }
+            return await _run_agent_background(
+                run_id=run_id,
+                rtdb_run_path=rtdb_run_path,
+                batch_id=batch_id,
+                chat_id=chat_id,
+                agent_session_id=agent_session_id,
+                lecturer_id=lecturer_id,
+                user_message=user_message,
+                session_state=session_state,
+                session_assume_exists=session_assume_exists,
+                **retry_budgets,
+            )
+
         try:
             write_stream_meta(
                 run_id,
@@ -2110,7 +2304,12 @@ async def _run_agent_background(
             )
         except Exception as stream_exc:
             logger.warning("RTDB stream meta failure failed run_id=%s: %s", run_id, stream_exc)
-        safe_error = safe_run_error_message(exc)
+        safe_error = (
+            "Your stopped request was still winding down when this one started, "
+            "and it did not clear in time. Please try again in a moment."
+            if collision_suspect
+            else safe_run_error_message(exc)
+        )
         emit_backend_event(
             "run.failed",
             status="failed",

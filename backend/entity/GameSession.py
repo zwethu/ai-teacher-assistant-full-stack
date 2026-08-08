@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-# Kept in sync with pnai/agents/game/schemas.py — the agent validates against the same
+# Kept in sync with mila/agents/game/schemas.py — the agent validates against the same
 # bounds before staging, so a payload that reaches here should already satisfy them.
 # Re-validating is deliberate: the pending artifact is agent-authored input, and the
 # backend is the only writer of gameSessions.

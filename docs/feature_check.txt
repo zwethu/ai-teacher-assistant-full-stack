@@ -11,7 +11,7 @@ side navbar ui is responsive, good and correct
 ---need to update privacy and policy
 ---need to add users auto accept terms and conditions by signing in
 ---need to update contact us page
----need to remove PNai text from the system and update date
+---DONE 2026-08-08: PNAI/PNai text removed in the MILA brand sweep
 ---mobile nav bar does not look good
 ---confirmation are done by default showalert
 ---need to implement skeleton for lists

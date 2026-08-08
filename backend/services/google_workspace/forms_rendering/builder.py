@@ -1,6 +1,6 @@
 """Google Forms batchUpdate request builders.
 
-Copied from Pnai-ai/pnai/tools/google_forms/builder.py
+Copied from Pnai-ai/mila/tools/google_forms/builder.py
 """
 
 from __future__ import annotations

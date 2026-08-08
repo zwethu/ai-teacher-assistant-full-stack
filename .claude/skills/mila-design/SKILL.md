@@ -24,7 +24,7 @@ If the user invokes this skill without any other guidance, ask them what they wa
 
 ---
 
-## Where these files live in the PNAI repo
+## Where these files live in the MILA repo
 
 *(Added during the import — the paths above are the design-system project's own
 layout; below is where each piece actually landed here.)*

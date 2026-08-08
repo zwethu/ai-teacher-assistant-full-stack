@@ -21,6 +21,14 @@ class AgentEngineStreamFilterTest(unittest.TestCase):
         self.assertTrue(_event_is_partial(event))
         self.assertEqual(_event_text(event), "Done")
 
+    def test_both_root_agent_names_pass_the_public_filter(self):
+        # The brand sweep renamed the root agent; an engine deployed before it
+        # still says pnai_root_agent. Both must stream to the lecturer.
+        from services.agent_engine_client import _PUBLIC_RESPONSE_AUTHORS
+
+        self.assertIn("mila_root_agent", _PUBLIC_RESPONSE_AUTHORS)
+        self.assertIn("pnai_root_agent", _PUBLIC_RESPONSE_AUTHORS)
+
     def test_tool_and_thought_parts_are_hidden(self) -> None:
         tool = {"content": {"parts": [{"function_call": {"name": "worker"}}]}}
         mixed_tool = {

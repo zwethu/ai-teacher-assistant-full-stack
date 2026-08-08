@@ -436,7 +436,7 @@ The standalone page supports hybrid local development out-of-the-box.
 
 **Deployed (frontend deployed → backend deployed → deployed Agent Engine):**
 - The same flow works identically.
-- Agent-side Google tools may additionally function if `PNAI_BACKEND_INTERNAL_URL` is configured, but the standalone lesson plan workflow does not depend on them.
+- Agent-side Google tools may additionally function if `PNAI_BACKEND_INTERNAL_URL` was configured (the variable has since been removed as dead), but the standalone lesson plan workflow does not depend on them.
 
 ## 15. Implementation checklist for standalone developer
 

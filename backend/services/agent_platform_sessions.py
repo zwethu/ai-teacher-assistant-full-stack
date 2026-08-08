@@ -189,7 +189,7 @@ async def _append_state(
     state: dict[str, Any],
 ) -> None:
     event = Event(
-        author="pnai-backend",
+        author="mila-backend",
         invocation_id=str(state.get("run_id") or ""),
         actions=EventActions(state_delta=state),
     )

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type RefObject } from 'react'
 import type { ChangeEvent, ClipboardEvent, KeyboardEvent } from 'react'
 import type { ChatMessage } from '../../../entity/Chat'
 import { CornerUpLeft, Globe, Send, Square, X } from 'lucide-react'
-import { MessageRow, ThinkingIndicator } from './MessageRow'
+import { MessageRow, ThinkingIndicator, isGeneratedArtifactPreviewMessage } from './MessageRow'
 import { type ConnectorsState } from './ConnectorToggles'
 import type { RunUiState } from '../runTypes'
 import type { PendingChatAttachment } from '../hooks/useChatPage'
@@ -489,6 +489,25 @@ export function ChatMessagesPanel({
     }),
   )
 
+  // Generated-artifact preview cards carry live "Generate Google Doc" buttons.
+  // When the lecturer refines and regenerates, the chat holds several previews
+  // of the same artifact and only the newest is the draft they mean — clicking
+  // an older card's export a week later quietly shipped the superseded draft.
+  // Same shape as the outline rule above: newest per (type, week) wins.
+  const supersededPreviewMessageIds = new Set<string>()
+  const newestPreviewByKey = new Map<string, string>()
+  for (const message of safeMessages) {
+    const pending = Boolean(message.pending || message.status === 'pending')
+    if (!isGeneratedArtifactPreviewMessage(message, pending)) continue
+    const metadata = message.metadata || {}
+    const key = `${String(metadata.artifact_type || metadata.pending_artifact_type || '')}:${String(
+      metadata.week ?? metadata.pending_artifact_week ?? '',
+    )}`
+    const previous = newestPreviewByKey.get(key)
+    if (previous) supersededPreviewMessageIds.add(previous)
+    newestPreviewByKey.set(key, message.message_id)
+  }
+
   // The approval request itself is not part of the conversation — see
   // `isAutoIssuedUserMessage`. Filtered here rather than upstream so the two
   // derivations above still see the turn that actually happened.
@@ -591,6 +610,7 @@ export function ChatMessagesPanel({
                 approvalGenerating={approvingOutlineMessageId === msg.message_id}
                 approvalCompleted={Boolean(msg.run_id && completedOutlineRunIds.has(msg.run_id))}
                 approvalSuperseded={Boolean(msg.run_id && supersededOutlineRunIds.has(msg.run_id))}
+                previewSuperseded={supersededPreviewMessageIds.has(msg.message_id)}
                 onPendingEmailEdited={onPendingEmailEdited}
                 onRetry={onRetryMessage}
                 onQuoteReply={onQuoteReply}

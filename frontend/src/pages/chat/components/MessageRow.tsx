@@ -268,6 +268,7 @@ export const MessageRow = memo(function MessageRow({
   approvalGenerating = false,
   approvalCompleted = false,
   approvalSuperseded = false,
+  previewSuperseded = false,
   onPendingEmailEdited,
   onRetry,
   onQuoteReply,
@@ -287,6 +288,8 @@ export const MessageRow = memo(function MessageRow({
   approvalGenerating?: boolean
   approvalCompleted?: boolean
   approvalSuperseded?: boolean
+  /** A newer preview of the same artifact exists later in this chat. */
+  previewSuperseded?: boolean
   onPendingEmailEdited?: (runId: string, result: UpdatePendingEmailResult) => void
 }) {
   if (!msg) return null
@@ -466,7 +469,9 @@ export const MessageRow = memo(function MessageRow({
                 )
               ) : null}
             </div>
-            {!isUser && batchId && <ArtifactExportButton batchId={batchId} msg={msg} />}
+            {!isUser && batchId && (
+              <ArtifactExportButton batchId={batchId} msg={msg} superseded={previewSuperseded} />
+            )}
             {!isUser && batchId && <BlueprintSaveButton batchId={batchId} msg={msg} />}
             {!isUser && batchId && <GameCreateButton batchId={batchId} msg={msg} />}
             {!isUser && batchId && (
@@ -1721,10 +1726,15 @@ export function ArtifactExportButton({
   batchId,
   msg,
   onDelivered,
+  superseded = false,
 }: {
   batchId: string
   msg: ChatMessage
   onDelivered?: (patch: Record<string, unknown>) => void
+  /** A newer draft of the same artifact exists later in the chat. Suppresses
+   *  the export button — exporting here would quietly ship the old draft — but
+   *  never the links of an export that already happened. */
+  superseded?: boolean
 }) {
   const metadata = msg.metadata || {}
   const artifactId = String(metadata.draft_artifact_id || '')
@@ -1932,6 +1942,12 @@ export function ArtifactExportButton({
             {result?.version ? ` · v${String(result.version).padStart(2, '0')}` : ''}
           </span>
         </>
+      ) : superseded ? (
+        /* Both cards used to keep live export buttons; a lecturer clicking the
+           older one a week later got the superseded draft with no warning. */
+        <span className="text-xs text-slate-500">
+          Superseded — a newer draft of this {artifactType === 'quiz' ? 'assessment' : artifactType === 'lab' ? 'lab' : 'lesson plan'} appears later in this chat.
+        </span>
       ) : (
         <button
           type="button"

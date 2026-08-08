@@ -90,7 +90,7 @@ logger = logging.getLogger(__name__)
 
 _LOCATION: str = os.getenv("AGENT_ENGINE_LOCATION", "us-central1").strip()
 _PROJECT: str = os.getenv("GOOGLE_CLOUD_PROJECT", "").strip()
-_DEBUG_STREAM_TEXT: bool = os.getenv("PNAI_DEBUG_AGENT_STREAM_TEXT", "").strip().lower() in {
+_DEBUG_STREAM_TEXT: bool = os.getenv("MILA_DEBUG_AGENT_STREAM_TEXT", "").strip().lower() in {
     "1",
     "true",
     "yes",
@@ -103,7 +103,11 @@ _INTERNAL_TEXT_PREFIXES = (
 )
 _INTERNAL_MARKERS = ("thought", "thinking", "reasoning", "internal", "model_thinking")
 _TOOL_FIELDS = ("function_call", "function_response", "tool_call", "tool_response")
-_PUBLIC_RESPONSE_AUTHOR = "pnai_root_agent"
+# Both names are live: the brand sweep renamed the root agent to
+# mila_root_agent, but an engine deployed before that sweep still emits
+# pnai_root_agent — and the deploy order must never open a window where the
+# backend filters out every response. Permanent tolerance costs nothing.
+_PUBLIC_RESPONSE_AUTHORS = frozenset({"mila_root_agent", "pnai_root_agent"})
 
 
 def get_agent_engine_resource_name() -> str:
@@ -178,7 +182,7 @@ async def stream_agent_response(
     # not executed anything, so a re-run has no side effects. Once events have
     # flowed, tools may have run (searches, sends), so a mid-run failure is not
     # re-run at this layer; the Gemini client inside the agent retries its own
-    # HTTP calls instead (retry_options in pnai/shared/config.py).
+    # HTTP calls instead (retry_options in mila/shared/config.py).
     for attempt in range(1, _STREAM_START_ATTEMPTS + 1):
         progress: dict[str, bool] = {"saw_event": False}
         try:
@@ -301,7 +305,7 @@ async def _sdk_stream(
         resource_name,
         lecturer_id,
         session_id,
-        _PUBLIC_RESPONSE_AUTHOR,
+        sorted(_PUBLIC_RESPONSE_AUTHORS),
     )
     try:
         stream = agent.async_stream_query(**stream_kwargs)  # type: ignore[attr-defined]
@@ -352,7 +356,7 @@ async def _sdk_stream(
             event_kind = _event_kind(event)
             author = _event_author(event)
             is_partial = _event_is_partial(event)
-            is_root_presenter = author == _PUBLIC_RESPONSE_AUTHOR
+            is_root_presenter = author in _PUBLIC_RESPONSE_AUTHORS
             chunk = _event_text(event) if is_root_presenter else ""
             logger.debug(
                 "Agent Engine stream event resource=%s user_id=%s session_id=%s "
@@ -766,7 +770,7 @@ def _recover_final_chunks_from_stream_exception(exc: Exception) -> list[str]:
             event, next_index = decoder.raw_decode(raw, index)
         except json.JSONDecodeError:
             return partial_chunks or complete_chunks
-        if _event_author(event) != _PUBLIC_RESPONSE_AUTHOR:
+        if _event_author(event) not in _PUBLIC_RESPONSE_AUTHORS:
             index = next_index
             continue
         text = _event_text(event)

@@ -1,6 +1,6 @@
 """DocBuilder — transforms LessonPlanFull into styled document blocks.
 
-Copied from Pnai-ai/pnai/tools/google_docs/builder.py with imports
+Copied from Pnai-ai/mila/tools/google_docs/builder.py with imports
 adjusted to use the local schemas module.
 """
 

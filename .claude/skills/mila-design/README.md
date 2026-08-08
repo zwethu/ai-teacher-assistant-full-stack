@@ -36,7 +36,7 @@ Innovation Institute, mlii.mfu.ac.th).
   keeps the identical component inventory and APIs.
 - **GitHub:** `zwethu/ai-teacher-assistant-full-stack` @ branch `agent-wire`
   (`frontend/` — React 19 + Vite + Tailwind v4; prototyped under the placeholder
-  brand "PNai / Pyin Nyar AI").
+  brand "PNai / Pyin Nyar AI", since renamed to MILA).
 - **MLII (grantor):** https://mlii.mfu.ac.th/en/
 
 ---

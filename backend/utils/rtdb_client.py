@@ -42,7 +42,7 @@ def _ensure_init() -> bool:
         import firebase_admin
         from firebase_admin import credentials
 
-        app_name = "pnai-backend-rtdb"
+        app_name = "mila-backend-rtdb"
         try:
             _rtdb_app = firebase_admin.get_app(app_name)
         except ValueError:

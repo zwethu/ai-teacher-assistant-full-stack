@@ -90,7 +90,7 @@ function humanizeName(raw?: string): string {
 
 function eventTitle(event: AgentRunEvent): string {
   // The agent now sends a friendly, plain-language `title` for tool + process
-  // events (see Pnai-ai/pnai/shared/labels.py); prefer it and never surface a
+  // events (see Pnai-ai/mila/shared/labels.py); prefer it and never surface a
   // raw tool/agent name. humanizeName is only a graceful fallback.
   if (event.kind === 'tool') return event.title || humanizeName(event.tool_name) || 'Working'
   if (isAttachmentEvent(event)) {

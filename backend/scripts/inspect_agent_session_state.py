@@ -62,7 +62,7 @@ async def main() -> None:
 
     state_delta: dict[str, Any] = json.loads(delta_json)
     event = Event(
-        author="pnai-inspect",
+        author="mila-inspect",
         invocation_id=str(state_delta.get("run_id") or "inspect-state-delta"),
         actions=EventActions(state_delta=state_delta),
     )

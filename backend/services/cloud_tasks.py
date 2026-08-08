@@ -94,6 +94,7 @@ def enqueue(
         return
 
     from google.cloud import tasks_v2
+    from google.protobuf import duration_pb2
 
     project = os.getenv("GOOGLE_CLOUD_PROJECT") or ""
     location = os.getenv("CLOUD_TASKS_LOCATION") or "us-central1"
@@ -109,7 +110,15 @@ def enqueue(
                 "service_account_email": service_account,
                 "audience": service_url,
             },
-        }
+        },
+        # 30 minutes — the maximum. Agent-run handlers execute the whole run
+        # inside this request (an observed full generation took 11 minutes),
+        # and the DEFAULT deadline is 10: Cloud Tasks would abandon the attempt
+        # mid-run, and the retry no-ops against the once-only dispatch claim,
+        # leaving the run spinning forever. Harmlessly generous for the quick
+        # attachment/indexing handlers. Cloud Run's request timeout is raised
+        # to match — both ceilings must clear the longest real run.
+        "dispatch_deadline": duration_pb2.Duration(seconds=1800),
     }
     if delay_seconds > 0:
         from datetime import datetime, timedelta, timezone

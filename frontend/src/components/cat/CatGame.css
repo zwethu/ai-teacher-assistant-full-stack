@@ -14,7 +14,10 @@
 .cat-game-container {
   position: relative;
   width: 100%;
+  /* dvh so the mobile address bar sliding in/out can't crop the board.
+     The vh line is the fallback for browsers without dvh. */
   height: 100vh;
+  height: 100dvh;
   background:
     var(--game-pattern) 0 0 / var(--game-pattern-size) repeat,
     var(--g-bg);
@@ -116,16 +119,44 @@
 /* Stack vertically on narrow / mobile so it still works there.
    The footer keeps its order (info then submit), so the CTA stays last. */
 @media (max-width: 900px) {
-  .cat-game-container { align-items: flex-start; overflow-y: auto; padding: 16px; }
+  /* The 62px top padding is the corner chrome's parking space: the timer, the
+     Guide pill and the mute toggle are absolutely positioned at the container's
+     top edge, and once the layout stacks, the pet's speech bubble arrives right
+     underneath them. Padding pushes the whole column clear of all three. */
+  .cat-game-container { align-items: flex-start; overflow-y: auto; padding: 62px 16px 20px; }
   .mode-layout { flex-direction: column; gap: 16px; max-height: none; }
+  /* Board FIRST, pet last. Stacked the other way round, a phone shows a
+     200-280px animal before any card — the work would start below the fold. */
+  .mode-main { order: 1; width: 100%; max-width: 560px; }
   /* Stacked layout: the cross axis is horizontal here, so flex-end would shove
      the pet to the right edge — recentre it. */
-  .mode-side { flex: none; width: 100%; max-width: 420px; align-self: center; }
-  .mode-main { width: 100%; max-width: 560px; }
+  .mode-side { order: 2; flex: none; width: 100%; max-width: 420px; align-self: center; }
   .mode-board { max-height: none; overflow: visible; }
   .mode-footer { flex-direction: column; align-items: stretch; gap: 10px; }
+  .mode-footer-round { justify-content: center; }
   .mode-footer-info { align-items: center; text-align: center; }
   .mode-footer .submit-btn { width: 100%; }
+  /* The container itself is the scroller here, and these three are absolutely
+     positioned inside it — so they'd slide off the top the moment the player
+     scrolls the board. Fixed keeps the countdown on screen, which is the whole
+     point of a countdown. (During the wrong-answer shake the container has a
+     transform and briefly becomes their containing block; it fills the viewport
+     either way, so they just shake along with everything else.) */
+  .game-timer-corner,
+  .game-mute,
+  .game-guide-btn { position: fixed; }
+}
+
+/* Phone-sized chrome: the corner controls tuck into the corners and the timer
+   pill slims down so the three of them fit across a 360px top edge. */
+@media (max-width: 560px) {
+  .cat-game-container { padding: 56px 12px 18px; }
+  .game-timer-corner { top: 12px; left: 12px; }
+  .game-mute { top: 12px; right: 12px; }
+  .game-guide-btn { top: 12px; right: 56px; }
+  .game-timer { padding: 6px 12px 7px; gap: 6px; }
+  .game-timer-text { font-size: 0.95rem; min-width: 38px; }
+  .game-timer-bar { width: 54px; }
 }
 
 /* ─── Countdown timer ─── */
@@ -495,6 +526,18 @@
 .cat-sprite--cat.cat-sprite--result .cat-shadow { margin-top: -65px; }
 .cat-sprite--cat.cat-sprite--game .cat-shadow { width: 150px; margin-top: -72px; }
 
+/* Phone: the in-game pet is company, not the content. Shrink the BOX (same
+   reason as above — the mood keyframes own `transform`), and rescale the
+   hand-tuned corrections with it; each is a fixed fraction of the box, so the
+   cat's shadow still claws back ~26% of its empty canvas. The matching bubble
+   override lives further down, next to the rule it has to beat. */
+@media (max-width: 560px) {
+  .cat-sprite--game .cat-lottie { width: 130px; height: 130px; }
+  .cat-sprite--game .cat-shadow { width: 74px; margin-top: -6px; }
+  .cat-sprite--cat.cat-sprite--game .cat-lottie { width: 170px; height: 170px; }
+  .cat-sprite--cat.cat-sprite--game .cat-shadow { width: 92px; margin-top: -44px; }
+}
+
 .cat-mood-happy    .cat-lottie { animation: catBounce 0.6s ease; }
 .cat-mood-confused .cat-lottie { animation: catWobble 0.6s ease; }
 .cat-mood-playful  .cat-lottie { animation: catSpin   0.6s ease; }
@@ -534,6 +577,14 @@
   max-width: 210px;
   text-align: center;
   line-height: 1.3;
+}
+/* Same fraction-of-the-box correction as the shadow above, for the smaller
+   phone pet. Media queries add no specificity, so this has to sit AFTER the
+   two rules it overrides, not next to the sizing block. */
+@media (max-width: 560px) {
+  .cat-sprite--game.cat-sprite--cat .cat-speech-bubble { margin-bottom: -47px; }
+  .cat-sprite--game.cat-sprite--dog .cat-speech-bubble { margin-bottom: -4px; }
+  .cat-speech-bubble--hint { max-width: 180px; font-size: 0.82rem; }
 }
 /* Comic-style cone: TWO stacked triangles, not one. ::before is the outlined
    cone in the border colour; ::after is a slightly smaller white one laid over
@@ -1108,15 +1159,70 @@
   box-shadow: 0 8px 20px rgba(74, 45, 24, 0.28);
 }
 
+/* ─── Board layouts on small screens ─── */
+/* All three boards are laid out with fixed column counts, which is right on a
+   desktop and unreadable at 360px. These blocks sit AFTER every rule they
+   override — media queries carry no extra specificity. */
+
+/* Rope's 48px gutter is the rope's runway; on a phone it's most of the screen.
+   The SVG reads live element rects, so the ropes re-aim themselves. */
+@media (max-width: 700px) {
+  .rope-arena { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 10px 16px; }
+  .rope-node { min-height: 52px; padding: 8px 10px; font-size: 0.78rem; }
+  .rope-node-answer { padding: 9px 11px; font-size: 0.76rem; }
+}
+
+@media (max-width: 640px) {
+  .mode-panel { padding: 14px 12px; border-radius: 22px; }
+  .rope-panel, .bucket-panel { padding: 14px 11px 12px; }
+
+  .match-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .match-card { font-size: 0.75rem; min-height: 62px; padding: 9px 7px; }
+
+  .bucket-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .bucket { min-height: 96px; padding: 9px 8px 10px; }
+  .bucket-label { font-size: 0.76rem; }
+  .bucket-chip { font-size: 0.74rem; padding: 7px 8px; }
+
+  .chip-tray { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 10px; }
+  .tray-chip { font-size: 0.75rem; min-height: 54px; padding: 8px 10px; }
+  .chip-ghost { width: 150px; font-size: 0.75rem; }
+}
+
+/* Below this the answer cards are sentences squeezed into ~150px — one column
+   reads better than two columns of confetti. */
+@media (max-width: 380px) {
+  .chip-tray { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Touch: the three ✕ badges are 21-23px discs, which is a miss more often than
+   a hit with a fingertip. Pointer devices keep the small ones. */
+@media (hover: none) {
+  .match-remove-btn,
+  .bucket-remove-btn,
+  .rope-disconnect-btn {
+    width: 27px;
+    height: 27px;
+    font-size: 0.8rem;
+  }
+}
+
 /* ─── Result screen ─── */
+/* min-height, not height: on a short phone the medal + stats + two buttons are
+   taller than the viewport, and a fixed height with overflow:hidden simply cut
+   the bottom off with no way to scroll to it. Horizontal overflow stays clipped
+   so the confetti and popper layers can't widen the page. */
 .result-screen {
   position: relative;
-  width: 100vw;
-  height: 100vh;
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
+  padding: 20px 14px;
+  box-sizing: border-box;
+  overflow-x: hidden;
   font-family: 'Nunito', 'Segoe UI', sans-serif;
 }
 /* Medal tints stay in the warm family — a cool grey "silver" against a warm
@@ -1193,8 +1299,21 @@
   justify-content: center;
 }
 @media (max-width: 720px) {
+  /* Room at the top for the corner mute toggle, which the stacked card would
+     otherwise slide under. */
+  .result-screen { padding: 62px 14px 24px; }
   .result-card--row { flex-direction: column; align-items: center; text-align: center; max-width: 400px; }
   .result-col-right { align-items: center; width: 100%; }
+  .result-mute { top: 12px; right: 12px; }
+}
+@media (max-width: 560px) {
+  .result-card { padding: 22px 18px 24px; border-radius: 26px; }
+  /* Full-width actions: two shrink-to-fit pills centred in a narrow card read
+     as debris. Hierarchy is unchanged — one is solid, one is outlined. */
+  .result-col-right .cert-open-btn,
+  .result-col-right .restart-btn { width: 100%; }
+  .result-medal-emoji { font-size: 2.8rem; }
+  .result-medal-title { font-size: 1.25rem; }
 }
 .result-nickname {
   margin: 0;

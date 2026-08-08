@@ -16,6 +16,7 @@ from google_auth_oauthlib.flow import Flow
 from google.cloud.firestore import SERVER_TIMESTAMP
 
 from services.google_workspace.credentials import read_refresh_token, store_refresh_token
+from services.lecturer_service import LECTURER_ROLE, is_lecturer_email
 from utils.firebase_auth import CurrentUser, get_current_user, init_firebase
 from utils.firestore_client import get_firestore
 from utils.google_credentials import get_google_flow, GOOGLE_SCOPES
@@ -41,34 +42,10 @@ def _build_flow() -> Flow:
     return get_google_flow()
 
 
-@router.post("/init-user")
-async def init_user(
-    current_user: CurrentUser = Depends(get_current_user),
-) -> dict[str, str]:
-    """
-    Ensure a Firestore user profile exists (email, display name).
-    Called by the frontend after Google sign-in.
-    """
-    uid = current_user["uid"]
-    db = get_firestore()
-    user_ref = db.collection(USERS_COLLECTION).document(uid)
-    snapshot = user_ref.get()
-
-    if snapshot.exists:
-        return {"status": "exists", "uid": uid}
-
-    email = current_user.get("email") or ""
-    display_name = current_user.get("name") or current_user.get("display_name")
-
-    user_ref.set(
-        {
-            "uid": uid,
-            "email": email,
-            "display_name": display_name,
-            "createdAt": SERVER_TIMESTAMP,
-        }
-    )
-    return {"status": "created", "uid": uid}
+# Removed: POST /init-user. Nothing called it, and it let any holder of a valid
+# Firebase token — including a student signed in through the game — mint their
+# own users/{uid} profile document. The OAuth callback below writes that
+# document itself, only for an allowlisted lecturer.
 
 
 @router.get("/google-scopes")
@@ -175,6 +152,18 @@ async def google_scopes_callback(
         if not email:
             return RedirectResponse(url=failure_url, status_code=status.HTTP_302_FOUND)
 
+        # The gate. Everything below creates or updates a Firebase account, so
+        # the allowlist is checked BEFORE any of it: an unknown address must
+        # leave no trace, not become a dormant teacher account. Until this
+        # existed, any Google account on the internet that reached this callback
+        # was handed a working teacher session.
+        if not is_lecturer_email(email):
+            logger.warning("Blocked teacher sign-in for non-lecturer address: %s", email)
+            return RedirectResponse(
+                url=f"{failure_url}?error=not_lecturer",
+                status_code=status.HTTP_302_FOUND,
+            )
+
         try:
             user_record = firebase_auth_module.get_user_by_email(email)
             uid = user_record.uid
@@ -210,6 +199,18 @@ async def google_scopes_callback(
         # The refresh token (a secret) is written to an Admin-only private subdoc,
         # never to the client-readable users/{uid} doc.
         store_refresh_token(db, uid, refresh_token)
+
+        # Stamp the role onto the account itself, so the API, the security rules
+        # and the frontend can all read it straight off the token with no extra
+        # lookup. Set BEFORE the custom token is minted — claims are baked in
+        # when the ID token is issued, so doing this afterwards would leave the
+        # lecturer roleless until their token refreshed an hour later.
+        #
+        # This REPLACES the whole custom-claims object; nothing else sets claims
+        # today, so there is nothing to preserve. Re-stamped on every sign-in,
+        # which is also how an existing lecturer picks the claim up for the
+        # first time.
+        firebase_auth_module.set_custom_user_claims(uid, {"role": LECTURER_ROLE})
 
         custom_token = firebase_auth_module.create_custom_token(uid).decode("utf-8")
     except Warning as exc:

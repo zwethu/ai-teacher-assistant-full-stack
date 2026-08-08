@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Navigate, useSearchParams } from 'react-router-dom'
 import {
   Mail,
   type LucideIcon,
@@ -159,6 +159,11 @@ function AboutModal({ open, onClose }: { open: boolean; onClose: () => void }) {
 
 export default function Login() {
   const { user, loading, signInWithGoogle } = useAuth()
+  const [searchParams] = useSearchParams()
+  // The OAuth callback bounces a non-allowlisted address back here. Without a
+  // message the round trip looks like a silent failure, and the natural next
+  // move is to try the same account again.
+  const notLecturer = searchParams.get('error') === 'not_lecturer'
   const [redirecting, setRedirecting] = useState(false)
   const [termsOpen, setTermsOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
@@ -290,6 +295,22 @@ export default function Login() {
               button sits inert for however long the round trip takes and the
               page looks broken. `loading` renders the bead garland — the
               loading loader, never the thinking one. */}
+          {notLecturer && (
+            <div
+              role="alert"
+              className="mt-8 rounded-2xl border border-amber-200 bg-amber-50/90 p-4 text-left"
+            >
+              <p className="text-sm font-semibold text-amber-900">
+                That account can't sign in here
+              </p>
+              <p className="mt-1 text-sm leading-relaxed text-amber-800">
+                MILA is for lecturers, and this Google account isn't on the list. If you're
+                a student, open the game link your teacher sent you instead. If you're
+                staff, ask your admin to add your email — then sign in again.
+              </p>
+            </div>
+          )}
+
           <Button
             type="button"
             onClick={() => {
@@ -299,7 +320,7 @@ export default function Login() {
             loading={redirecting}
             size="lg"
             block
-            className="mt-10"
+            className={notLecturer ? 'mt-5' : 'mt-10'}
           >
             {redirecting ? 'Taking you to Google…' : 'Sign in with Google'}
           </Button>

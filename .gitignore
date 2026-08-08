@@ -26,3 +26,4 @@ frontend/tsconfig.tsbuildinfo
 *.backup-*
 *-legacy
 *.legacy
+.firebase/

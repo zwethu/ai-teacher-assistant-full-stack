@@ -125,12 +125,15 @@
      underneath them. Padding pushes the whole column clear of all three. */
   .cat-game-container { align-items: flex-start; overflow-y: auto; padding: 62px 16px 20px; }
   .mode-layout { flex-direction: column; gap: 16px; max-height: none; }
-  /* Board FIRST, pet last. Stacked the other way round, a phone shows a
-     200-280px animal before any card — the work would start below the fold. */
-  .mode-main { order: 1; width: 100%; max-width: 560px; }
+  /* Pet FIRST, board under it: the hint bubble is the thing a player needs
+     before they touch a card, and at the bottom of a scrolling column it was
+     arriving after the work it explains. The compact phone-sized sprite is
+     forced on for this whole stacked range (see the sizing block further down)
+     — at its desktop 210-280px it would push the first card past the fold. */
+  .mode-side { order: 1; flex: none; width: 100%; max-width: 420px; align-self: center; }
   /* Stacked layout: the cross axis is horizontal here, so flex-end would shove
-     the pet to the right edge — recentre it. */
-  .mode-side { order: 2; flex: none; width: 100%; max-width: 420px; align-self: center; }
+     the pet to the right edge — recentre it (above). */
+  .mode-main { order: 2; width: 100%; max-width: 560px; }
   .mode-board { max-height: none; overflow: visible; }
   .mode-footer { flex-direction: column; align-items: stretch; gap: 10px; }
   .mode-footer-round { justify-content: center; }
@@ -526,12 +529,15 @@
 .cat-sprite--cat.cat-sprite--result .cat-shadow { margin-top: -65px; }
 .cat-sprite--cat.cat-sprite--game .cat-shadow { width: 150px; margin-top: -72px; }
 
-/* Phone: the in-game pet is company, not the content. Shrink the BOX (same
-   reason as above — the mood keyframes own `transform`), and rescale the
-   hand-tuned corrections with it; each is a fixed fraction of the box, so the
-   cat's shadow still claws back ~26% of its empty canvas. The matching bubble
-   override lives further down, next to the rule it has to beat. */
-@media (max-width: 560px) {
+/* Stacked layout (same 900px breakpoint as .mode-layout, not a phone-only one):
+   the in-game pet is company, not the content, and it now sits ABOVE the board —
+   so every width that stacks gets the small pet, or the cards start below the
+   fold. Shrink the BOX (same reason as above — the mood keyframes own
+   `transform`), and rescale the hand-tuned corrections with it; each is a fixed
+   fraction of the box, so the cat's shadow still claws back ~26% of its empty
+   canvas. The matching bubble override lives further down, next to the rule it
+   has to beat. */
+@media (max-width: 900px) {
   .cat-sprite--game .cat-lottie { width: 130px; height: 130px; }
   .cat-sprite--game .cat-shadow { width: 74px; margin-top: -6px; }
   .cat-sprite--cat.cat-sprite--game .cat-lottie { width: 170px; height: 170px; }
@@ -579,9 +585,10 @@
   line-height: 1.3;
 }
 /* Same fraction-of-the-box correction as the shadow above, for the smaller
-   phone pet. Media queries add no specificity, so this has to sit AFTER the
-   two rules it overrides, not next to the sizing block. */
-@media (max-width: 560px) {
+   stacked-layout pet — same 900px breakpoint as the sizing block it follows.
+   Media queries add no specificity, so this has to sit AFTER the two rules it
+   overrides, not next to the sizing block. */
+@media (max-width: 900px) {
   .cat-sprite--game.cat-sprite--cat .cat-speech-bubble { margin-bottom: -47px; }
   .cat-sprite--game.cat-sprite--dog .cat-speech-bubble { margin-bottom: -4px; }
   .cat-speech-bubble--hint { max-width: 180px; font-size: 0.82rem; }

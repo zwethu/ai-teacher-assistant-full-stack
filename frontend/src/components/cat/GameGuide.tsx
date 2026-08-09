@@ -55,9 +55,16 @@ const TIPS: { icon: Icon; text: string }[] = [
   { icon: Trophy,      text: 'Finish to earn a medal — the faster and fewer tries, the shinier!' },
 ];
 
-/** Floating “?” help button that opens a game-manual dialog for the mode. */
+/** Floating “?” help button that opens a game-manual dialog for the mode.
+ *
+ *  Opens by itself the moment the board appears: a player who has never seen
+ *  this mode shouldn't have to guess that the “?” in the corner is where the
+ *  rules live. The button stays for re-reading it mid-round.
+ *
+ *  This component mounts once per game page (it sits outside the keyed mode),
+ *  so the dialog shows once per load — turning to round 2 doesn't reopen it. */
 export default function GameGuide({ gameMode }: { gameMode: GameMode }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
   const guide = GUIDES[gameMode];
   const ModeIcon = guide.icon;
 

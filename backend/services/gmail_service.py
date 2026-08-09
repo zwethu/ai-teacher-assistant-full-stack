@@ -1,5 +1,4 @@
 import base64
-import os
 from email.mime.text import MIMEText
 from typing import Any
 
@@ -7,14 +6,15 @@ from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
+from utils.google_credentials import google_oauth_client
+
 
 class GmailSendError(Exception):
     """Raised when sending an email through Gmail fails."""
 
 
 def _gmail_client(refresh_token: str):
-    client_id = os.getenv("GOOGLE_CLIENT_ID")
-    client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
+    client_id, client_secret = google_oauth_client()
     if not client_id or not client_secret:
         raise GmailSendError(
             "Google OAuth client is not configured (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET)"

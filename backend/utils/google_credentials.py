@@ -56,13 +56,39 @@ def get_google_redirect_uri() -> str:
     return "http://localhost:8000/auth/google-scopes/callback"
 
 
+def _clean(value: str | None) -> str:
+    """Whitespace- and BOM-free view of an OAuth client credential.
+
+    A UTF-8 BOM (U+FEFF) or a trailing newline gets into these values easily \u2014
+    PowerShell's `Set-Content`/`Out-File` write a BOM by default, and a secret
+    created from a file keeps the file's final newline. Neither is visible when
+    you look at the value, and each breaks the token endpoint differently: a BOM
+    lands in the Basic-auth header of the exchange, where requests' latin-1
+    encoding raises and sign-in silently bounces back to /login; a stray newline
+    survives the header and comes back as `invalid_client: The provided client
+    secret is invalid`.
+    """
+    return (value or "").strip().lstrip("\ufeff").strip()
+
+
+def google_oauth_client() -> tuple[str, str]:
+    """The OAuth client id/secret from the environment, cleaned.
+
+    Every path that talks to Google's token endpoint must read the pair through
+    here. They used to clean it themselves and disagreed about how much: the
+    sign-in flow stripped whitespace and the BOM, the Workspace client stripped
+    only whitespace, and the Gmail client stripped nothing at all \u2014 so a secret
+    with one invisible stray byte let a lecturer sign in and draft an email, then
+    failed with `invalid_client` at the moment they pressed Send.
+
+    Returns whatever is configured, empty strings included; callers keep their
+    own "not configured" error so each surface can raise its own type.
+    """
+    return _clean(os.getenv("GOOGLE_CLIENT_ID")), _clean(os.getenv("GOOGLE_CLIENT_SECRET"))
+
+
 def get_google_flow() -> Flow:
-    # Strip whitespace and any UTF-8 BOM (U+FEFF): a BOM pasted into an env
-    # file ends up in the Basic-auth header of the token exchange, where
-    # requests' latin-1 encoding raises and sign-in silently bounces back
-    # to /login.
-    client_id = (os.getenv("GOOGLE_CLIENT_ID") or "").strip().lstrip("\ufeff").strip()
-    client_secret = (os.getenv("GOOGLE_CLIENT_SECRET") or "").strip().lstrip("\ufeff").strip()
+    client_id, client_secret = google_oauth_client()
     if not client_id or not client_secret:
         raise ValueError("GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set")
 

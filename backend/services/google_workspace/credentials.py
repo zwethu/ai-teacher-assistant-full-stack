@@ -10,7 +10,6 @@ backend service layer.
 from __future__ import annotations
 
 import logging
-import os
 import threading
 import time
 from typing import Any
@@ -20,6 +19,7 @@ from google.cloud.firestore import DELETE_FIELD, SERVER_TIMESTAMP
 from google.oauth2.credentials import Credentials
 
 from utils.firestore_client import get_firestore
+from utils.google_credentials import google_oauth_client
 
 logger = logging.getLogger(__name__)
 
@@ -242,8 +242,7 @@ def build_user_credentials(
     if not refresh_token:
         raise GoogleOAuthRequiredError(uid)
 
-    client_id = (os.getenv("GOOGLE_CLIENT_ID") or "").strip()
-    client_secret = (os.getenv("GOOGLE_CLIENT_SECRET") or "").strip()
+    client_id, client_secret = google_oauth_client()
     if not client_id or not client_secret:
         raise RuntimeError(
             "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be configured "

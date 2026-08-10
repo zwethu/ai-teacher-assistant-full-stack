@@ -43,12 +43,17 @@ export default function BucketFill({ items, timeUp, countUnplaced = true, sideba
 
   // ─── Behavior tracking (shared with the other modes) ────────────────────
   const finishedRef = useRef(false);
+  // Mirrors finishedRef for the button's disabled state — a ref alone wouldn't
+  // re-render, and the button has to visibly close during the celebration.
+  const [cleared, setCleared] = useState(false);
   const { resetRound, recordFirstAction, recordSubmit, buildSignals } = useRoundSignals();
 
   useEffect(() => {
     setPlacements([]);
     setDragChip(null);
     setDragPos(null);
+    finishedRef.current = false;
+    setCleared(false);
     resetRound();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items]);
@@ -111,8 +116,13 @@ export default function BucketFill({ items, timeUp, countUnplaced = true, sideba
 
   const allFilled = placements.filter(p => p.state !== 'wrong').length >= items.length;
 
+  // `finishedRef` is the real lock, not the disabled attribute: every bucket
+  // stays filled after a clean submit, so the button would otherwise remain live
+  // through the 1.8s celebration. Spamming it there re-graded the same board —
+  // inflating the submit counters the assessment reads and queueing one page
+  // turn per press, which skipped whole rounds.
   function handleSubmit() {
-    if (!allFilled) return;
+    if (!allFilled || finishedRef.current) return;
     recordFirstAction();
 
     let wrongCount = 0;
@@ -150,6 +160,7 @@ export default function BucketFill({ items, timeUp, countUnplaced = true, sideba
 
     if (wrongCount === 0) {
       finishedRef.current = true;
+      setCleared(true);
       const signals = buildSignals();
       // Long enough for the flock + fanfare to land before the page turns —
       // at the old 800ms the celebration was cut off mid-flight.
@@ -283,8 +294,12 @@ export default function BucketFill({ items, timeUp, countUnplaced = true, sideba
             type="submit"
             className="submit-btn"
             onClick={handleSubmit}
-            disabled={!allFilled}
-            title={allFilled ? undefined : `Fill all ${items.length} buckets first`}
+            disabled={!allFilled || cleared}
+            title={
+              cleared ? 'Round cleared — hang on'
+              : allFilled ? undefined
+              : `Fill all ${items.length} buckets first`
+            }
           >
             <CheckCircle size={18} weight="fill" /> Submit Answers
           </button>

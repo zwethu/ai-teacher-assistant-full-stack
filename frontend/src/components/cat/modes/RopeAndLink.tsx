@@ -47,6 +47,9 @@ export default function RopeAndLink({ items, timeUp, countUnplaced = true, sideb
 
   // ─── Behavior tracking ──────────────────────────────────────────────────
   const finishedRef = useRef(false);
+  // Mirrors finishedRef for the button's disabled state — a ref alone wouldn't
+  // re-render, and the button has to visibly close during the celebration.
+  const [cleared, setCleared] = useState(false);
   const { resetRound, recordFirstAction, recordSubmit, buildSignals } = useRoundSignals();
 
   useEffect(() => {
@@ -130,8 +133,13 @@ export default function RopeAndLink({ items, timeUp, countUnplaced = true, sideb
   const allConnected = connections.filter(c => c.state !== 'wrong').length >= items.length
     && new Set(connections.filter(c => c.state !== 'wrong').map(c => c.leftIndex)).size === items.length;
 
+  // `finishedRef` is the real lock, not the disabled attribute: the round stays
+  // fully connected after a clean submit, so the button would otherwise remain
+  // live through the 1.8s celebration. Spamming it there re-graded the same
+  // board — inflating the submit counters the assessment reads and queueing one
+  // page turn per press, which skipped whole rounds.
   function handleSubmit() {
-    if (!allConnected) return;
+    if (!allConnected || finishedRef.current) return;
     recordFirstAction();
 
     let wrongCount = 0;
@@ -168,6 +176,7 @@ export default function RopeAndLink({ items, timeUp, countUnplaced = true, sideb
 
     if (wrongCount === 0) {
       finishedRef.current = true;
+      setCleared(true);
       const signals = buildSignals();
       // Long enough for the flock + fanfare to land before the page turns —
       // at the old 800ms the celebration was cut off mid-flight.
@@ -352,8 +361,12 @@ export default function RopeAndLink({ items, timeUp, countUnplaced = true, sideb
             type="submit"
             className="submit-btn"
             onClick={handleSubmit}
-            disabled={!allConnected}
-            title={allConnected ? undefined : `Connect all ${items.length} pairs first`}
+            disabled={!allConnected || cleared}
+            title={
+              cleared ? 'Round cleared — hang on'
+              : allConnected ? undefined
+              : `Connect all ${items.length} pairs first`
+            }
           >
             <CheckCircle size={18} weight="fill" /> Submit Answers
           </button>

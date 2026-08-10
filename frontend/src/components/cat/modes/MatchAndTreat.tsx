@@ -41,6 +41,9 @@ export default function MatchAndTreat({ items, timeUp, countUnplaced = true, sid
   const [celebrating, setCelebrating] = useState<Set<string>>(new Set());     // pairIds that just turned correct
 
   const finishedRef = useRef(false);
+  // Mirrors finishedRef for the button's disabled state — a ref alone wouldn't
+  // re-render, and the button has to visibly close during the celebration.
+  const [cleared, setCleared] = useState(false);
   const { resetRound, recordFirstAction, recordSubmit, buildSignals } = useRoundSignals();
 
   useEffect(() => {
@@ -53,6 +56,8 @@ export default function MatchAndTreat({ items, timeUp, countUnplaced = true, sid
     setSelected(null);
     setMatchStates({});
     setPlayerPairs({});
+    finishedRef.current = false;
+    setCleared(false);
     resetRound();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items]);
@@ -122,8 +127,13 @@ export default function MatchAndTreat({ items, timeUp, countUnplaced = true, sid
   const termCards = cards.filter(c => c.side === 'term');
   const allPaired = termCards.length > 0 && termCards.every(tc => playerPairs[tc.id] !== undefined);
 
+  // `finishedRef` is the real lock, not the disabled attribute: the round stays
+  // all-paired after a clean submit, so the button would otherwise remain live
+  // through the 1.8s celebration. Spamming it there re-graded the same board —
+  // inflating the submit counters the assessment reads and queueing one page
+  // turn per press, which skipped whole rounds.
   function handleSubmit() {
-    if (!allPaired) return;
+    if (!allPaired || finishedRef.current) return;
     recordFirstAction();
 
     let wrongCount = 0;
@@ -170,6 +180,7 @@ export default function MatchAndTreat({ items, timeUp, countUnplaced = true, sid
 
     if (wrongCount === 0) {
       finishedRef.current = true;
+      setCleared(true);
       const signals = buildSignals();
       // Long enough for the flock + fanfare to land before the page turns —
       // at the old 800ms the celebration was cut off mid-flight.
@@ -263,8 +274,12 @@ export default function MatchAndTreat({ items, timeUp, countUnplaced = true, sid
             type="submit"
             className="submit-btn"
             onClick={handleSubmit}
-            disabled={!allPaired}
-            title={allPaired ? undefined : `Pair all ${termCards.length} items first`}
+            disabled={!allPaired || cleared}
+            title={
+              cleared ? 'Round cleared — hang on'
+              : allPaired ? undefined
+              : `Pair all ${termCards.length} items first`
+            }
           >
             <CheckCircle size={18} weight="fill" /> Submit Answers
           </button>

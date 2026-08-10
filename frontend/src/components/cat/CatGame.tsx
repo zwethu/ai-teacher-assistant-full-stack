@@ -459,9 +459,17 @@ export default function CatGame({
     }
   }
 
+  // The last page index reported by a mode. A round is reportable exactly once:
+  // a mode that reports twice would duplicate its answers and its signals, and
+  // turn the page once per report — skipping rounds. The modes each hold their
+  // own lock, but the invariant belongs here, where the page counter lives.
+  const reportedPageRef = useRef<number | null>(null);
+
   // Fired by a mode when its page is all-correct OR by its timeout finalizer.
   async function handlePageComplete(newAnswers: AnswerRecord[], signals: BehaviorSignals) {
     if (doneRef.current) return;   // guard against double-finish (complete vs timeout race)
+    if (reportedPageRef.current === pageIndex) return;
+    reportedPageRef.current = pageIndex;
 
     pageAnswersRef.current = [...pageAnswersRef.current, ...newAnswers];
     roundsRef.current = [...roundsRef.current, {
@@ -499,6 +507,7 @@ export default function CatGame({
     doneRef.current   = false;
     timeUpRef.current = false;
     skipRef.current   = false;
+    reportedPageRef.current = null;
     setSkipped(false);
     pageAnswersRef.current = [];
     roundsRef.current      = [];

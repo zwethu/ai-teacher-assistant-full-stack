@@ -175,15 +175,18 @@ export default function RopeAndLink({ items, timeUp, countUnplaced = true, sideb
     }
   }
 
-  // Timeout: grade whatever's currently linked as the final attempt.
+  // Timeout: only links a submit has confirmed count as correct. A link that
+  // was never submitted was never validated — grading the raw board here let a
+  // player link everything, skip Submit, and run out the clock for full credit
+  // with no wrong-submit on record.
   useEffect(() => {
     if (!timeUp || finishedRef.current) return;
     finishedRef.current = true;
     const finalAnswers: AnswerRecord[] = items
       .map((item, i) => {
-        const conn = connections.find(c => c.leftIndex === i && c.state !== 'wrong');
-        const correct = !!conn && shuffledRight[conn.rightIndex].id === item.id;
-        const touched = connections.some(c => c.leftIndex === i);
+        const conn = connections.find(c => c.leftIndex === i);
+        const correct = conn?.state === 'correct';
+        const touched = !!conn;
         return { questionId: item.id, correct, touched };
       })
       .filter(a => countUnplaced || a.touched)

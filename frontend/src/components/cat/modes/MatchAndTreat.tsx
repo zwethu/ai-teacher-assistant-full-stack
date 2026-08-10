@@ -177,7 +177,10 @@ export default function MatchAndTreat({ items, timeUp, countUnplaced = true, sid
     }
   }
 
-  // Timeout: grade whatever's currently on the board as the final attempt.
+  // Timeout: only pairs a submit has confirmed count as correct. A pairing
+  // that was never submitted was never validated — grading the raw board here
+  // let a player pair everything, skip Submit, and run out the clock for full
+  // credit with no wrong-submit on record.
   useEffect(() => {
     if (!timeUp || finishedRef.current) return;
     finishedRef.current = true;
@@ -185,7 +188,7 @@ export default function MatchAndTreat({ items, timeUp, countUnplaced = true, sid
       .filter(tc => countUnplaced || playerPairs[tc.id] !== undefined)
       .map(tc => ({
         questionId: tc.pairId,
-        correct: playerPairs[tc.id] === `${tc.pairId}-D`,
+        correct: matchStates[tc.pairId] === 'matched',
       }));
     onComplete(finalAnswers, buildSignals());
     // eslint-disable-next-line react-hooks/exhaustive-deps

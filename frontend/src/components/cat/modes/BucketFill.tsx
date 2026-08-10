@@ -157,15 +157,18 @@ export default function BucketFill({ items, timeUp, countUnplaced = true, sideba
     }
   }
 
-  // Timeout: grade whatever is currently in the buckets as the final attempt.
+  // Timeout: only placements a submit has confirmed count as correct. A chip
+  // that was never submitted was never validated — grading the raw board here
+  // let a player fill every bucket, skip Submit, and run out the clock for
+  // full credit with no wrong-submit on record.
   useEffect(() => {
     if (!timeUp || finishedRef.current) return;
     finishedRef.current = true;
     const finalAnswers: AnswerRecord[] = items
       .map((item, bi) => {
-        const p = placements.find(pl => pl.bucketIndex === bi && pl.state !== 'wrong');
-        const correct = !!p && items[bi].id === p.chipId;
-        const touched = placements.some(pl => pl.bucketIndex === bi);
+        const p = placements.find(pl => pl.bucketIndex === bi);
+        const correct = p?.state === 'correct';
+        const touched = !!p;
         return { questionId: item.id, correct, touched };
       })
       .filter(a => countUnplaced || a.touched)

@@ -324,6 +324,13 @@ export default function PlayEntryPage() {
           <CatSprite mood="idle" />
           <h2 className="play-title">What's your name?</h2>
           <p className="play-subtitle">Choose a nickname — your cat will remember it! 🐾</p>
+          {/* The one honest line about what playing records. Shown before the
+              first thing the student types, not buried after the game. */}
+          <p className="play-privacy-note">
+            Your teacher will see your name, school email, nickname, your answers and
+            score, and how you played — including how long each round took. It's used
+            to help with your learning, not to catch you out.
+          </p>
           <div className="play-input-wrap">
             {/* No `name` attribute, and autofill off: this is a shared-device
                 flow, so the browser must not offer the last student's nickname

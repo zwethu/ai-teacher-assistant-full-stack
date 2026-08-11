@@ -11,6 +11,7 @@ import { useAuth } from '../hooks/useAuth'
 import { Button, Modal } from '../design-system'
 import { ARTIFACT_ICONS } from '../utils/artifactIcons'
 import LoadingScreen from '../components/ui/LoadingScreen'
+import { TermsDocument, TERMS_UPDATED } from '../components/legal/TermsDocument'
 
 /**
  * Sign-in page.
@@ -49,9 +50,28 @@ const CAPABILITIES: Capability[] = [
 const GOOGLE_SERVICES: { name: string; purpose: string }[] = [
   { name: 'Google Docs', purpose: 'lesson plans and labs' },
   { name: 'Google Drive', purpose: 'a folder per class for what MILA creates' },
-  { name: 'Google Forms', purpose: 'assessments, and their responses' },
+  // "creating assessments", not "and their responses": forms.responses.readonly
+  // is granted but nothing reads responses yet. Say only what is built.
+  { name: 'Google Forms', purpose: 'creating assessments' },
   { name: 'Gmail', purpose: 'messages to your students' },
 ]
+
+/**
+ * Who builds MILA — shown in the About modal. The advisor's address doubles as
+ * the contact for terms and data questions (see TermsDocument.CONTACT_EMAIL).
+ */
+const ADVISOR = { name: 'Dr. Nang Hsu Mon Pyae', email: 'nanghsumonpyae@mfu.ac.th' }
+
+const TEAM: { name: string; email: string }[] = [
+  { name: 'Nyan Sint Zaw', email: '6731503077@lamduan.mfu.ac.th' },
+  { name: 'Thaw Zin Myo Aung', email: '6731503088@lamduan.mfu.ac.th' },
+  { name: 'Zwe Thura Aung', email: '6731503097@lamduan.mfu.ac.th' },
+  { name: 'Thant Htoo San', email: '6731503087@lamduan.mfu.ac.th' },
+  { name: 'Nadi Zeya', email: '6731503070@lamduan.mfu.ac.th' },
+]
+
+/** Email as a quiet violet link — used for every address in the About modal. */
+const MAIL_LINK = 'font-medium text-violet-700 underline-offset-2 hover:underline'
 
 const MICRO_LABEL = 'text-[10px] font-bold uppercase tracking-[0.2em] text-violet-700'
 
@@ -85,45 +105,14 @@ function TermsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
     <Modal
       open={open}
       onClose={onClose}
-      title="Terms and conditions"
-      eyebrow="Last updated 2025"
+      title="Terms and Privacy Notice"
+      eyebrow={TERMS_UPDATED}
       size="lg"
       footer={<Button onClick={onClose}>Got it</Button>}
     >
-      <div className="space-y-5 text-sm leading-relaxed text-slate-700">
-        <p>
-          By using MILA (MFU Intelligent Lecturer Assistant) you agree to the terms below.
-          Please read them before continuing.
-        </p>
-        <section className="space-y-1.5">
-          <h4 className="font-semibold text-slate-900">Purpose of the service</h4>
-          <p>
-            MILA helps you plan lessons, create assessments, manage student batches, and
-            communicate with students using Google Workspace tools.
-          </p>
-        </section>
-        <section className="space-y-1.5">
-          <h4 className="font-semibold text-slate-900">Account access</h4>
-          <p>
-            Sign in with a valid Google account. You are responsible for keeping that
-            account secure.
-          </p>
-        </section>
-        <section className="space-y-1.5">
-          <h4 className="font-semibold text-slate-900">Google services and permissions</h4>
-          <p>
-            MILA asks for access to the Google services listed on the sign-in panel, and
-            uses them only for the classroom workflows described there.
-          </p>
-        </section>
-        <section className="space-y-1.5">
-          <h4 className="font-semibold text-slate-900">Your work stays yours</h4>
-          <p>
-            Everything MILA generates is a draft for you to review. Nothing is sent to
-            your students until you approve it.
-          </p>
-        </section>
-      </div>
+      {/* The prose lives in TermsDocument — the same component the post-sign-in
+          acceptance gate renders, so the two can never drift apart. */}
+      <TermsDocument />
     </Modal>
   )
 }
@@ -152,6 +141,40 @@ function AboutModal({ open, onClose }: { open: boolean; onClose: () => void }) {
           MILA is developed at Mae Fah Luang University under the MLII Innovation
           Development Grant, at the MFU Learning Innovation Institute.
         </p>
+
+        <section className="space-y-1.5">
+          <h4 className="font-semibold text-slate-900">Project advisor</h4>
+          <p>
+            {ADVISOR.name} —{' '}
+            <a className={MAIL_LINK} href={`mailto:${ADVISOR.email}`}>
+              {ADVISOR.email}
+            </a>
+          </p>
+        </section>
+
+        <section className="space-y-1.5">
+          <h4 className="font-semibold text-slate-900">Development team</h4>
+          <ul className="space-y-1">
+            {TEAM.map(({ name, email }) => (
+              <li key={email}>
+                {name} —{' '}
+                <a className={MAIL_LINK} href={`mailto:${email}`}>
+                  {email}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <section className="space-y-1.5">
+          <h4 className="font-semibold text-slate-900">Contact</h4>
+          <p>
+            Questions, feedback, or data requests:{' '}
+            <a className={MAIL_LINK} href={`mailto:${ADVISOR.email}`}>
+              {ADVISOR.email}
+            </a>
+          </p>
+        </section>
       </div>
     </Modal>
   )
@@ -167,6 +190,10 @@ export default function Login() {
   const [redirecting, setRedirecting] = useState(false)
   const [termsOpen, setTermsOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
+  /* Deliberately not persisted: a consent box that comes back pre-ticked is a
+     dark pattern. One click per visit is the price of an honest ask; the
+     durable record is the per-account acceptance behind sign-in (TermsGate). */
+  const [agreed, setAgreed] = useState(false)
 
   if (loading) return <LoadingScreen label="Checking sign-in status…" />
   if (user) return <Navigate to="/chat" replace />
@@ -311,6 +338,37 @@ export default function Login() {
             </div>
           )}
 
+          {/* The agreement sits directly above the button it arms, so cause
+              and effect share one glance. Not the design-system Checkbox: its
+              label is typed string-only, and this one needs a live link. */}
+          <label
+            className={`flex cursor-pointer items-start gap-2.5 text-sm leading-relaxed text-slate-700 ${
+              notLecturer ? 'mt-5' : 'mt-10'
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={agreed}
+              onChange={(event) => setAgreed(event.target.checked)}
+              className="mt-0.5 h-4 w-4 flex-none cursor-pointer accent-violet-600"
+            />
+            <span id="terms-agree-label">
+              I have read and agree to the{' '}
+              <button
+                type="button"
+                className="font-semibold text-violet-700 underline underline-offset-2"
+                /* preventDefault so opening the document never toggles the box
+                   it happens to be labelling. */
+                onClick={(event) => {
+                  event.preventDefault()
+                  setTermsOpen(true)
+                }}
+              >
+                Terms and Privacy Notice
+              </button>
+            </span>
+          </label>
+
           <Button
             type="button"
             onClick={() => {
@@ -318,9 +376,15 @@ export default function Login() {
               signInWithGoogle()
             }}
             loading={redirecting}
+            disabled={!agreed}
+            /* Points a screen reader at the reason the button is shut. */
+            aria-describedby="terms-agree-label"
             size="lg"
             block
-            className={notLecturer ? 'mt-5' : 'mt-10'}
+            /* Greyed while shut, violet once the box is ticked — the colour
+               arriving is the feedback. `!` because the design system's
+               unlayered CSS beats Tailwind's @layer utilities. */
+            className="mt-4 disabled:!bg-slate-200 disabled:!text-slate-500 disabled:!opacity-100 disabled:!shadow-none"
           >
             {redirecting ? 'Taking you to Google…' : 'Sign in with Google'}
           </Button>
@@ -350,7 +414,7 @@ export default function Login() {
               look like a mistake. */}
           <div className="mt-8 grid grid-cols-2 gap-3">
             <Button type="button" variant="secondary" size="sm" block onClick={() => setTermsOpen(true)}>
-              Terms and conditions
+              Terms and privacy
             </Button>
             <Button type="button" variant="secondary" size="sm" block onClick={() => setAboutOpen(true)}>
               About and contact

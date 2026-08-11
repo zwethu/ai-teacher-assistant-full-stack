@@ -13,7 +13,10 @@ vi.mock('../hooks/useAuth', () => ({
 }))
 
 
-afterEach(() => cleanup())
+afterEach(() => {
+  cleanup()
+  signInWithGoogle.mockClear()
+})
 
 function renderLogin() {
   render(
@@ -49,8 +52,25 @@ describe('Login', () => {
     }
   })
 
-  it('signs in with Google', () => {
+  /**
+   * The checkbox is the pre-sign-in half of the consent story (the durable,
+   * per-account half is TermsGate). A disabled button swallows clicks
+   * entirely, which is exactly the behaviour under test.
+   */
+  it('holds sign-in shut until the terms are agreed to', () => {
     renderLogin()
+    const button = screen.getByRole('button', { name: 'Sign in with Google' }) as HTMLButtonElement
+    expect(button.disabled).toBe(true)
+    fireEvent.click(button)
+    expect(signInWithGoogle).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('checkbox'))
+    expect(button.disabled).toBe(false)
+  })
+
+  it('signs in with Google once the terms are agreed to', () => {
+    renderLogin()
+    fireEvent.click(screen.getByRole('checkbox'))
     fireEvent.click(screen.getByRole('button', { name: 'Sign in with Google' }))
     expect(signInWithGoogle).toHaveBeenCalledTimes(1)
   })
@@ -65,11 +85,17 @@ describe('Login', () => {
   it('opens terms and about', () => {
     renderLogin()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Terms and conditions' }))
-    expect(screen.getByText(/By using MILA/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Terms and privacy' }))
+    // The full document, not the old four-paragraph sketch: a string query is
+    // a full-text match, so this hits the section heading and nothing else.
+    expect(screen.getByText('Privacy notice')).toBeTruthy()
+    expect(screen.getByText('AI processing')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Got it' }))
 
     fireEvent.click(screen.getByRole('button', { name: 'About and contact' }))
     expect(screen.getByText(/MFU Intelligent Lecturer Assistant/)).toBeTruthy()
+    // The team is named and reachable — the whole point of "and contact".
+    expect(screen.getByText(/Nang Hsu Mon Pyae/)).toBeTruthy()
+    expect(screen.getAllByRole('link').some((a) => a.getAttribute('href')?.startsWith('mailto:'))).toBe(true)
   })
 })

@@ -2,6 +2,7 @@ import { Navigate, Outlet } from 'react-router-dom'
 import { GraduationCap } from 'lucide-react'
 import { useAuth } from '../../hooks/useAuth'
 import { Button } from '../../design-system'
+import { TermsGate } from '../legal/TermsGate'
 import LoadingScreen from '../ui/LoadingScreen'
 
 /**
@@ -32,7 +33,13 @@ export default function ProtectedRoute() {
     return <LecturersOnly />
   }
 
-  return <Outlet />
+  /* Signed in and a lecturer — one question left: have they accepted the
+     current terms? The gate holds the app shut until they have. */
+  return (
+    <TermsGate>
+      <Outlet />
+    </TermsGate>
+  )
 }
 
 function LecturersOnly() {

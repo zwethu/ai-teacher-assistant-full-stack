@@ -96,6 +96,22 @@
   margin: 0;
 }
 
+/* The data notice on the nickname step. Quieter than .play-hint — it informs
+   rather than instructs — and left-aligned because it is three clauses of
+   prose, not a one-line nudge. */
+.play-privacy-note {
+  font-size: 0.78rem;
+  color: #8b5e52;
+  font-weight: 600;
+  line-height: 1.55;
+  text-align: left;
+  margin: 0;
+  background: #fff8f4;
+  border: 1.5px solid #f4e4d4;
+  border-radius: 14px;
+  padding: 10px 14px;
+}
+
 /* ─── Mode badge ─── */
 .play-mode-badge {
   background: #fff3e4;

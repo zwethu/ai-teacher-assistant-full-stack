@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ChevronDown } from 'lucide-react'
 import type { Batch } from '../../../entity/Batch'
+import { Button } from '../../../design-system'
 import { BatchMenuList } from './BatchMenuList'
 
 type Props = {
@@ -44,27 +45,28 @@ export function BatchSelectorBar({ batches, batchesLoading, onSelectBatch }: Pro
 
   return (
     <div ref={containerRef} className="relative px-4 pb-2 flex-shrink-0">
-      <div className="max-w-3xl mx-auto flex items-center gap-2">
-        <button
+      {/* Centred, and the design system's primary — the hero copy points at
+          this button as THE action of the empty state, and a left-hugging
+          frosted chip read as an afterthought floating in dead space.
+          `pointer-events-auto`: the composer wrapper this sits in floats over
+          the transcript and disables pointer events, so only the controls
+          themselves take clicks — the rest of the band stays see-through. */}
+      <div className="max-w-3xl mx-auto flex items-center justify-center gap-2">
+        <Button
           type="button"
           onClick={handleChipClick}
-          /* pointer-events-auto: the composer wrapper this sits in floats over
-             the transcript and disables pointer events, so only the controls
-             themselves take clicks — the rest of the band stays see-through. */
-          /* violet-900, not slate: white/70 over the page's purple canvas
-             composites to a lavender, and neutral gray reads muddy on it. */
-          className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-violet-200/70 bg-white/70 px-3 py-1.5 text-sm font-medium text-violet-900 transition-colors hover:bg-violet-50/60 active:scale-[0.97]"
+          className="pointer-events-auto"
           aria-expanded={open}
         >
           <span className="truncate max-w-[220px]">{chipLabel}</span>
           {batches.length > 0 && (
             <ChevronDown
-              className={`h-4 w-4 flex-none text-violet-500 transition-transform duration-200 ${
+              className={`h-4 w-4 flex-none transition-transform duration-200 ${
                 open ? 'rotate-180' : ''
               }`}
             />
           )}
-        </button>
+        </Button>
       </div>
 
       {open && batches.length > 0 && (

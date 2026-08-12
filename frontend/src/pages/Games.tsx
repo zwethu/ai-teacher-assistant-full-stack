@@ -12,6 +12,7 @@ import { GenerationAttachments } from '../components/generation/GenerationAttach
 import { GenerationRunView } from '../components/generation/GenerationRunView'
 import Toast from '../components/ui/Toast'
 import { SelectField } from '../components/ui/SelectField'
+import { NumberField } from '../components/ui/NumberField'
 import { Collapse } from '../components/ui/Collapse'
 import { DateField } from '../components/ui/DateField'
 import { CHECKBOX_CLASS, FIELD_CLASS } from '../components/ui/fieldStyles'
@@ -38,10 +39,11 @@ import { Button, Modal, Spinner } from '../design-system'
 // the term-bearing teaching content a term/definition game needs.
 const ARTIFACT_SOURCE_TYPES = ['lesson_plan', 'lab', 'quiz'] as const
 
-// Every game is the standard size — the count is shown to the lecturer, never
-// chosen. Must stay within MIN_GAME_ITEMS / MAX_GAME_ITEMS (4–40) in
-// backend/entity/GameSession.py, which re-validates on create.
-const PAIR_COUNT = 30
+// Mirrors MIN_GAME_ITEMS / MAX_GAME_ITEMS in backend/entity/GameSession.py — the
+// backend re-validates, so asking for a count outside these fails the create.
+const MIN_PAIRS = 4
+const MAX_PAIRS = 40
+const DEFAULT_PAIRS = 30
 
 /**
  * `datetime-local` speaks local wall-clock with no zone, so its value has to be built
@@ -427,6 +429,8 @@ function GameGenerator({
   const [pickerOpen, setPickerOpen] = useState(false)
   const [pickerQuery, setPickerQuery] = useState('')
   const [instructions, setInstructions] = useState('')
+  // Held as text so the field can be cleared while typing; validated before use.
+  const [pairCount, setPairCount] = useState(String(DEFAULT_PAIRS))
   // Seeded from storage so returning mid-run restores the deadline the lecturer
   // already chose, instead of quietly creating the game without one.
   const [deadline, setDeadline] = useState(() => readStoredDeadline(batch.id))
@@ -435,6 +439,9 @@ function GameGenerator({
   useEffect(() => {
     writeStoredDeadline(batch.id, hasDeadline ? deadline : '')
   }, [batch.id, hasDeadline, deadline])
+
+  const pairs = Number(pairCount)
+  const pairsValid = Number.isInteger(pairs) && pairs >= MIN_PAIRS && pairs <= MAX_PAIRS
 
   const deadlineDate = hasDeadline && deadline ? new Date(deadline) : null
   const deadlineValid =
@@ -497,8 +504,8 @@ function GameGenerator({
   })
 
   async function handleGenerate() {
-    if (run.sending || !hasSource || !deadlineValid) return
-    const lines: string[] = [`Create exactly ${PAIR_COUNT} term/definition pairs.`]
+    if (run.sending || !hasSource || !pairsValid || !deadlineValid) return
+    const lines: string[] = [`Create exactly ${pairs} term/definition pairs.`]
     if (selectedArtifact) {
       const type = String(selectedArtifact.type || selectedArtifact.artifact_type || 'lesson_plan')
       const week = selectedArtifact.week
@@ -589,12 +596,27 @@ function GameGenerator({
           Sections are separated by rules, not by more borders. */}
       <div className="mt-5 grid max-w-3xl gap-4 border-t border-slate-100 pt-5 sm:grid-cols-[8rem_1fr]">
         <div>
-          {/* A read-out, not a control — every game is the standard size, so
-              the lecturer sees what they are getting instead of choosing it. */}
-          <span className="mb-1.5 block text-sm font-semibold text-slate-700">Number of pairs</span>
-          <p className="text-sm text-slate-900">{PAIR_COUNT} pairs</p>
-          <p className="mt-1 text-xs text-slate-500">
-            About {gameTimeLimitMinutes(PAIR_COUNT)} min to play
+          {/* The same control as every other number on the site. It was the
+              last raw `type="number"` left, so this was the one field still
+              drawing the operating system's spinner rather than ours. */}
+          <NumberField
+            id="game-pair-count"
+            label="Number of pairs"
+            min={MIN_PAIRS}
+            max={MAX_PAIRS}
+            value={pairs}
+            onChange={(value) => setPairCount(Number.isFinite(value) ? String(value) : '')}
+            invalid={!pairsValid}
+            describedBy="game-pair-count-hint"
+          />
+          
+          <p
+            id="game-pair-count-hint"
+            className={`mt-1 text-xs ${pairsValid ? 'text-slate-500' : 'text-red-600'}`}
+          >
+            {pairsValid
+              ? `About ${gameTimeLimitMinutes(pairs)} min to play`
+              : `Pick between ${MIN_PAIRS} and ${MAX_PAIRS}`}
           </p>
         </div>
 
@@ -761,7 +783,7 @@ function GameGenerator({
         <Button
           type="button"
           onClick={() => void handleGenerate()}
-          disabled={run.sending || !hasSource || !deadlineValid}
+          disabled={run.sending || !hasSource || !pairsValid || !deadlineValid}
           loading={run.sending}
           leadingIcon={<Sparkles className="h-4 w-4" />}
         >

@@ -1805,7 +1805,8 @@ async def _run_agent_background(
                     if not chunk:
                         continue
                     final_text_parts.append(chunk)
-                    write_stream_delta(
+                    await asyncio.to_thread(
+                        write_stream_delta,
                         run_id,
                         chunk_index,
                         chunk,
@@ -1815,7 +1816,8 @@ async def _run_agent_background(
                     )
                     chunk_index += 1
                     streamed_length += len(chunk)
-                    write_stream_meta(
+                    await asyncio.to_thread(
+                        write_stream_meta,
                         run_id,
                         done=False,
                         chunk_count=chunk_index,

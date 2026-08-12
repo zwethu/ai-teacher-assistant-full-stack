@@ -1,0 +1,34 @@
+For frontend
+
+
+cd frontend
+npm run build
+cd ..
+firebase deploy --only hosting
+
+
+if we also wanna update firebase rules,
+
+
+firebase deploy --only firestore:rules
+
+
+For backend
+
+!! IMPORTANT: do NOT pass --env-vars-file env.yaml !!
+env.yaml only has 4 variables, but the service needs ~20 (FIREBASE_RTDB_URL,
+AGENT_ENGINE_RESOURCE_NAME, CLOUD_TASKS_*, ...). --env-vars-file REPLACES the
+whole set, so deploying with it wipes the other 16 vars. That broke production
+on 2026-08-12: the backend could not write agentRuns to RTDB and every AI
+draft failed with "Lost the live connection". The vars were restored from
+revision 00016.
+
+Env vars persist across deploys on their own, so just deploy the code:
+
+I think we should change this symbol is to common at the mode yeah yeah we can okay okay okay so maybe we stop this meeting at the moment and we generate we generate pictures for that and came up again for the pool againcd backend
+gcloud run deploy ai-teacher-backend --source . --region asia-southeast1
+cd ..
+
+To change ONE env var (merges, does not wipe the rest):
+
+gcloud run services update ai-teacher-backend --region asia-southeast1 --update-env-vars KEY=VALUE

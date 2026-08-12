@@ -11,8 +11,8 @@ type Props = {
   onSelectBatch: (batch: Batch) => void
 }
 
-/** The "pick a space" chip above the composer. It exists only for the empty
-    state — once a space is chosen, the header names it and owns switching. */
+/** The "pick a space" button in the empty-state hero. It exists only for the
+    empty state — once a space is chosen, the header names it and owns switching. */
 export function BatchSelectorBar({ batches, batchesLoading, onSelectBatch }: Props) {
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
@@ -44,13 +44,9 @@ export function BatchSelectorBar({ batches, batchesLoading, onSelectBatch }: Pro
       : 'Select a batch'
 
   return (
-    <div ref={containerRef} className="relative px-4 pb-2 flex-shrink-0">
+    <div ref={containerRef} className="relative w-full px-4 pb-2 flex-shrink-0">
       {/* Centred, and the design system's primary — the hero copy points at
-          this button as THE action of the empty state, and a left-hugging
-          frosted chip read as an afterthought floating in dead space.
-          `pointer-events-auto`: the composer wrapper this sits in floats over
-          the transcript and disables pointer events, so only the controls
-          themselves take clicks — the rest of the band stays see-through. */}
+          this button as THE action of the empty state. */}
       <div className="max-w-3xl mx-auto flex items-center justify-center gap-2">
         <Button
           type="button"
@@ -70,7 +66,9 @@ export function BatchSelectorBar({ batches, batchesLoading, onSelectBatch }: Pro
       </div>
 
       {open && batches.length > 0 && (
-        <div className="pointer-events-auto absolute left-4 right-4 bottom-full mb-1 max-w-sm mx-auto rounded-xl border border-slate-200 bg-white shadow-lg z-30 overflow-hidden">
+        /* Opens downward: the button sits mid-screen in the hero, so there is
+           room below and the menu reads as belonging to the button. */
+        <div className="pointer-events-auto absolute left-4 right-4 top-full mt-1 max-w-sm mx-auto rounded-xl border border-slate-200 bg-white shadow-lg z-30 overflow-hidden">
           <BatchMenuList
             batches={batches}
             onSelect={(batch) => {

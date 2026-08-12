@@ -262,10 +262,15 @@ export function ChatLayout(props: Props) {
                   <Sparkles className="w-7 h-7 text-violet-600" />
                 </div>
                 <h2 className="text-2xl font-semibold text-slate-800 mb-2">AI Teaching Assistant</h2>
-                <p className="text-slate-500 text-sm max-w-sm">
-                  Pick a batch from the <span className="font-medium text-slate-700">Select a batch</span> button
-                  below to start chatting about lesson plans, assessments, and more.
+                <p className="text-slate-500 text-sm max-w-sm mb-6">
+                  Pick a batch to start chatting about lesson plans, assessments,
+                  and more.
                 </p>
+                <BatchSelectorBar
+                  batches={batches}
+                  batchesLoading={batchesLoading}
+                  onSelectBatch={setSelectedBatch}
+                />
               </div>
             )}
           </main>
@@ -322,21 +327,8 @@ export function ChatLayout(props: Props) {
           ref={composerRef}
           className="chat-composer-enter pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col bg-transparent"
         >
-          {/* Only while nothing is chosen. Once a space is selected the header
-              names it and owns switching, so a chip here would just repeat the
-              title back at the user. Hidden while a canonical
-              /batches/:id/chats/:id route is still resolving, so it does not
-              flash "Select a batch" over a chat that already has one. */}
-          {!selectedBatch &&
-            !isRouteInvalid &&
-            routeHydration !== 'hydrating' &&
-            (batchesLoading || batches.length > 0) && (
-              <BatchSelectorBar
-                batches={batches}
-                batchesLoading={batchesLoading}
-                onSelectBatch={setSelectedBatch}
-              />
-            )}
+          {/* The batch picker lives in the hero above, centered — the composer
+              stack only carries the input. */}
           <ChatInput
             input={input}
             sending={sending}

@@ -123,8 +123,11 @@ export default function PlayEntryPage() {
       setUserEmail(user.email);
       setUserUid(user.uid);
       handlePostLogin(session, user.uid, user.email);
-    } catch {
-      // user cancelled
+    } catch (err) {
+      // Usually the user closing the popup — but log it, because real
+      // failures (popup blocked, redirect_uri_mismatch, network) land
+      // here too and used to disappear without a trace.
+      console.error('[login] Google sign-in failed:', err);
     }
   }
 

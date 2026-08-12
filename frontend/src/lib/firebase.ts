@@ -1,5 +1,11 @@
 import { initializeApp } from 'firebase/app'
-import { getAuth } from 'firebase/auth'
+import {
+  initializeAuth,
+  browserLocalPersistence,
+  browserSessionPersistence,
+  inMemoryPersistence,
+  browserPopupRedirectResolver,
+} from 'firebase/auth'
 import { getDatabase } from 'firebase/database'
 import { getFirestore } from 'firebase/firestore'
 
@@ -27,6 +33,14 @@ if (missing.length > 0) {
 }
 
 export const app = initializeApp(firebaseConfig)
-export const auth = getAuth(app)
+// getAuth() defaults to IndexedDB persistence, which is flaky on some
+// devices ("Database is closing" killed sign-in on a tester's Mac,
+// 2026-08-13: auth succeeded, persisting the user threw, app bounced
+// back to login). localStorage first — reliable everywhere — with
+// session/memory as last-resort fallbacks (e.g. storage-blocked modes).
+export const auth = initializeAuth(app, {
+  persistence: [browserLocalPersistence, browserSessionPersistence, inMemoryPersistence],
+  popupRedirectResolver: browserPopupRedirectResolver,
+})
 export const db = getFirestore(app)
 export const rtdb = getDatabase(app)

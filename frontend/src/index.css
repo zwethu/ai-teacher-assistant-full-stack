@@ -1579,6 +1579,28 @@
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
+
+  /* Stress meter at warning level and above: the bar (and the mobile dot)
+     breathe so an elevated score registers even in peripheral vision. */
+  .mila-stress-pulse {
+    animation: mila-stress-pulse 1.5s ease-in-out infinite;
+  }
+
+  @keyframes mila-stress-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.55;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .mila-stress-pulse {
+      animation: none;
+    }
+  }
 }
 
 /* ---------------------------------------------------------------------------

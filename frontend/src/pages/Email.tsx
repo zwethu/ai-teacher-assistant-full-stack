@@ -47,7 +47,6 @@ import {
   sendSavedDraft,
 } from '../services/emailService'
 import { listBatches, listBatchStudents } from '../services/batchService'
-import { increaseStress } from '../services/wellnessService'
 import { formatDateTime, timeAgo, toDate } from '../utils/formatDate'
 import { Spinner, Button } from '../design-system'
 import { FIELD_CLASS, TEXTAREA_CLASS } from '../components/ui/fieldStyles'
@@ -583,7 +582,6 @@ export default function Email() {
             ? `Email sent to ${sent.length} recipient${sent.length > 1 ? 's' : ''}.`
             : `Sent to ${sent.length}, but ${failed.length} failed. Check the addresses and retry.`,
         )
-        increaseStress(user.uid, 3)
       } else if (modalMode === 'schedule') {
         if (!form.sendAt) {
           setFormError('Please choose a send date and time.')
@@ -618,7 +616,6 @@ export default function Email() {
           'success',
           `Email scheduled for ${finalRecipients.length} recipient${finalRecipients.length > 1 ? 's' : ''}.`,
         )
-        increaseStress(user.uid, 3)
       }
     } catch (err) {
       console.error(err)
@@ -744,7 +741,6 @@ export default function Email() {
           ? `Email sent to ${sent} recipient${sent === 1 ? '' : 's'}.`
           : `Sent to ${sent} of ${recipients.length} recipients.`,
       )
-      increaseStress(user.uid, 3)
     } catch (err) {
       console.error(err)
       setDetailError(getErrorMessage(err, 'Failed to send email.'))

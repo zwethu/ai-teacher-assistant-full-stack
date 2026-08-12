@@ -17,7 +17,7 @@ import {
 import { confirm } from '../ui/confirmStore'
 import { useAuth } from '../../hooks/useAuth'
 import { ARTIFACT_ICONS } from '../../utils/artifactIcons'
-import { getStress, type StressState } from '../../services/wellnessService'
+import { useStress } from '../../context/StressContext'
 import WellnessPopover from '../wellness/WellnessPopover'
 const NAV_ITEMS: {
   to: string
@@ -40,42 +40,30 @@ function stressLabel(score: number): string {
   return 'Low'
 }
 
-function stressBarColor(score: number): string {
-  if (score >= 100) return 'bg-red-500'
-  if (score >= 80) return 'bg-orange-500'
-  return 'bg-emerald-400'
+/* Meter colors come from the wellness tokens: violet at rest (MILA calm),
+   orange in the warning band, red at the ceiling. */
+function stressBarVar(score: number): string {
+  if (score >= 100) return 'var(--stress-max)'
+  if (score >= 80) return 'var(--stress-high)'
+  return 'var(--stress-low)'
 }
 
 function stressLabelColor(score: number): string {
   if (score >= 100) return 'text-red-600'
   if (score >= 80) return 'text-orange-600'
-  return 'text-emerald-600'
+  return 'text-violet-600'
 }
 
-interface StressWidgetProps {
-  uid: string
-}
-
-function StressWidget({ uid }: StressWidgetProps) {
+function StressWidget() {
   const [expanded, setExpanded] = useState(false)
-  const [stress, setStress] = useState<StressState | null>(null)
-
-  async function refreshStress() {
-    try {
-      setStress(await getStress(uid))
-    } catch (err) {
-      console.error('Failed to load stress:', err)
-    }
-  }
-
-  useEffect(() => {
-    refreshStress()
-  }, [uid])
+  const { stress } = useStress()
 
   const score = stress?.stress_score ?? 0
+  const elevated = score >= 80
 
   return (
     <div
+      data-stress-ui
       className={`rounded-xl transition-colors ${
         expanded ? 'bg-slate-50 border border-slate-200' : 'hover:bg-slate-50'
       }`}
@@ -104,19 +92,20 @@ function StressWidget({ uid }: StressWidgetProps) {
         </div>
         <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
           <div
-            className={`h-full rounded-full transition-all duration-700 ${stressBarColor(score)}`}
-            style={{ width: `${score}%` }}
+            className={`h-full rounded-full transition-all duration-700 ${
+              elevated ? 'mila-stress-pulse' : ''
+            }`}
+            style={{
+              width: `${Math.min(100, score)}%`,
+              backgroundColor: stressBarVar(score),
+            }}
           />
         </div>
       </button>
 
       {expanded && (
         <div className="px-2 pb-3 pt-1 border-t border-slate-200/80">
-          <WellnessPopover
-            uid={uid}
-            embedded
-            onStressUpdate={refreshStress}
-          />
+          <WellnessPopover />
         </div>
       )}
     </div>
@@ -385,7 +374,7 @@ export default function Sidebar({
 
         {uid && (
           <div className="px-5 py-4 border-t border-slate-100">
-            <StressWidget uid={uid} />
+            <StressWidget />
           </div>
         )}
 
@@ -436,7 +425,7 @@ export default function Sidebar({
 
         {!collapsed && uid && (
           <div className="px-5 py-4 border-t border-slate-100 flex-shrink-0">
-            <StressWidget uid={uid} />
+            <StressWidget />
           </div>
         )}
 

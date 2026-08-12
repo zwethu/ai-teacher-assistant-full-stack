@@ -29,7 +29,9 @@ from services.chat_service import (
     get_or_create_workflow_chat,
     update_assistant_message_metadata_for_run,
 )
+from services.wellness_service import apply_feature_stress, workflow_stress_cost
 from utils.firebase_auth import CurrentUser, get_current_user
+from utils.stress_guard import stress_guard
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -180,6 +182,7 @@ async def invoke_agent(
     body: AgentInvokeRequest,
     background_tasks: BackgroundTasks,
     user: CurrentUser = Depends(get_current_user),
+    _stress: None = Depends(stress_guard),
 ) -> AgentInvokeResponse:
     """Create a run, write RTDB lifecycle nodes, invoke Agent Engine in background.
 
@@ -318,6 +321,8 @@ async def invoke_agent(
         approved_outline=approved_outline,
         attachment_ids=body.attachment_ids,
     )
+
+    apply_feature_stress(lecturer_id, workflow_stress_cost(body.workflow_type))
 
     return AgentInvokeResponse(
         run_id=result["run_id"],

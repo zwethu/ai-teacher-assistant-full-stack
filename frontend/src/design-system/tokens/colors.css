@@ -133,8 +133,10 @@
   --status-danger: var(--red-600);
   --status-danger-soft: var(--red-50);
 
-  /* Wellness / stress signal (low → max) */
-  --stress-low: var(--emerald-500);
+  /* Wellness / stress signal (low → max). Low is brand violet — calm reads
+     as "MILA at rest", not a success state; orange and red keep their
+     universal urgency once the meter passes the warning threshold. */
+  --stress-low: var(--violet-500);
   --stress-high: var(--orange-500);
   --stress-max: var(--red-500);
 

@@ -2,12 +2,17 @@ import { useState } from 'react'
 import { Menu } from 'lucide-react'
 import { Outlet } from 'react-router-dom'
 import Sidebar from './Sidebar'
+import { StressProvider } from '../../context/StressContext'
+import BreathingModal from '../wellness/BreathingModal'
+import StressBlocker from '../wellness/StressBlocker'
+import StressWarningBanner from '../wellness/StressWarningBanner'
 
 export default function AppLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   return (
+    <StressProvider>
     <div className="maia-app-bg h-screen overflow-hidden text-slate-800 font-sans">
       <div className="flex h-full">
         <Sidebar
@@ -46,12 +51,19 @@ export default function AppLayout() {
                 every switch. */}
             <div className="flex-1 flex flex-col min-h-0 overflow-y-auto [scrollbar-gutter:stable]">
               <div className="max-w-7xl mx-auto w-full flex-1 flex flex-col min-h-0 px-4 pt-4 md:px-8 md:pt-6">
+                <StressWarningBanner />
                 <Outlet />
               </div>
             </div>
           </main>
+
+          {/* Covers the content column only — the sidebar (and its wellness
+              widget) stays reachable while features are paused at 100. */}
+          <StressBlocker />
         </div>
       </div>
     </div>
+    <BreathingModal />
+    </StressProvider>
   )
 }

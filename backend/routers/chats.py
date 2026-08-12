@@ -49,6 +49,12 @@ from services.chat_service import (
     update_assistant_message_metadata_for_run,
     update_chat_title,
 )
+from services.wellness_service import (
+    STRESS_CHAT_MESSAGE,
+    STRESS_EMAIL,
+    apply_feature_stress,
+)
+from utils.stress_guard import stress_guard
 from services.chat_export_service import (
     SUPPORTED_FORMATS,
     build_export,
@@ -487,6 +493,7 @@ async def send_message_endpoint(
     body: SendMessageBody,
     background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(get_current_user),
+    _stress: None = Depends(stress_guard),
 ) -> dict:
     """Send a message, create a run, start the agent in the background.
 
@@ -527,7 +534,7 @@ async def send_message_endpoint(
                 superseded_outline_run_id,
             )
 
-    return await start_chat_run(
+    result = await start_chat_run(
         user_message=body.content,
         batch_id=batch_id,
         chat_id=chat_id,
@@ -541,6 +548,8 @@ async def send_message_endpoint(
         pending_artifact=False,
         attachment_ids=body.attachment_ids,
     )
+    apply_feature_stress(lecturer_id, STRESS_CHAT_MESSAGE)
+    return result
 
 
 @router.post("/{chat_id}/runs/{run_id}/pending-artifact/generate-docs", response_model=dict)
@@ -1115,6 +1124,7 @@ async def send_pending_email_endpoint(
             "email_failed_count": result["failed_count"],
         },
     )
+    apply_feature_stress(lecturer_id, STRESS_EMAIL)
     return {"success": True, **result}
 
 
@@ -1177,6 +1187,7 @@ async def save_pending_email_draft_endpoint(
             "email_failed_count": result["failed_count"],
         },
     )
+    apply_feature_stress(lecturer_id, STRESS_EMAIL)
     return {"success": True, **result}
 
 
@@ -1239,4 +1250,5 @@ async def schedule_pending_email_endpoint(
             "email_send_at": result["send_at"],
         },
     )
+    apply_feature_stress(lecturer_id, STRESS_EMAIL)
     return {"success": True, **result}

@@ -137,6 +137,7 @@ class OutlineFollowupInvalidationTest(unittest.IsolatedAsyncioTestCase):
                 return_value="outline-run",
             ) as invalidate,
             patch.object(chats, "update_assistant_message_metadata_for_run") as update_message,
+            patch.object(chats, "apply_feature_stress"),
             patch.object(
                 chats,
                 "start_chat_run",

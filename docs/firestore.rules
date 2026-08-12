@@ -140,16 +140,18 @@ service cloud.firestore {
     }
 
     // Stress score per user (document id = Firebase Auth uid).
+    // Writes go through the backend only (Admin SDK bypasses rules): the
+    // stress meter is an enforcement mechanism, so a browser must not be able
+    // to write its own score. Reads stay open to the owner so any cached old
+    // frontend keeps rendering instead of erroring.
     match /user_stress/{uid} {
-      allow read, create, update, delete: if isLecturer() && request.auth.uid == uid;
+      allow read: if isLecturer() && request.auth.uid == uid;
     }
 
-    // Post-breathing journal entries (scoped by uid field).
+    // Post-breathing journal entries (scoped by uid field). Server-write-only,
+    // same reasoning as user_stress.
     match /wellness_journal/{docId} {
       allow get, list: if isOwner();
-      allow create: if isOwnerOnCreate();
-      allow update: if isOwnerOnUpdate();
-      allow delete: if isOwner();
     }
 
     match /timetable/{docId} {

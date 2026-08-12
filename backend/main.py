@@ -68,6 +68,7 @@ from routers.course_blueprint import router as course_blueprint_router
 from routers.email import router as email_router
 from routers.files import router as files_router
 from routers.game import router as game_router
+from routers.wellness import router as wellness_router
 from services.maintenance_scheduler import shutdown_scheduler, start_scheduler
 
 # Comma-separated list of allowed browser origins. Local dev works with the
@@ -109,6 +110,7 @@ app.include_router(chats_router, dependencies=_lecturer_only)
 app.include_router(course_blueprint_router, dependencies=_lecturer_only)
 app.include_router(game_router, dependencies=_lecturer_only)
 app.include_router(email_router, prefix="", tags=["email"], dependencies=_lecturer_only)
+app.include_router(wellness_router, dependencies=_lecturer_only)
 app.include_router(agent_router, prefix="/agent", tags=["agent"], dependencies=_lecturer_only)
 
 from routers.tasks import router as tasks_router  # noqa: E402

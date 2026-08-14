@@ -27,6 +27,7 @@ const NAV_ITEMS: {
 }[] = [
   { to: '/chat', label: 'Chat', icon: MessageCircle, end: true },
   { to: '/batches', label: 'Batches', icon: Users },
+  { to: '/course-plans', label: 'Course Plans', icon: ARTIFACT_ICONS.course_blueprint },
   { to: '/lesson-plans', label: 'Lesson Plans', icon: ARTIFACT_ICONS.lesson_plan },
   { to: '/assessments', label: 'Assessments', icon: ARTIFACT_ICONS.assessment },
   { to: '/email', label: 'Send Emails', icon: Mail },

@@ -22,6 +22,7 @@ const Login = lazy(() => import('./pages/Login'))
 const Chat = lazy(() => import('./pages/chat'))
 const Assessments = lazy(() => import('./pages/Assessments'))
 const LessonPlans = lazy(() => import('./pages/LessonPlans'))
+const CoursePlans = lazy(() => import('./pages/CoursePlans'))
 const Batches = lazy(() => import('./pages/batches'))
 const Email = lazy(() => import('./pages/Email'))
 const CatGamePage = lazy(() => import('./pages/CatGamePage'))
@@ -60,6 +61,7 @@ export default function App() {
               <Route path="/batches" element={<Batches />} />
               <Route path="/assessments" element={<Assessments />} />
               <Route path="/lesson-plans" element={<LessonPlans />} />
+              <Route path="/course-plans" element={<CoursePlans />} />
               <Route path="/email" element={<Email />} />
               <Route path="/games" element={<Games />} />
               <Route path="/cat-game" element={<CatGamePage />} />

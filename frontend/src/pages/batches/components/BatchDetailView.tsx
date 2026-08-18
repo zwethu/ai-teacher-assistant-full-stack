@@ -43,6 +43,8 @@ type Props = {
   studentsLoading: boolean
   files: BatchFile[]
   filesLoading: boolean
+  /** `null` until the count is known — the tab shows no badge until then. */
+  chatCount: number | null
   artifacts: Artifact[]
   games: GameSession[]
   artifactSummary: ArtifactSummary | null
@@ -84,6 +86,7 @@ export function BatchDetailView({
   studentsLoading,
   files,
   filesLoading,
+  chatCount,
   artifacts,
   games,
   artifactSummary,
@@ -227,21 +230,46 @@ export function BatchDetailView({
       </div>
 
       <BatchTabs
+        /* Every tab carries its own count, so the strip answers "is there
+           anything in there?" without a click. Each number is one the page
+           already holds — nothing here triggers a fetch of its own — and a
+           count that is zero or not yet loaded shows nothing rather than a
+           "0" that reads like a failure. Planning counts the weeks in the
+           current blueprint, which is the only honest number that tab has. */
         tabs={[
-          { id: 'planning', label: 'Planning', icon: BookOpenCheck },
-          { id: 'students', label: 'Students', icon: Users },
+          {
+            id: 'planning',
+            label: 'Planning',
+            icon: BookOpenCheck,
+            badge: blueprint?.weekly_plan.length,
+            badgeLabel: `${blueprint?.weekly_plan.length ?? 0} weeks planned`,
+          },
+          {
+            id: 'students',
+            label: 'Students',
+            icon: Users,
+            badge: students.length,
+            badgeLabel: `${students.length} student${students.length === 1 ? '' : 's'}`,
+          },
           /* "Chats", not "Sessions". A session reads as a login session or a
              class meeting, neither of which this is — and the tab's own copy
              had already drifted to the honest word ("Show older chats"). Not
              "History" either: the tab is where a chat is *started*, so naming
              it for the past would describe half of it. The `materials` id is
              untouched — it is in the URL as `?tab=materials`. */
-          { id: 'materials', label: 'Chats', icon: MessageCircle },
+          {
+            id: 'materials',
+            label: 'Chats',
+            icon: MessageCircle,
+            badge: chatCount ?? undefined,
+            badgeLabel: `${chatCount ?? 0} chat${chatCount === 1 ? '' : 's'}`,
+          },
           {
             id: 'artifacts',
             label: 'Generated content',
             icon: Sparkles,
             badge: artifacts.length + games.length,
+            badgeLabel: `${artifacts.length + games.length} items`,
           },
         ]}
         active={detailTab}

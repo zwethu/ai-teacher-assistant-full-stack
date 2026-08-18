@@ -28,10 +28,15 @@ import {
   uploadBatchFile,
 } from '../../../services/fileService'
 import { deleteGame, listGames, type GameSession } from '../../../services/gameService'
+import { listChats } from '../../../services/chatService'
+import { CHAT_CREATED_EVENT } from '../../../utils/chatEvents'
 import type { BatchDetails, BatchWithCount, CreateStep, DetailTab, StudentRow } from '../types'
 import { parseCsv } from '../utils/parseCsv'
 import { confirm } from '../../../components/ui/confirmStore'
 import { undoable, usePendingUndo } from '../../../components/ui/undoStore'
+
+/** The server caps the chat list at 100 per request; the count cannot exceed it. */
+const CHAT_COUNT_LIMIT = 100
 
 export function useBatchesPage() {
   const { user } = useAuth()
@@ -111,6 +116,20 @@ export function useBatchesPage() {
   }, [selectedBatch, detailTab, searchParams, setSearchParams])
   const [students, setStudents] = useState<BatchStudent[]>([])
   const [studentsLoading, setStudentsLoading] = useState(false)
+
+  /**
+   * How many chats the batch has, for the Chats tab's count.
+   *
+   * Fetched here rather than read off `MaterialsTab`'s list: that tab pages
+   * (`CHAT_PAGE_SIZE` at a time) and only mounts once you open it, so its
+   * length is neither the total nor available before the first visit — a count
+   * that appears when you click the tab is worse than no count.
+   *
+   * `null` means not known yet, which renders as no badge at all. The server
+   * caps `limit` at 100, so that is also the ceiling here; the badge renders
+   * anything over 99 as "99+" rather than claiming a number it cannot see.
+   */
+  const [chatCount, setChatCount] = useState<number | null>(null)
   const lastDetailBatchIdRef = useRef<string | null>(null)
 
   const [studentForm, setStudentForm] = useState({ name: '', email: '' })
@@ -193,6 +212,19 @@ export function useBatchesPage() {
       showToast('error', getErrorMessage(err, 'Could not load students.'))
     } finally {
       setStudentsLoading(false)
+    }
+  }, [selectedBatch])
+
+  const refreshChatCount = useCallback(async () => {
+    if (!selectedBatch) return
+    try {
+      const chats = await listChats(selectedBatch.id, { limit: CHAT_COUNT_LIMIT })
+      setChatCount(chats.length)
+    } catch (err) {
+      // A count is decoration; a toast for one would be noise on top of
+      // whatever else just failed. Drop the badge instead.
+      console.error(err)
+      setChatCount(null)
     }
   }, [selectedBatch])
 
@@ -288,10 +320,24 @@ export function useBatchesPage() {
     // A URL-requested tab wins over the default for this one selection.
     setDetailTab(pendingTabRef.current ?? 'students')
     pendingTabRef.current = null
+    setChatCount(null)
     refreshStudents()
     refreshFiles()
     refreshArtifacts()
-  }, [selectedBatch, refreshStudents, refreshFiles, refreshArtifacts])
+    void refreshChatCount()
+  }, [selectedBatch, refreshStudents, refreshFiles, refreshArtifacts, refreshChatCount])
+
+  /* Chats are created and deleted inside the tab, and from the chat page
+     entirely. The window event both of those already fire is the only signal
+     that reaches here without threading a callback through four components. */
+  useEffect(() => {
+    if (!selectedBatch) return undefined
+    function onChatsChanged() {
+      void refreshChatCount()
+    }
+    window.addEventListener(CHAT_CREATED_EVENT, onChatsChanged)
+    return () => window.removeEventListener(CHAT_CREATED_EVENT, onChatsChanged)
+  }, [selectedBatch, refreshChatCount])
 
   useEffect(() => {
     if (pollingRef.current) clearInterval(pollingRef.current)
@@ -661,6 +707,7 @@ export function useBatchesPage() {
     studentsLoading,
     files: files.filter((file) => !pendingUndo.has(file.file_id)),
     filesLoading,
+    chatCount,
     artifacts: artifacts.filter((artifact) => !pendingUndo.has(artifact.id)),
     games: games.filter((game) => !pendingUndo.has(game.gameId)),
     artifactSummary,

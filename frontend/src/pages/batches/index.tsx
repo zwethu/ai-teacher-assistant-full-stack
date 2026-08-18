@@ -19,6 +19,7 @@ export default function Batches() {
         studentsLoading={state.studentsLoading}
         files={state.files}
         filesLoading={state.filesLoading}
+        chatCount={state.chatCount}
         artifacts={state.artifacts}
         artifactSummary={state.artifactSummary}
         games={state.games}

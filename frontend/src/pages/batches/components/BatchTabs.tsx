@@ -22,8 +22,17 @@ export type TabSpec = {
   id: DetailTab
   label: string
   icon: LucideIcon
-  /** Omitted when there is no honest number to show. */
+  /** Omitted when there is no honest number to show — including 0, and
+      including "not loaded yet", which must not render as an empty count. */
   badge?: number
+  /**
+   * What the badge counts, in words: "24 students", "12 weeks planned".
+   *
+   * A bare number beside a label is readable on screen and ambiguous out loud
+   * — "Planning 12" says nothing. This becomes the tab's accessible name, so
+   * the pill stays a pill and a screen reader still gets a sentence.
+   */
+  badgeLabel?: string
 }
 
 type Props = {
@@ -142,6 +151,7 @@ export function BatchTabs({ tabs, active, onChange }: Props) {
         {tabs.map((tab) => {
           const Icon = tab.icon
           const selected = tab.id === active
+          const showBadge = tab.badge !== undefined && tab.badge > 0
           return (
             <button
               key={tab.id}
@@ -157,6 +167,7 @@ export function BatchTabs({ tabs, active, onChange }: Props) {
               // Roving tabindex: one stop for the whole bar, then arrows.
               tabIndex={selected ? 0 : -1}
               onClick={() => onChange(tab.id)}
+              aria-label={showBadge ? `${tab.label}, ${tab.badgeLabel ?? tab.badge}` : undefined}
               /* The focus ring is deliberately *not* violet.
                  The active state is a violet underline and violet text, so a
                  violet ring would say the same thing twice and a keyboard user
@@ -170,9 +181,17 @@ export function BatchTabs({ tabs, active, onChange }: Props) {
             >
               <Icon className="h-4 w-4" />
               {tab.label}
-              {tab.badge !== undefined && tab.badge > 0 && (
-                <span className="inline-flex items-center rounded-full bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">
-                  {tab.badge}
+              {showBadge && (
+                <span
+                  aria-hidden="true"
+                  className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-xs tabular-nums transition-colors ${
+                    selected ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-600'
+                  }`}
+                >
+                  {/* The chat count is fetched against the server's 100-row
+                      ceiling, so past that the number is a floor, not a fact.
+                      Four tabs of pills also have to stay the same width. */}
+                  {(tab.badge as number) > 99 ? '99+' : tab.badge}
                 </span>
               )}
             </button>

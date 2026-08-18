@@ -438,6 +438,9 @@ export function MaterialsTab({
         try {
           await deleteChat(batchId, chat.chat_id)
           setChats((prev) => prev.filter((item) => item.chat_id !== chat.chat_id))
+          // Same event the create path fires: the tab strip's count is one
+          // level up and has no other way to hear about this.
+          emitChatCreated()
         } catch (err) {
           console.error(err)
         }

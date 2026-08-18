@@ -148,8 +148,23 @@ service cloud.firestore {
       allow read: if isLecturer() && request.auth.uid == uid;
     }
 
-    // Post-breathing journal entries (scoped by uid field). Server-write-only,
-    // same reasoning as user_stress.
+    // The activity journal: one row per charged action, and one rolled-up
+    // report per finished day. Server-write-only for the same reason as
+    // user_stress — a browser that could write these could write itself a
+    // quiet day. Nothing client-side reads them directly (the API serves the
+    // journal), but the owner keeps read access so the rows stay inspectable
+    // by the person they describe.
+    match /wellness_activity/{docId} {
+      allow get, list: if isOwner();
+    }
+
+    match /wellness_daily/{docId} {
+      allow get, list: if isOwner();
+    }
+
+    // Superseded: the old hand-written mood journal. The collection is being
+    // emptied (backend/scripts/delete_old_wellness_journal.py) and nothing
+    // reads it any more.
     match /wellness_journal/{docId} {
       allow get, list: if isOwner();
     }

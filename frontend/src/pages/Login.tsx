@@ -11,7 +11,7 @@ import { useAuth } from '../hooks/useAuth'
 import { Button, Modal } from '../design-system'
 import { ARTIFACT_ICONS } from '../utils/artifactIcons'
 import LoadingScreen from '../components/ui/LoadingScreen'
-import { TermsDocument, TERMS_UPDATED } from '../components/legal/TermsDocument'
+import { TermsDocument, TERMS_UPDATED, CONTACT_EMAIL } from '../components/legal/TermsDocument'
 
 /**
  * Sign-in page.
@@ -57,21 +57,39 @@ const GOOGLE_SERVICES: { name: string; purpose: string }[] = [
 ]
 
 /**
- * Who builds MILA — shown in the About modal. The advisor's address doubles as
- * the contact for terms and data questions (see TermsDocument.CONTACT_EMAIL).
+ * Who builds MILA — shown in the About modal. One team, listed the way the
+ * project is run: the lecturer who leads it first, then the assistant team.
+ * Questions go to the shared address, not to any one person, so the About
+ * modal and the Privacy Notice point at the same inbox
+ * (see TermsDocument.CONTACT_EMAIL).
  */
-const ADVISOR = { name: 'Dr. Nang Hsu Mon Pyae', email: 'nanghsumonpyae@mfu.ac.th' }
+const TEAM_LEAD = { name: 'Dr. Nang Hsu Mon Pyae', email: 'nanghsumonpyae@mfu.ac.th' }
 
-const TEAM: { name: string; email: string }[] = [
-  { name: 'Nyan Sint Zaw', email: '6731503077@lamduan.mfu.ac.th' },
-  { name: 'Thaw Zin Myo Aung', email: '6731503088@lamduan.mfu.ac.th' },
-  { name: 'Zwe Thura Aung', email: '6731503097@lamduan.mfu.ac.th' },
-  { name: 'Thant Htoo San', email: '6731503087@lamduan.mfu.ac.th' },
+/* Order is the team's own, not alphabetical or by student number — leave it. */
+const ASSISTANT_TEAM: { name: string; email: string }[] = [
   { name: 'Nadi Zeya', email: '6731503070@lamduan.mfu.ac.th' },
+  { name: 'Nyan Sint Zaw', email: '6731503077@lamduan.mfu.ac.th' },
+  { name: 'Thant Htoo San', email: '6731503087@lamduan.mfu.ac.th' },
+  { name: 'Zwe Thura Aung', email: '6731503097@lamduan.mfu.ac.th' },
+  { name: 'Thaw Zin Myo Aung', email: '6731503088@lamduan.mfu.ac.th' },
 ]
 
-/** Email as a quiet violet link — used for every address in the About modal. */
+/** Email as a quiet violet link — used for addresses that sit inside prose. */
 const MAIL_LINK = 'font-medium text-violet-700 underline-offset-2 hover:underline'
+
+/**
+ * The roster's two type sizes. Set at the same size and weight, a name and a
+ * `67315030xx@lamduan.mfu.ac.th` compete, and five rows of that read as one
+ * grey block where the only thing that varies is a student number. The name
+ * carries the row; the address drops a step and loses the underline until you
+ * reach for it.
+ */
+const ROSTER_NAME = 'font-medium leading-snug text-slate-900'
+const ROSTER_MAIL =
+  'text-xs text-violet-700/90 underline-offset-2 hover:text-violet-800 hover:underline'
+
+/** The one label inside the roster — smaller than the section heading above it. */
+const ROSTER_LABEL = 'text-[10px] font-bold uppercase tracking-[0.18em] text-violet-700'
 
 const MICRO_LABEL = 'text-[10px] font-bold uppercase tracking-[0.2em] text-violet-700'
 
@@ -138,40 +156,56 @@ function AboutModal({ open, onClose }: { open: boolean; onClose: () => void }) {
           improved continuously from lecturer feedback.
         </p>
         <p>
-          MILA is developed at Mae Fah Luang University under the MLII Innovation
-          Development Grant, at the MFU Learning Innovation Institute.
+          MILA is developed at the MFU Learning Innovation Institute (MLII), Mae Fah
+          Luang University, under the MLII Innovation Development Grant.
         </p>
 
-        <section className="space-y-1.5">
-          <h4 className="font-semibold text-slate-900">Project advisor</h4>
-          <p>
-            {ADVISOR.name} —{' '}
-            <a className={MAIL_LINK} href={`mailto:${ADVISOR.email}`}>
-              {ADVISOR.email}
-            </a>
-          </p>
-        </section>
+        {/* One section, not two: the advisor and the students are one team, and
+            splitting them read as two separate credits.
 
-        <section className="space-y-1.5">
-          <h4 className="font-semibold text-slate-900">Development team</h4>
-          <ul className="space-y-1">
-            {TEAM.map(({ name, email }) => (
-              <li key={email}>
-                {name} —{' '}
-                <a className={MAIL_LINK} href={`mailto:${email}`}>
-                  {email}
-                </a>
-              </li>
-            ))}
-          </ul>
+            A panel rather than a run of paragraphs, because six people with six
+            addresses is a roster, not prose — as flat text it was five ragged
+            lines of near-identical @lamduan addresses with a floating all-caps
+            label in the middle of them. The hairline carries the order the
+            label used to, the two-column grid halves the block's height, and
+            each person becomes a name with an address under it instead of a
+            line of text with a dash in it. */}
+        <section className="space-y-2.5">
+          <h4 className="font-semibold text-slate-900">Development and research team</h4>
+
+          <div className="rounded-xl border border-violet-200/70 bg-white/55 px-4 py-3.5">
+            {/* No label over the lead: first position in the card already says
+                it, and a one-person heading only added a line to read. */}
+            <p className={ROSTER_NAME}>{TEAM_LEAD.name}</p>
+            <a className={ROSTER_MAIL} href={`mailto:${TEAM_LEAD.email}`}>
+              {TEAM_LEAD.email}
+            </a>
+
+            <div className="mt-3.5 border-t border-violet-200/60 pt-3.5">
+              <p className={ROSTER_LABEL}>Assistant team</p>
+              {/* One column until there is room for two: at the modal's narrow
+                  end a 28-character address would wrap mid-domain, which costs
+                  more than the extra height. */}
+              <ul className="mt-2 grid gap-x-6 gap-y-2.5 sm:grid-cols-2">
+                {ASSISTANT_TEAM.map(({ name, email }) => (
+                  <li key={email}>
+                    <p className={ROSTER_NAME}>{name}</p>
+                    <a className={ROSTER_MAIL} href={`mailto:${email}`}>
+                      {email}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
         </section>
 
         <section className="space-y-1.5">
           <h4 className="font-semibold text-slate-900">Contact</h4>
           <p>
             Questions, feedback, or data requests:{' '}
-            <a className={MAIL_LINK} href={`mailto:${ADVISOR.email}`}>
-              {ADVISOR.email}
+            <a className={MAIL_LINK} href={`mailto:${CONTACT_EMAIL}`}>
+              {CONTACT_EMAIL}
             </a>
           </p>
         </section>
@@ -341,8 +375,13 @@ export default function Login() {
           {/* The agreement sits directly above the button it arms, so cause
               and effect share one glance. Not the design-system Checkbox: its
               label is typed string-only, and this one needs a live link. */}
+          {/* `leading-snug`, not `leading-relaxed`: at 1.625 the extra half-leading
+              above the first line pushed the sentence about 2px below the box's
+              centre, so a one-line label read as sitting low against its own
+              checkbox. At 1.375 the first line's optical centre lands on the
+              box's, and the wrapped second line tightens with it. */}
           <label
-            className={`flex cursor-pointer items-start gap-2.5 text-sm leading-relaxed text-slate-700 ${
+            className={`flex cursor-pointer items-start gap-2.5 text-sm leading-snug text-slate-700 ${
               notLecturer ? 'mt-5' : 'mt-10'
             }`}
           >
@@ -417,7 +456,7 @@ export default function Login() {
               Terms and privacy
             </Button>
             <Button type="button" variant="secondary" size="sm" block onClick={() => setAboutOpen(true)}>
-              About and contact
+              Contact us
             </Button>
           </div>
         </div>
@@ -432,9 +471,13 @@ export default function Login() {
           <p className={FOOTER_LABEL}>Built with the MLII Innovation Development Grant</p>
           {/* Two items, so the ends of the rule are the natural anchors —
               unlike the five-name list opposite, which needs a fixed gutter. */}
-          <div className={`${FOOTER_LINE} flex justify-between gap-4`}>
+          {/* Baseline-aligned, because the two spans are no longer the same
+              size: the university is the setting, not the claim, so it drops a
+              step in size, weight and contrast and lets © 2026 MILA hold the
+              line. Stretched alignment would leave the smaller one floating. */}
+          <div className={`${FOOTER_LINE} flex items-baseline justify-between gap-4`}>
             <span>© 2026 MILA</span>
-            <span>Mae Fah Luang University</span>
+            <span className="text-xs font-normal text-slate-500">Mae Fah Luang University</span>
           </div>
         </footer>
       </section>

@@ -92,9 +92,9 @@ describe('Login', () => {
     expect(screen.getByText('AI processing')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Got it' }))
 
-    fireEvent.click(screen.getByRole('button', { name: 'About and contact' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Contact us' }))
     expect(screen.getByText(/MFU Intelligent Lecturer Assistant/)).toBeTruthy()
-    // The team is named and reachable — the whole point of "and contact".
+    // The team is named and reachable — the whole point of the button.
     expect(screen.getByText(/Nang Hsu Mon Pyae/)).toBeTruthy()
     expect(screen.getAllByRole('link').some((a) => a.getAttribute('href')?.startsWith('mailto:'))).toBe(true)
   })

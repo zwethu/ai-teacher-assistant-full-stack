@@ -33,8 +33,12 @@ export const TERMS_VERSION = '2026-08'
 
 export const TERMS_UPDATED = 'Last updated August 2026'
 
-/** The address the Privacy Notice points people at. */
-export const CONTACT_EMAIL = 'nanghsumonpyae@mfu.ac.th'
+/**
+ * The address the Privacy Notice points people at — a shared team inbox rather
+ * than one person's, so it survives anyone leaving the project. The About modal
+ * on the login page imports this same constant.
+ */
+export const CONTACT_EMAIL = 'mila.research.team@gmail.com'
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (

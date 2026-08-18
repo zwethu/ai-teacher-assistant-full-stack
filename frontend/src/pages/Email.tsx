@@ -1139,26 +1139,53 @@ export default function Email() {
               {step === 'compose' ? (
                 <>
                   <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-                      Recipients
-                    </label>
-                    <div className="flex flex-wrap gap-1.5 rounded-md border border-slate-300 px-2 py-2 focus-within:border-violet-500 focus-within:ring-1 focus-within:ring-violet-500">
-                      {recipients.map((r) => (
-                        <span
-                          key={r}
-                          className="inline-flex items-center gap-1 rounded-full bg-violet-50 border border-violet-200 pl-2.5 pr-1 py-0.5 text-xs font-medium text-violet-700"
-                        >
-                          {r}
-                          <button
-                            type="button"
-                            onClick={() => removeRecipient(r)}
-                            className="p-0.5 rounded-full hover:bg-violet-100 text-violet-500 hover:text-violet-700"
-                            aria-label={`Remove ${r}`}
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
+                    <div className="mb-1.5 flex items-baseline justify-between gap-2">
+                      <label className="block text-sm font-semibold text-slate-700">
+                        Recipients
+                      </label>
+                      {/* The chips scroll, so the number cannot be read off
+                          them any more — "Add all" on a 40-student batch used
+                          to be confirmed by a wall of pills, and now has to be
+                          confirmed by a number. */}
+                      {recipients.length > 0 && (
+                        <span className="text-xs font-medium text-slate-500">
+                          {recipients.length} added
                         </span>
-                      ))}
+                      )}
+                    </div>
+                    {/* Chips scroll inside their own band; the field never does.
+                        ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+                        The box used to grow with its contents, so forty
+                        recipients made it taller than the viewport and the
+                        whole dialog became one long scroller — the prompt and
+                        the Generate button sat somewhere below the fold, past
+                        a screen of addresses nobody needed to read again.
+                        Capping the chips is not enough on its own: with the
+                        input inside the same scroller, "Add all" would push
+                        the thing you type into out of sight. It sits in its
+                        own row underneath instead, always visible, and only
+                        the pills move. */}
+                    <div className="rounded-md border border-slate-300 focus-within:border-violet-500 focus-within:ring-1 focus-within:ring-violet-500">
+                      {recipients.length > 0 && (
+                        <div className="flex max-h-36 flex-wrap content-start gap-1.5 overflow-y-auto border-b border-slate-200 px-2 py-2">
+                          {recipients.map((r) => (
+                            <span
+                              key={r}
+                              className="inline-flex h-fit items-center gap-1 rounded-full bg-violet-50 border border-violet-200 pl-2.5 pr-1 py-0.5 text-xs font-medium text-violet-700"
+                            >
+                              {r}
+                              <button
+                                type="button"
+                                onClick={() => removeRecipient(r)}
+                                className="p-0.5 rounded-full hover:bg-violet-100 text-violet-500 hover:text-violet-700"
+                                aria-label={`Remove ${r}`}
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
                       <input
                         type="text"
                         inputMode="email"
@@ -1173,7 +1200,7 @@ export default function Email() {
                         placeholder={
                           recipients.length ? 'Add another…' : 'student@example.com'
                         }
-                        className="flex-1 min-w-[140px] border-0 p-1 text-sm focus:ring-0 focus:outline-none"
+                        className="w-full border-0 bg-transparent px-3 py-2 text-sm focus:ring-0 focus:outline-none"
                       />
                     </div>
                     <p className="text-xs text-slate-400 mt-1">

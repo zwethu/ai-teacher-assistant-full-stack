@@ -1102,9 +1102,9 @@ export default function Email() {
             onClick={closeModal}
             aria-hidden="true"
           />
-          <div className="relative w-full max-w-lg rounded-xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
+          <div className="relative flex max-h-[calc(100dvh-2rem)] w-full max-w-lg flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl">
             <div
-              className={`px-6 py-4 border-b flex items-center justify-between ${
+              className={`flex shrink-0 items-center justify-between border-b px-6 py-4 ${
                 modalMode === 'send'
                   ? 'bg-violet-50 border-violet-100'
                   : 'bg-slate-50 border-slate-200'
@@ -1135,7 +1135,7 @@ export default function Email() {
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+            <form onSubmit={handleSubmit} className="min-h-0 space-y-4 overflow-y-auto p-6">
               {step === 'compose' ? (
                 <>
                   <div>

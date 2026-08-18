@@ -25,7 +25,7 @@ let sessionsCache: CacheEntry | null = null
  * Chats fetched per batch.
  *
  * The endpoint defaults to 30, which this list must not inherit: it merges
- * every batch into one timeline, so a lecturer with four spaces would see
+ * every batch into one timeline, so a lecturer with four batches would see
  * their four most recent conversations each truncated at a different depth,
  * with no way to reach past it. 100 is the server's ceiling for one request.
  *

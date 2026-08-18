@@ -53,7 +53,7 @@ function artifactTypeLabel(type: string) {
  *
  * Artifacts and games share almost nothing structurally — the alternative was
  * a second list beneath the first, which puts the same question ("what has
- * this space produced?") in two places and makes the type filter lie.
+ * this batch produced?") in two places and makes the type filter lie.
  */
 type ContentRow = {
   key: string
@@ -281,7 +281,7 @@ export function ArtifactsTab({
         {loading ? (
           <div className="p-8 text-center text-sm text-slate-500">Loading generated content...</div>
         ) : filtered.length === 0 ? (
-          <div className="p-8 text-center text-sm text-slate-500">Nothing generated for this space yet.</div>
+          <div className="p-8 text-center text-sm text-slate-500">Nothing generated for this batch yet.</div>
         ) : (
           <div className="divide-y divide-slate-100">
             {filtered.map((row) => {

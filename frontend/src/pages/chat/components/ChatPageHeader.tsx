@@ -65,7 +65,7 @@ export function ChatPageHeader({
   panelOpen,
   onBack,
 }: Props) {
-  const [spaceMenuOpen, setSpaceMenuOpen] = useState(false)
+  const [batchMenuOpen, setBatchMenuOpen] = useState(false)
   const [exporting, setExporting] = useState<ChatExportFormat | null>(null)
   const [exportError, setExportError] = useState('')
 
@@ -84,23 +84,23 @@ export function ChatPageHeader({
       setExporting(null)
     }
   }
-  const spaceMenuRef = useRef<HTMLDivElement>(null)
+  const batchMenuRef = useRef<HTMLDivElement>(null)
   const isRenaming = !!activeChat && renamingId === activeChat.chat_id
 
   useEffect(() => {
-    if (!spaceMenuOpen) return
+    if (!batchMenuOpen) return
     function handleMouseDown(event: MouseEvent) {
-      if (event.target instanceof Element && spaceMenuRef.current?.contains(event.target)) return
-      setSpaceMenuOpen(false)
+      if (event.target instanceof Element && batchMenuRef.current?.contains(event.target)) return
+      setBatchMenuOpen(false)
     }
     document.addEventListener('mousedown', handleMouseDown)
     return () => document.removeEventListener('mousedown', handleMouseDown)
-  }, [spaceMenuOpen])
+  }, [batchMenuOpen])
 
-  const spaceLabel = selectedBatch?.batch_name || 'No space selected'
+  const batchLabel = selectedBatch?.batch_name || 'No batch selected'
   // The composer no longer carries a space chip — it duplicated this title.
   // Switching lives here instead, and only when there is somewhere to switch to.
-  const canSwitchSpace = !!selectedBatch && batches.length > 1
+  const canSwitchBatch = !!selectedBatch && batches.length > 1
 
   // .maia-glass-header is exactly this surface in the design system:
   // white/35 + blur(24px) saturate(1.5) + a translucent white hairline.
@@ -111,7 +111,7 @@ export function ChatPageHeader({
           type="button"
           onClick={onBack}
           className="-ml-1 inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-slate-500 transition-colors hover:bg-white/80 hover:text-slate-800 active:scale-95"
-          aria-label={`Back to chats in ${spaceLabel}`}
+          aria-label={`Back to chats in ${batchLabel}`}
         >
           <ArrowLeft className="h-4 w-4" />
         </button>
@@ -131,36 +131,36 @@ export function ChatPageHeader({
             aria-label="Rename chat"
           />
         ) : (
-          <div className="relative min-w-0" ref={spaceMenuRef}>
-            {canSwitchSpace ? (
+          <div className="relative min-w-0" ref={batchMenuRef}>
+            {canSwitchBatch ? (
               <button
                 type="button"
-                onClick={() => setSpaceMenuOpen((open) => !open)}
+                onClick={() => setBatchMenuOpen((open) => !open)}
                 className="-mx-1.5 flex max-w-full items-center gap-1 rounded-lg px-1.5 py-0.5 text-left transition-colors hover:bg-white/70 active:scale-[0.97]"
-                aria-label="Switch space"
-                aria-expanded={spaceMenuOpen}
+                aria-label="Switch batch"
+                aria-expanded={batchMenuOpen}
               >
-                <h1 className="truncate text-sm font-semibold text-slate-800">{spaceLabel}</h1>
+                <h1 className="truncate text-sm font-semibold text-slate-800">{batchLabel}</h1>
                 <ChevronDown
                   className={`h-3.5 w-3.5 flex-none text-violet-500 transition-transform duration-200 ${
-                    spaceMenuOpen ? 'rotate-180' : ''
+                    batchMenuOpen ? 'rotate-180' : ''
                   }`}
                 />
               </button>
             ) : (
-              <h1 className="truncate text-sm font-semibold text-slate-800">{spaceLabel}</h1>
+              <h1 className="truncate text-sm font-semibold text-slate-800">{batchLabel}</h1>
             )}
             {activeChat?.title && (
               <p className="truncate text-xs text-slate-500">{activeChat.title}</p>
             )}
-            {spaceMenuOpen && (
+            {batchMenuOpen && (
               <div className="absolute left-0 top-full z-40 mt-1 w-64 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
                 <BatchMenuList
                   batches={batches}
                   selectedBatchId={selectedBatch?.id}
                   onSelect={(batch) => {
                     onSelectBatch(batch)
-                    setSpaceMenuOpen(false)
+                    setBatchMenuOpen(false)
                   }}
                 />
               </div>

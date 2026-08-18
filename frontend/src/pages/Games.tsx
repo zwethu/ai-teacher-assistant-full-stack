@@ -181,13 +181,13 @@ export default function Games() {
       {noBatches ? (
         <div className="rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm">
           <Gamepad2 className="mx-auto h-8 w-8 text-slate-300" />
-          <p className="mt-3 text-sm text-slate-600">You need a space before you can make games.</p>
+          <p className="mt-3 text-sm text-slate-600">You need a batch before you can make games.</p>
           <button
             type="button"
             onClick={() => navigate('/batches')}
             className="mt-4 inline-flex items-center rounded-md bg-violet-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-violet-700"
           >
-            Create a space
+            Create a batch
           </button>
         </div>
       ) : (
@@ -204,11 +204,11 @@ export default function Games() {
           )}
 
           <div className="mb-3 mt-8 flex items-center justify-between">
-            {/* Names the space rather than saying "this space". The control that
+            {/* Names the batch rather than saying "this batch". The control that
                 sets it now lives inside the builder, so the list has to say what
                 it is showing on its own. */}
             <h2 className="text-sm font-semibold text-slate-700">
-              Games in {selectedBatch?.batch_name ?? 'this space'}
+              Games in {selectedBatch?.batch_name ?? 'this batch'}
             </h2>
             <button
               type="button"
@@ -231,7 +231,7 @@ export default function Games() {
           ) : visibleGames.length === 0 ? (
             <div className="rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm">
               <Gamepad2 className="mx-auto h-8 w-8 text-slate-300" />
-              <p className="mt-3 text-sm font-medium text-slate-700">No games in this space yet.</p>
+              <p className="mt-3 text-sm font-medium text-slate-700">No games in this batch yet.</p>
               <p className="mt-1 text-sm text-slate-500">Use the panel above to build your first one.</p>
             </div>
           ) : (
@@ -314,7 +314,7 @@ function SavedWorkPicker({
     >
       {artifacts.length === 0 ? (
         <p className="py-2 text-sm text-slate-600">
-          Nothing saved in this space yet. Generate a lesson plan, lab, or assessment first, then
+          Nothing saved in this batch yet. Generate a lesson plan, lab, or assessment first, then
           come back and build a game from it.
         </p>
       ) : (
@@ -340,7 +340,7 @@ function SavedWorkPicker({
             <ul
               className="max-h-80 space-y-1.5 overflow-y-auto"
               role="radiogroup"
-              aria-label="Saved work in this space"
+              aria-label="Saved work in this batch"
             >
               {matches.map((artifact, index) => {
                 const type = String(artifact.type || artifact.artifact_type || '')
@@ -572,12 +572,12 @@ function GameGenerator({
     <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
       <h2 className="text-sm font-semibold text-slate-700">Build a game</h2>
 
-      {/* The space belongs at the top of the form, not floating in the page
+      {/* The batch belongs at the top of the form, not floating in the page
           corner where it aligned with nothing. It is still scope for the whole
-          page — the list below names the space it is showing for that reason. */}
+          page — the list below names the batch it is showing for that reason. */}
       <SelectField
         id="games-batch"
-        label="Space"
+        label="Batch"
         className="mt-4 max-w-md"
         value={batch.id}
         onChange={onSelectBatch}
@@ -587,7 +587,7 @@ function GameGenerator({
           hint: option.course_name,
         }))}
         disabled={batchesLoading}
-        placeholder={batchesLoading ? 'Loading spaces…' : 'Select a space'}
+        placeholder={batchesLoading ? 'Loading batches…' : 'Select a batch'}
       />
 
       {/* Settings next — they arrive with sensible defaults, so the lecturer

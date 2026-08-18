@@ -25,7 +25,7 @@ import { Spinner } from '../../design-system'
 /**
  * One live game, with everything a lecturer does to it.
  *
- * Lifted out of the standalone Games page so the batch space's Generated
+ * Lifted out of the standalone Games page so the batch's Generated
  * content tab can show the same thing. That tab used to flatten a game into the
  * generic artifact row — a title, a type chip and the string "20 pairs" — which
  * dropped the results download, the play link, the pair list and the whole

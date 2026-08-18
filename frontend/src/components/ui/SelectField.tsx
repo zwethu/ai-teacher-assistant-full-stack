@@ -42,7 +42,7 @@ import { useFlipPlacement } from './useFlipPlacement'
 export type SelectOption = {
   value: string
   label: string
-  /** Optional second line — used for the space picker's course name. */
+  /** Optional second line — used for the batch picker's course name. */
   hint?: string
 }
 
@@ -68,7 +68,7 @@ const MENU_H_FALLBACK = 264
 
 /**
  * Case-insensitive substring, over label and hint both: someone looking for a
- * space is at least as likely to remember the course as the cohort name.
+ * batch is at least as likely to remember the course as the cohort name.
  */
 function matches(option: SelectOption, query: string): boolean {
   const needle = query.trim().toLowerCase()

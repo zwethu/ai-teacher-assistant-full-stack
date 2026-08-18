@@ -6,7 +6,7 @@ type Props = {
   onSelect: (batch: Batch) => void
 }
 
-/** The space list itself, shared by the header switcher and the composer
+/** The batch list itself, shared by the header switcher and the composer
     picker so the two cannot drift apart. Callers own the surface around it. */
 export function BatchMenuList({ batches, selectedBatchId, onSelect }: Props) {
   return (

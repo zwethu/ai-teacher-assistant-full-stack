@@ -130,7 +130,7 @@ export default function ChatHistory() {
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Sessions</h1>
+        <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Chat History</h1>
         <p className="text-sm text-slate-500 mt-1">
           Every chat across your batches, most recent first.
         </p>

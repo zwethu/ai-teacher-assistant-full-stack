@@ -32,7 +32,7 @@ const NAV_ITEMS: {
   { to: '/assessments', label: 'Assessments', icon: ARTIFACT_ICONS.assessment },
   { to: '/email', label: 'Send Emails', icon: Mail },
   { to: '/games', label: 'Games', icon: ARTIFACT_ICONS.game },
-  { to: '/chat-history', label: 'Sessions', icon: History },
+  { to: '/chat-history', label: 'Chat History', icon: History },
 ]
 
 function stressLabel(score: number): string {

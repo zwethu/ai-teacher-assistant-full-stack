@@ -96,7 +96,7 @@ function buildMessage(f: typeof INITIAL_FORM): string {
 // one never blocks generation.
 function missingRequiredInputs(f: typeof INITIAL_FORM, hasBatch: boolean): string[] {
   const missing: string[] = []
-  if (!hasBatch) missing.push('a space')
+  if (!hasBatch) missing.push('a batch')
   if (!(Number(f.week) >= 1)) missing.push('a week number')
   if (!f.priorKnowledge.trim()) missing.push('prior knowledge')
   return missing
@@ -150,7 +150,7 @@ export default function LessonPlans() {
 
 
   /* Deleting from the standalone page, with the same confirm-then-undo the
-     batch space uses — the artifact and its Drive file are the same object
+     batch uses — the artifact and its Drive file are the same object
      wherever it is reached from. */
   async function handleDeleteArtifact(artifact: Artifact) {
     const batchId = selectedBatchId
@@ -271,7 +271,7 @@ export default function LessonPlans() {
       <div className="mb-4">
         <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Lesson Plans</h1>
         <p className="text-sm text-slate-500 mt-1">
-          Generate a lesson plan from Course-Space files, web search, and any attachments.
+          Generate a lesson plan from the batch’s course materials, web search, and any attachments.
         </p>
       </div>
 
@@ -301,12 +301,12 @@ export default function LessonPlans() {
         <div className="space-y-6">
           <form onSubmit={handleGenerate} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm space-y-3">
             <SelectField
-              label="Space (batch)"
+              label="Batch"
               value={selectedBatchId ?? ''}
               onChange={setSelectedBatchId}
               options={batchOptions}
               disabled={batchesLoading}
-              placeholder={batchesLoading ? 'Loading spaces…' : 'Select a space'}
+              placeholder={batchesLoading ? 'Loading batches…' : 'Select a batch'}
             />
 
             {/* Filling a required field without saying so is the kind of help
@@ -404,7 +404,7 @@ export default function LessonPlans() {
 
             {selectedBatch && <GenerationAttachments run={run} />}
             <p className="text-xs text-slate-400">
-              Course-Space files for the selected space are always used.
+              Course materials for the selected batch are always used.
             </p>
 
             <div>
@@ -456,7 +456,7 @@ export default function LessonPlans() {
         ) : visibleArtifacts.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-10 text-center rounded-xl border border-slate-100 bg-white">
             <LessonPlanIcon className="w-8 h-8 text-slate-300 mb-2" />
-            <p className="text-sm text-slate-500">No lesson plans yet for this space.</p>
+            <p className="text-sm text-slate-500">No lesson plans yet for this batch.</p>
           </div>
         ) : (
           /* Full-width rows, the shape the Games page already uses for the

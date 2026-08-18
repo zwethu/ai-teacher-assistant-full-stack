@@ -125,15 +125,15 @@ describe('Games page', () => {
     expect(screen.getByRole('button', { name: /Reopen/ })).toBeTruthy()
   })
 
-  it('points the lecturer at the builder when the space has no games', async () => {
+  it('points the lecturer at the builder when the batch has no games', async () => {
     listGames.mockResolvedValue([])
     renderPage()
 
-    await waitFor(() => expect(screen.getByText(/No games in this space yet/)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/No games in this batch yet/)).toBeTruthy())
     expect(screen.getByText(/Use the panel above to build your first one/)).toBeTruthy()
   })
 
-  it('offers space creation instead of an empty picker when there are no batches', async () => {
+  it('offers batch creation instead of an empty picker when there are no batches', async () => {
     useBatchSelection.mockReturnValue({
       batches: [],
       loading: false,
@@ -143,7 +143,7 @@ describe('Games page', () => {
     })
     renderPage()
 
-    expect(screen.getByRole('button', { name: /Create a space/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Create a batch/ })).toBeTruthy()
     expect(listGames).not.toHaveBeenCalled()
   })
 })

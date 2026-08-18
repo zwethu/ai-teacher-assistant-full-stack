@@ -62,12 +62,12 @@ class AttachmentValidationError(ValueError):
 
 
 class AttachmentTooLargeError(AttachmentValidationError):
-    """The file is too large for native chat reading — steer it to Course Space."""
+    """The file is too large for native chat reading — steer it to the batch's course materials."""
     pass
 
 
 TOO_LARGE_FOR_CHAT_MESSAGE = (
-    "This file is too large to use in chat. Add it to the batch's Course Space, "
+    "This file is too large to use in chat. Add it to the batch's course materials, "
     "where large documents are indexed for retrieval."
 )
 
@@ -759,7 +759,7 @@ def cleanup_expired_attachments(limit: int = 100) -> int:
 
     No sliding extension — an unsent file dies 24h after upload, a sent file
     dies 7 days after message association, regardless of chat activity. Long-term
-    storage is Course Space promotion, not chat retention.
+    storage is promotion to the batch's course materials, not chat retention.
     """
     db = get_firestore()
     now = datetime.now(timezone.utc)

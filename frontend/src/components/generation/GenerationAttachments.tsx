@@ -108,8 +108,8 @@ export function GenerationAttachments({
       )}
       {blocked && (
         <p className="mt-2 text-xs text-amber-600">
-          Remove the flagged file to generate. Large files belong in Course Space, where they’re
-          indexed for retrieval.
+          Remove the flagged file to generate. Large files belong in the batch’s course
+          materials, where they’re indexed for retrieval.
         </p>
       )}
 

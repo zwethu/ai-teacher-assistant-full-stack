@@ -131,7 +131,7 @@ describe('chat attachment composer', () => {
     // A rejected file must stay identifiable without a caption: red ring on the
     // tile, reason in the tooltip, and the composer-level instruction below it.
     const tile = screen.getByRole('button', { name: 'Preview huge.pdf' })
-    expect(tile.getAttribute('title')).toContain('too large — add to Course Space')
+    expect(tile.getAttribute('title')).toContain('too large — add to course materials')
     expect(tile.className).toContain('border-red-300')
     expect(screen.getByText(/Remove the flagged attachment/)).toBeTruthy()
     expect((screen.getByRole('button', { name: 'Send message' }) as HTMLButtonElement).disabled).toBe(true)

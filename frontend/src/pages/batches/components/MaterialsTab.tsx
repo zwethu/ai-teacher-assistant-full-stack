@@ -490,7 +490,7 @@ export function MaterialsTab({
               </div>
             ) : visibleChats.length === 0 ? (
               <p className="px-4 py-5 text-sm text-slate-500">
-                Nothing yet — your chats about this space will collect here.
+                Nothing yet — your chats about this batch will collect here.
               </p>
             ) : (
               <ul className="divide-y divide-slate-100">
@@ -670,7 +670,7 @@ export function MaterialsTab({
                 type="file"
                 /* `.pptx` was missing and is the format a lecturer is most
                    likely to reach for. The two pickers on this screen still
-                   differ — this one indexes into the space, the composer's
+                   differ — this one indexes into the batch, the composer's
                    attaches to one message — but that is now said in words
                    below rather than left to be discovered. */
                 accept=".pdf,.pptx,.docx,.txt,.md,.markdown,.json"
@@ -694,7 +694,7 @@ export function MaterialsTab({
                 slides through the composer instead believes MILA "has" them,
                 then finds next week's chat does not. */}
             <p className="text-xs text-slate-500">
-              MILA reads these in every chat about this space. To send a file to one
+              MILA reads these in every chat about this batch. To send a file to one
               message only, attach it in the composer instead.
             </p>
             {atFileLimit && (

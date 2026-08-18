@@ -489,7 +489,7 @@ def add_user_message_with_attachments(
             if data.get("status") == "too_large":
                 raise ValueError(
                     f"'{data.get('file_name') or 'A file'}' is too large to use in chat. "
-                    "Remove it, or add it to the batch's Course Space."
+                    "Remove it, or add it to the batch's course materials."
                 )
             records.append(data)
 

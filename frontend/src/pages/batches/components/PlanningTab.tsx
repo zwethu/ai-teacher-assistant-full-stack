@@ -158,7 +158,7 @@ function GeneratePlanPanel({
       <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
           <div>
             <h2 className="text-lg font-semibold text-slate-900">Generate Course Plan</h2>
-            <p className="text-sm text-slate-500">The agent uses this space’s Course-Space files, web search, and anything already generated for it.</p>
+            <p className="text-sm text-slate-500">The agent uses this batch’s course materials, web search, and anything already generated for it.</p>
           </div>
           <button onClick={onClose}><X className="h-5 w-5" /></button>
         </div>

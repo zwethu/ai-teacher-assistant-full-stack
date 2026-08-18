@@ -51,7 +51,7 @@ MAX_FULL_EXTRACT_CHARS = 500_000   # bound for full-text extraction of docx/pptx
 
 # Per-file native-read ceiling. Cost/quality guard, NOT a model context limit
 # (Gemini handles ~1M). Keep in step with the agent's NATIVE_READ_MAX_TOKENS.
-# Files over this are unusable in chat and are steered to Course Space instead.
+# Files over this are unusable in chat and are steered to the batch's course materials.
 def get_max_native_read_tokens() -> int:
     return _bounded_int("CHAT_ATTACHMENT_MAX_NATIVE_TOKENS", 60_000, 1_000, 900_000)
 

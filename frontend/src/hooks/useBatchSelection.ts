@@ -4,12 +4,12 @@ import { listBatches } from '../services/batchService'
 import { useAuth } from './useAuth'
 
 /**
- * Shared batch ("space") selection for standalone generation surfaces.
+ * Shared batch selection for standalone generation surfaces.
  *
  * Selecting a batch is what wires generation context: the batch's datastore_id
  * flows through the agent run so Course-Space (Vertex Search) files are searched
  * automatically — exactly like chat. Every standalone generation page requires a
- * selected batch (attachments are optional; the space is not).
+ * selected batch (attachments are optional; the batch is not).
  */
 export function useBatchSelection(initialBatchId?: string) {
   const { user } = useAuth()

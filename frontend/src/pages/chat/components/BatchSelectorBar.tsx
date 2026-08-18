@@ -11,8 +11,8 @@ type Props = {
   onSelectBatch: (batch: Batch) => void
 }
 
-/** The "pick a space" button in the empty-state hero. It exists only for the
-    empty state — once a space is chosen, the header names it and owns switching. */
+/** The "pick a batch" button in the empty-state hero. It exists only for the
+    empty state — once a batch is chosen, the header names it and owns switching. */
 export function BatchSelectorBar({ batches, batchesLoading, onSelectBatch }: Props) {
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)

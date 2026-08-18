@@ -565,7 +565,7 @@ def build_chat_attachment_context(
                 f"Type: {kind} ({item.get('content_type') or 'unknown'})",
             ]
             if kind == "image":
-                lines.append("Scope: chat-only. This image is not saved to Course Space and cannot be promoted.")
+                lines.append("Scope: chat-only. This image is not saved to the batch's course materials and cannot be promoted.")
                 if item.get("vision_summary"):
                     lines.append(f"Vision summary: {item['vision_summary']}")
                 if item.get("ocr_text"):

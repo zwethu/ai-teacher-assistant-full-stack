@@ -85,7 +85,7 @@ export function formatBytes(bytes: number): string {
 export function attachmentStatusLabel(
   attachment: PreviewableAttachment & { vision_status?: string },
 ): string {
-  if (attachment.status === 'too_large') return 'too large — add to Course Space'
+  if (attachment.status === 'too_large') return 'too large — add to course materials'
   if (attachment.status === 'processing') return 'processing…'
   if (attachment.status === 'failed') return 'processing failed'
   if (attachment.attachment_kind === 'image') {

@@ -13,7 +13,7 @@ export interface Email extends BaseDoc {
   recipients?: string[]
   /** Gmail draft ids, one per recipient, for emails saved as drafts. */
   draftIds?: string[]
-  /** Batch ("space") this email was composed for, when sent from the batch flow. */
+  /** Batch this email was composed for, when sent from the batch flow. */
   batchId?: string
   batchName?: string
 }

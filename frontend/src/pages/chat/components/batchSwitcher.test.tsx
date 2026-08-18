@@ -39,12 +39,12 @@ function headerProps(
   }
 }
 
-describe('space switching after the composer chip was removed', () => {
-  it('lets the header title switch spaces when there is more than one', () => {
+describe('batch switching after the composer chip was removed', () => {
+  it('lets the header title switch batches when there is more than one', () => {
     const onSelectBatch = vi.fn()
     render(<ChatPageHeader {...headerProps({ onSelectBatch })} />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Switch space' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Switch batch' }))
     fireEvent.click(screen.getByText('Data Mining 26'))
 
     expect(onSelectBatch).toHaveBeenCalledWith(BATCHES[1])
@@ -53,11 +53,11 @@ describe('space switching after the composer chip was removed', () => {
   it('leaves the title as plain text when there is nowhere to switch to', () => {
     render(<ChatPageHeader {...headerProps({ batches: [BATCHES[0]] })} />)
 
-    expect(screen.queryByRole('button', { name: 'Switch space' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Switch batch' })).toBeNull()
     expect(screen.getByText('Software Testing 26')).toBeTruthy()
   })
 
-  it('still selects a space from the composer chip when none is chosen', () => {
+  it('still selects a batch from the composer chip when none is chosen', () => {
     const onSelectBatch = vi.fn()
     render(
       <MemoryRouter>

@@ -47,7 +47,7 @@ export function useWorkflowPrefill(
    * `null` means "not fetched yet", which is not the same as "none" — and the
    * difference is the whole bug this parameter exists to prevent. The blueprint
    * lookup and the artifact list race; the blueprint usually wins, and an empty
-   * array read as "no artifacts" offered week 1 for a space already on week 4.
+   * array read as "no artifacts" offered week 1 for a batch already on week 4.
    * The form took that, marked itself filled, and ignored the real answer when
    * it landed a moment later.
    */

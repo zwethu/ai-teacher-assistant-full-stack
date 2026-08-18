@@ -360,7 +360,7 @@ export function ChatSidePanel({
             count={items.length}
           >
             <p className="mb-3 text-[10px] leading-4 text-slate-500">
-              Chat files stay available in this chat for 30 days, then are removed. They are not saved to Course Space.
+              Chat files stay available in this chat for 30 days, then are removed. They are not saved to the batch’s course materials.
               Images remain chat-only. Sent files can be referenced again but not deleted here.
             </p>
             {loading ? (

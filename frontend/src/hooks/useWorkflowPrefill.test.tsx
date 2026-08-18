@@ -38,7 +38,7 @@ describe('what a generation form should already be holding', () => {
     expect((await readout()).week).toBe(3)
   })
 
-  it('starts at week 1 in a space with nothing generated', async () => {
+  it('starts at week 1 in a batch with nothing generated', async () => {
     getCurrentCourseBlueprint.mockResolvedValue(null)
     render(<Probe batchId="b1" artifacts={[]} />)
 
@@ -95,7 +95,7 @@ describe('what a generation form should already be holding', () => {
 
   it('waits for the artifact list, not just the plan', async () => {
     // The two lookups race and the plan usually wins. An empty array read as
-    // "no artifacts" offered week 1 for a space already on week 4 — the form
+    // "no artifacts" offered week 1 for a batch already on week 4 — the form
     // took it, marked itself filled, and ignored the real answer a moment
     // later. `null` says "not fetched yet"; `[]` says "none".
     getCurrentCourseBlueprint.mockResolvedValue(null)
@@ -108,7 +108,7 @@ describe('what a generation form should already be holding', () => {
     expect((await readout()).week).toBe(4)
   })
 
-  it('offers nothing without a space selected', () => {
+  it('offers nothing without a batch selected', () => {
     render(<Probe batchId={null} artifacts={[]} />)
 
     expect(screen.getByTestId('out').textContent).toBe('pending')

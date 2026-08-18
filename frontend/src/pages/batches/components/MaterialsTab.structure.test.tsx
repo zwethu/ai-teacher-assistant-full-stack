@@ -114,10 +114,10 @@ describe('Sessions tab structure', () => {
   })
 
   /** Named by consequence, so the two upload paths cannot be confused. */
-  it('says what the space-level upload is for', async () => {
+  it('says what the batch-level upload is for', async () => {
     renderTab()
     expect(
-      await screen.findByText(/reads these in every chat about this space/i),
+      await screen.findByText(/reads these in every chat about this batch/i),
     ).toBeTruthy()
   })
 

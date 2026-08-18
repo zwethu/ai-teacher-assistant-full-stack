@@ -54,8 +54,8 @@ async def upload_file_endpoint(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
-                f"This Course Space is at its {max_files}-file limit. Remove a file before "
-                "adding another, or use chat attachments for one-off documents."
+                f"This batch is at its {max_files}-file limit for course materials. Remove a file "
+                "before adding another, or use chat attachments for one-off documents."
             ),
         )
 

@@ -181,8 +181,8 @@ describe('generated content', () => {
     expect(within(tile).getByText('2')).toBeTruthy()
   })
 
-  it('says so when a space has produced nothing at all', () => {
+  it('says so when a batch has produced nothing at all', () => {
     renderTab({ artifacts: [], games: [] })
-    expect(screen.getByText('Nothing generated for this space yet.')).toBeTruthy()
+    expect(screen.getByText('Nothing generated for this batch yet.')).toBeTruthy()
   })
 })

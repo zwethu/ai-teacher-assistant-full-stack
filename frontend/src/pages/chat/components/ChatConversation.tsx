@@ -215,7 +215,7 @@ export function ChatInput({
                 <p className="text-xs text-slate-500">Some attachments are still processing — you can send now, and the assistant may note a file isn't ready yet.</p>
               )}
               {hasBlockingAttachment && (
-                <p className="text-xs text-amber-600">Remove the flagged attachment to send. Large files belong in Course Space, where they’re indexed for retrieval.</p>
+                <p className="text-xs text-amber-600">Remove the flagged attachment to send. Large files belong in the batch’s course materials, where they’re indexed for retrieval.</p>
               )}
             </>
           )}

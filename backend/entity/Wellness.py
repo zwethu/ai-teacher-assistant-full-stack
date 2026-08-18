@@ -3,10 +3,10 @@ from pydantic import BaseModel, Field
 
 class StressState(BaseModel):
     stress_score: float = 0.0
-    warning: bool = False
-    blocked: bool = False
+    """Which band the score is in: low | medium | high | max. The bar's depth
+    and the label's colour both come from this, so the two can never disagree."""
+    level: str = "low"
     breathing_used_today: bool = False
-    journaled_today: bool = False
 
 
 class StressIncreaseRequest(BaseModel):
@@ -17,21 +17,25 @@ class StressIncreaseRequest(BaseModel):
 
 class BreathingResult(StressState):
     stress_reduced: bool = False
-    prompt_reflection: bool = False
     message: str = ""
 
 
-class JournalCreate(BaseModel):
-    mood: str
-    notes: str = ""
+class DailyReport(BaseModel):
+    """One day of work, rolled up. Written after the day ends; today's copy is
+    computed live and marked `in_progress`."""
+
+    date: str
+    actions: dict[str, int] = {}
+    total_actions: int = 0
+    stress_added: float = 0.0
+    peak_score: float = 0.0
+    end_score: float = 0.0
+    breathing_done: bool = False
+    grind_actions: int = 0
+    grind_from: str = ""
+    in_progress: bool = False
 
 
-class JournalEntryModel(BaseModel):
-    id: str
-    uid: str
-    mood: str
-    notes: str = ""
-    entry_type: str = "after_breathing"
-    stress_score: float = 0.0
-    stress_reduced: bool = False
-    created_at: str | None = None
+class JournalPage(BaseModel):
+    month: str
+    entries: list[DailyReport] = []

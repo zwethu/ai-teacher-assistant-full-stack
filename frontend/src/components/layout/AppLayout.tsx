@@ -4,7 +4,7 @@ import { Outlet } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import { StressProvider } from '../../context/StressContext'
 import BreathingModal from '../wellness/BreathingModal'
-import StressBlocker from '../wellness/StressBlocker'
+import WellnessDialog from '../wellness/WellnessDialog'
 import StressWarningBanner from '../wellness/StressWarningBanner'
 
 export default function AppLayout() {
@@ -56,13 +56,10 @@ export default function AppLayout() {
               </div>
             </div>
           </main>
-
-          {/* Covers the content column only — the sidebar (and its wellness
-              widget) stays reachable while features are paused at 100. */}
-          <StressBlocker />
         </div>
       </div>
     </div>
+    <WellnessDialog />
     <BreathingModal />
     </StressProvider>
   )

@@ -1,7 +1,11 @@
 /* Stress controller — one owner for the stress meter's client half.
-   The server is the source of truth; this context keeps a synced copy,
-   reports rapid clicking, reacts to 403 stress-blocks from the API, and
-   decides when the breathing modal must be forced open. */
+   The server is the source of truth; this context keeps a synced copy, reports
+   rapid clicking, and owns which wellness dialog is open.
+
+   What it deliberately no longer does: block anything. There is no forced
+   modal and no blocked state, because a lecturer whose deadline is tomorrow
+   is going to work tonight either way — the meter's job is to tell them what
+   it is costing, and to keep the breathing exercise one click away. */
 
 import {
   createContext,
@@ -12,9 +16,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { STRESS_BLOCKED_EVENT } from '../lib/api'
 import {
-  FORCED_BREATHING_THRESHOLD,
   RAPID_CLICK_STRESS,
   getStress,
   increaseStress,
@@ -31,8 +33,11 @@ interface StressContextValue {
   stress: StressState | null
   refresh: () => Promise<void>
   applyState: (state: StressState) => void
+  /** The hub: current level, breathing, and the journal. */
+  wellnessOpen: boolean
+  openWellness: () => void
+  closeWellness: () => void
   breathingOpen: boolean
-  breathingForced: boolean
   openBreathing: () => void
   closeBreathing: () => void
 }
@@ -50,8 +55,8 @@ export function StressProvider({ children }: { children: ReactNode }) {
   const enabled = Boolean(user && isLecturer)
 
   const [stress, setStress] = useState<StressState | null>(null)
+  const [wellnessOpen, setWellnessOpen] = useState(false)
   const [breathingOpen, setBreathingOpen] = useState(false)
-  const [breathingForced, setBreathingForced] = useState(false)
 
   const applyState = useCallback((state: StressState) => {
     setStress(state)
@@ -72,16 +77,6 @@ export function StressProvider({ children }: { children: ReactNode }) {
     refresh()
     const id = window.setInterval(refresh, SYNC_INTERVAL_MS)
     return () => window.clearInterval(id)
-  }, [enabled, refresh])
-
-  /* A feature endpoint refused with 403 blocked — flip immediately. */
-  useEffect(() => {
-    if (!enabled) return undefined
-    function onBlocked() {
-      refresh()
-    }
-    window.addEventListener(STRESS_BLOCKED_EVENT, onBlocked)
-    return () => window.removeEventListener(STRESS_BLOCKED_EVENT, onBlocked)
   }, [enabled, refresh])
 
   /* Rapid clicking. Clicks on the wellness UI itself never count — punishing
@@ -115,30 +110,15 @@ export function StressProvider({ children }: { children: ReactNode }) {
     return () => document.removeEventListener('click', onClick, true)
   }, [enabled])
 
-  /* Forced intervention: at 85+ with today's reduction still available, the
-     breathing modal opens and cannot be dismissed until completed. Once the
-     daily reduction is spent there is nothing to force — only decay helps. */
-  const score = stress?.stress_score ?? 0
-  const mustForce = Boolean(
-    stress &&
-      score >= FORCED_BREATHING_THRESHOLD &&
-      !stress.breathing_used_today,
-  )
-  useEffect(() => {
-    if (mustForce) {
-      setBreathingOpen(true)
-      setBreathingForced(true)
-    } else {
-      setBreathingForced(false)
-    }
-  }, [mustForce])
-
-  const openBreathing = useCallback(() => setBreathingOpen(true), [])
-  const closeBreathing = useCallback(() => {
-    /* A forced modal only closes through completion, which updates `stress`
-       (breathing_used_today) and drops `mustForce` first. */
-    setBreathingOpen(false)
+  const openWellness = useCallback(() => setWellnessOpen(true), [])
+  const closeWellness = useCallback(() => setWellnessOpen(false), [])
+  /* Breathing replaces the hub rather than stacking on it: two dialogs deep,
+     the close button stops meaning anything predictable. */
+  const openBreathing = useCallback(() => {
+    setWellnessOpen(false)
+    setBreathingOpen(true)
   }, [])
+  const closeBreathing = useCallback(() => setBreathingOpen(false), [])
 
   return (
     <StressContext.Provider
@@ -146,8 +126,10 @@ export function StressProvider({ children }: { children: ReactNode }) {
         stress,
         refresh,
         applyState,
+        wellnessOpen,
+        openWellness,
+        closeWellness,
         breathingOpen,
-        breathingForced,
         openBreathing,
         closeBreathing,
       }}

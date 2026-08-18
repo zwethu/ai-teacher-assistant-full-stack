@@ -14,7 +14,6 @@ from fastapi.testclient import TestClient
 
 import routers.agent as agent_router
 from utils.firebase_auth import get_current_user
-from utils.stress_guard import stress_guard
 
 
 @pytest.fixture()
@@ -25,8 +24,8 @@ def client():
         "uid": "lecturer-1",
         "email": "l@example.edu",
     }
-    # The stress meter lives in Firestore; keep the endpoint tests hermetic.
-    app.dependency_overrides[stress_guard] = lambda: None
+    # Nothing to override for the stress meter any more: it charges after a
+    # successful run (patched below) and no longer gates the endpoint.
     with TestClient(app) as test_client:
         yield test_client
 

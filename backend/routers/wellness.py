@@ -1,4 +1,7 @@
-"""Wellness router — stress meter state, breathing exercise, reflection journal."""
+"""Wellness router — stress meter state, breathing exercise, activity journal.
+
+Nothing here gates a feature. The meter reports; it does not refuse.
+"""
 
 import logging
 
@@ -6,8 +9,7 @@ from fastapi import APIRouter, Depends
 
 from entity.Wellness import (
     BreathingResult,
-    JournalCreate,
-    JournalEntryModel,
+    JournalPage,
     StressIncreaseRequest,
     StressState,
 )
@@ -17,7 +19,6 @@ from services.wellness_service import (
     get_stress_state,
     increase_stress,
     list_journal,
-    save_journal,
 )
 from utils.firebase_auth import CurrentUser, get_current_user
 
@@ -41,7 +42,9 @@ async def increase_stress_endpoint(
     """Client-reported bump (rapid clicking). Amount is clamped server-side —
     real feature costs are charged by the feature endpoints, not this route."""
     amount = min(max(body.amount, 0.0), MAX_CLIENT_INCREASE)
-    return StressState(**increase_stress(current_user["uid"], amount))
+    return StressState(
+        **increase_stress(current_user["uid"], amount, action="rapid_click")
+    )
 
 
 @router.post("/breathing", response_model=BreathingResult)
@@ -51,19 +54,14 @@ async def complete_breathing_endpoint(
     return BreathingResult(**complete_breathing(current_user["uid"]))
 
 
-@router.get("/journal", response_model=list[JournalEntryModel])
+@router.get("/journal", response_model=JournalPage)
 async def list_journal_endpoint(
+    month: str | None = None,
     current_user: CurrentUser = Depends(get_current_user),
-) -> list[JournalEntryModel]:
-    return [JournalEntryModel(**row) for row in list_journal(current_user["uid"])]
+) -> JournalPage:
+    """One month of daily reports (`month` as YYYY-MM, default this month).
 
-
-@router.post("/journal", response_model=dict)
-async def save_journal_endpoint(
-    body: JournalCreate,
-    current_user: CurrentUser = Depends(get_current_user),
-) -> dict:
-    mood = body.mood.strip()
-    if not mood:
-        return {"ok": False, "reason": "mood_required"}
-    return save_journal(current_user["uid"], mood, body.notes.strip())
+    Reading is what finalises finished days, so this is the only place a report
+    gets written.
+    """
+    return JournalPage(**list_journal(current_user["uid"], month))

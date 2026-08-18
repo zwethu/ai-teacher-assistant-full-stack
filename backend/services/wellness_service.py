@@ -1,13 +1,24 @@
-"""Stress meter service — calculation, passive decay, breathing reduction, journal.
+"""Stress meter service — calculation, passive decay, breathing, activity journal.
 
 The server is the source of truth for the stress score: feature endpoints add
-stress after a successful action, the guard blocks them at 100, and the client
-only reads state, reports rapid clicking, and triggers breathing/journal.
+stress after a successful action and the client only reads state, reports rapid
+clicking, and triggers breathing.
+
+Nothing here blocks a feature. A lecturer with a deadline tomorrow works
+through the night; the meter's job is to tell them what that is costing, not to
+lock the door. Working while the meter is pinned is recorded rather than
+refused, and shows up in the day's journal as grinding.
+
+The journal is written, not typed. Every charged action lands in an activity
+row; once a day is over, those rows are rolled up into one report for that day.
+The lecturer reads it — there is no mood picker and no notes box.
 
 Stored in Firestore:
-  user_stress/{uid}: stress_score, last_active_at, last_breathing_date
-  wellness_journal/{auto}: uid, mood, notes, entry_type, stress_score,
-                           stress_reduced, created_at
+  user_stress/{uid}:      stress_score, last_active_at, last_breathing_date
+  wellness_activity/{id}: uid, action, cost, score_after, at_max, local_date,
+                          created_at
+  wellness_daily/{uid_date}: uid, date, actions{}, total_actions, stress_added,
+                          peak_score, end_score, breathing_done, grind_actions
 """
 
 from datetime import datetime, timedelta, timezone
@@ -18,10 +29,16 @@ from google.cloud.firestore import SERVER_TIMESTAMP
 from utils.firestore_client import get_firestore
 
 MAX_STRESS = 100.0
-WARNING_THRESHOLD = 80.0
 BREATHING_REDUCTION = 20.0
 PASSIVE_DECAY_PER_HOUR = 5.0
 USER_TIMEZONE_OFFSET_HOURS = 7  # UTC+7, matches localToday() on the frontend
+
+# Band floors. Four bands rather than three: "high" and "pinned at the ceiling"
+# are different situations for the person reading the meter, and only the
+# second one counts as grinding.
+BAND_MEDIUM = 40.0
+BAND_HIGH = 75.0
+BAND_MAX = 95.0
 
 # The only client-reported increase is rapid clicking (+5); clamp so a
 # malicious client cannot self-inflict more than that per call.
@@ -35,7 +52,20 @@ STRESS_EMAIL = 10.0           # send / draft / schedule
 STRESS_CHAT_MESSAGE = 2.0
 
 STRESS_COLLECTION = "user_stress"
-JOURNAL_COLLECTION = "wellness_journal"
+ACTIVITY_COLLECTION = "wellness_activity"
+DAILY_COLLECTION = "wellness_daily"
+
+# What an activity row's `action` may be, and how to say it in a report. The
+# journal is read by a lecturer, not by a developer, so the label is a plain
+# noun rather than the endpoint's name for itself.
+ACTION_LABELS: dict[str, str] = {
+    "lesson_plan": "lesson plans and labs",
+    "artifact": "assessments, games and blueprints",
+    "batch_create": "batches created",
+    "email": "emails drafted or sent",
+    "chat": "chat messages",
+    "rapid_click": "bursts of rapid clicking",
+}
 
 
 def workflow_stress_cost(workflow_type: str | None) -> float:
@@ -48,15 +78,34 @@ def workflow_stress_cost(workflow_type: str | None) -> float:
     return STRESS_CHAT_MESSAGE
 
 
+def workflow_action(workflow_type: str | None) -> str:
+    """Which activity bucket one /agent/invoke belongs to."""
+    family = (workflow_type or "").split(".")[0]
+    if family in {"lesson_plan", "lab"}:
+        return "lesson_plan"
+    if family in {"assessment", "quiz", "game", "course_blueprint"}:
+        return "artifact"
+    return "chat"
+
+
+def stress_level(score: float) -> str:
+    """Which band a score falls in: low | medium | high | max."""
+    if score >= BAND_MAX:
+        return "max"
+    if score >= BAND_HIGH:
+        return "high"
+    if score >= BAND_MEDIUM:
+        return "medium"
+    return "low"
+
+
+def _local_now() -> datetime:
+    return datetime.now(timezone.utc) + timedelta(hours=USER_TIMEZONE_OFFSET_HOURS)
+
+
 def _local_today() -> str:
     """Today's date (YYYY-MM-DD) in the user's local timezone (UTC+7)."""
-    local_now = datetime.now(timezone.utc) + timedelta(hours=USER_TIMEZONE_OFFSET_HOURS)
-    return local_now.strftime("%Y-%m-%d")
-
-
-def _is_blocked(score: float) -> bool:
-    """True at max stress; aligns with the UI showing 100 when it rounds to 100."""
-    return float(score) >= 99.5
+    return _local_now().strftime("%Y-%m-%d")
 
 
 def _apply_passive_decay(score: float, last_active_at: Any) -> float:
@@ -69,58 +118,12 @@ def _apply_passive_decay(score: float, last_active_at: Any) -> float:
     return max(0.0, score - hours_inactive * PASSIVE_DECAY_PER_HOUR)
 
 
-def _state_dict(score: float, breathing_used_today: bool, journaled_today: bool) -> dict:
+def _state_dict(score: float, breathing_used_today: bool) -> dict:
     return {
         "stress_score": round(score, 2),
-        "warning": score >= WARNING_THRESHOLD and not _is_blocked(score),
-        "blocked": _is_blocked(score),
+        "level": stress_level(score),
         "breathing_used_today": breathing_used_today,
-        "journaled_today": journaled_today,
     }
-
-
-def _journal_entries(uid: str) -> list[dict]:
-    """All journal rows for a user, newest first.
-
-    Sorted in Python rather than with orderBy: entries accrue at most a couple
-    per day, and an equality-only query needs no composite index.
-    """
-    db = get_firestore()
-    docs = db.collection(JOURNAL_COLLECTION).where("uid", "==", uid).stream()
-    rows = []
-    for doc in docs:
-        data = doc.to_dict() or {}
-        created = data.get("created_at")
-        rows.append({
-            "id": doc.id,
-            "uid": data.get("uid") or uid,
-            "mood": data.get("mood") or "",
-            "notes": data.get("notes") or "",
-            "entry_type": data.get("entry_type") or "after_breathing",
-            "stress_score": float(data.get("stress_score") or 0),
-            "stress_reduced": bool(data.get("stress_reduced")),
-            "created_at": created.isoformat() if isinstance(created, datetime) else None,
-            "_sort": created if isinstance(created, datetime) else datetime.min.replace(tzinfo=timezone.utc),
-        })
-    rows.sort(key=lambda r: r["_sort"], reverse=True)
-    for row in rows:
-        row.pop("_sort", None)
-    return rows
-
-
-def _journaled_today(entries: list[dict]) -> bool:
-    today = _local_today()
-    for entry in entries:
-        created = entry.get("created_at")
-        if not created:
-            continue
-        try:
-            local = datetime.fromisoformat(created) + timedelta(hours=USER_TIMEZONE_OFFSET_HOURS)
-        except ValueError:
-            continue
-        if local.strftime("%Y-%m-%d") == today:
-            return True
-    return False
 
 
 def get_stress_state(uid: str) -> dict:
@@ -135,7 +138,7 @@ def get_stress_state(uid: str) -> dict:
             "last_active_at": SERVER_TIMESTAMP,
             "last_breathing_date": "",
         })
-        return _state_dict(0.0, False, _journaled_today(_journal_entries(uid)))
+        return _state_dict(0.0, False)
 
     data = snap.to_dict() or {}
     stored = float(data.get("stress_score") or 0)
@@ -146,28 +149,44 @@ def get_stress_state(uid: str) -> dict:
         ref.update({"stress_score": round(decayed, 2)})
 
     breathing_used_today = (data.get("last_breathing_date") or "") == _local_today()
-    journaled_today = _journaled_today(_journal_entries(uid))
-    return _state_dict(decayed, breathing_used_today, journaled_today)
+    return _state_dict(decayed, breathing_used_today)
 
 
-def increase_stress(uid: str, amount: float) -> dict:
-    """Add stress points (capped at 100) and mark the user active."""
+def increase_stress(uid: str, amount: float, action: str = "chat") -> dict:
+    """Add stress points (capped at 100), mark the user active, log the action.
+
+    `at_max` is read *before* the increase: it answers "was this person already
+    pinned when they did this?", which is the thing the journal calls grinding.
+    Reading it after would flag the single action that took them to the ceiling
+    as if they had worked through it.
+    """
     state = get_stress_state(uid)
+    was_at_max = state["stress_score"] >= BAND_MAX
     new_score = min(MAX_STRESS, state["stress_score"] + float(amount))
+
     db = get_firestore()
     db.collection(STRESS_COLLECTION).document(uid).update({
         "stress_score": round(new_score, 2),
         "last_active_at": SERVER_TIMESTAMP,
     })
-    return _state_dict(new_score, state["breathing_used_today"], state["journaled_today"])
+    db.collection(ACTIVITY_COLLECTION).add({
+        "uid": uid,
+        "action": action,
+        "cost": float(amount),
+        "score_after": round(new_score, 2),
+        "at_max": was_at_max,
+        "local_date": _local_today(),
+        "created_at": SERVER_TIMESTAMP,
+    })
+    return _state_dict(new_score, state["breathing_used_today"])
 
 
-def apply_feature_stress(uid: str | None, amount: float) -> None:
+def apply_feature_stress(uid: str | None, amount: float, action: str = "chat") -> None:
     """Charge stress after a successful feature action; never fail the request."""
     if not uid:
         return
     try:
-        increase_stress(uid, amount)
+        increase_stress(uid, amount, action)
     except Exception:  # pragma: no cover - defensive
         import logging
 
@@ -182,7 +201,6 @@ def complete_breathing(uid: str) -> dict:
         return {
             **state,
             "stress_reduced": False,
-            "prompt_reflection": False,
             "message": (
                 "Great job completing your breathing exercise! You've already "
                 "used your stress reduction for today — come back tomorrow."
@@ -196,32 +214,134 @@ def complete_breathing(uid: str) -> dict:
         "last_breathing_date": _local_today(),
     })
     return {
-        **_state_dict(new_score, True, state["journaled_today"]),
+        **_state_dict(new_score, True),
         "stress_reduced": True,
-        "prompt_reflection": not state["journaled_today"],
         "message": f"Breathing complete! Your stress dropped by {BREATHING_REDUCTION:.0f} points.",
     }
 
 
-def list_journal(uid: str, limit: int = 20) -> list[dict]:
-    return _journal_entries(uid)[: max(1, min(limit, 100))]
+# --------------------------------------------------------------------------
+# The journal: activity rows in, one report per finished day out.
+# --------------------------------------------------------------------------
 
 
-def save_journal(uid: str, mood: str, notes: str) -> dict:
-    """Save a post-breathing reflection (one per day)."""
-    entries = _journal_entries(uid)
-    if _journaled_today(entries):
-        return {"ok": False, "reason": "already_journaled_today"}
+def _activity_rows(uid: str) -> list[dict]:
+    """Every activity row for a user.
 
-    state = get_stress_state(uid)
+    Equality on `uid` only, sorted and bucketed in Python: adding a range or an
+    order to the query would need a composite index for a collection that holds
+    a few rows per person per day.
+    """
     db = get_firestore()
-    db.collection(JOURNAL_COLLECTION).add({
+    docs = db.collection(ACTIVITY_COLLECTION).where("uid", "==", uid).stream()
+    rows = []
+    for doc in docs:
+        data = doc.to_dict() or {}
+        created = data.get("created_at")
+        rows.append({
+            "action": data.get("action") or "chat",
+            "cost": float(data.get("cost") or 0),
+            "score_after": float(data.get("score_after") or 0),
+            "at_max": bool(data.get("at_max")),
+            "local_date": data.get("local_date") or "",
+            "created_at": created if isinstance(created, datetime) else None,
+        })
+    rows.sort(key=lambda r: r["created_at"] or datetime.min.replace(tzinfo=timezone.utc))
+    return rows
+
+
+def _summarise(uid: str, date: str, rows: list[dict], breathing_done: bool) -> dict:
+    """Roll one day's activity rows into the report that gets stored."""
+    actions: dict[str, int] = {}
+    for row in rows:
+        actions[row["action"]] = actions.get(row["action"], 0) + 1
+
+    grind_rows = [row for row in rows if row["at_max"]]
+    first_grind = grind_rows[0]["created_at"] if grind_rows else None
+
+    return {
         "uid": uid,
-        "mood": mood,
-        "notes": notes,
-        "entry_type": "after_breathing",
-        "stress_score": state["stress_score"],
-        "stress_reduced": True,
-        "created_at": SERVER_TIMESTAMP,
-    })
-    return {"ok": True}
+        "date": date,
+        "actions": actions,
+        "total_actions": len(rows),
+        "stress_added": round(sum(row["cost"] for row in rows), 2),
+        "peak_score": round(max((row["score_after"] for row in rows), default=0.0), 2),
+        "end_score": round(rows[-1]["score_after"], 2) if rows else 0.0,
+        "breathing_done": breathing_done,
+        "grind_actions": len(grind_rows),
+        # Local clock time the grinding started, for a report line that reads
+        # like a sentence: "kept working from 23:40".
+        "grind_from": (
+            (first_grind + timedelta(hours=USER_TIMEZONE_OFFSET_HOURS)).strftime("%H:%M")
+            if first_grind
+            else ""
+        ),
+    }
+
+
+def finalize_days(uid: str) -> None:
+    """Write a report for every finished day that does not have one yet.
+
+    Called on read rather than by a scheduler: the report only has to exist by
+    the time somebody looks at it, and this needs no cron, no service account
+    and no fan-out over every user in the system. Writing is idempotent — the
+    document id is `{uid}_{date}` — so two tabs racing produce one report.
+    """
+    today = _local_today()
+    rows = [row for row in _activity_rows(uid) if row["local_date"] and row["local_date"] < today]
+    if not rows:
+        return
+
+    by_date: dict[str, list[dict]] = {}
+    for row in rows:
+        by_date.setdefault(row["local_date"], []).append(row)
+
+    db = get_firestore()
+    breathing_date = ""
+    snap = db.collection(STRESS_COLLECTION).document(uid).get()
+    if snap.exists:
+        breathing_date = (snap.to_dict() or {}).get("last_breathing_date") or ""
+
+    for date, day_rows in by_date.items():
+        ref = db.collection(DAILY_COLLECTION).document(f"{uid}_{date}")
+        if ref.get().exists:
+            continue
+        ref.set({
+            **_summarise(uid, date, day_rows, breathing_done=breathing_date == date),
+            "created_at": SERVER_TIMESTAMP,
+        })
+
+
+def list_journal(uid: str, month: str | None = None) -> dict:
+    """One month of daily reports, newest first, plus today's so-far.
+
+    Today is summarised live and never stored: the day is not over, so anything
+    written now would be wrong by dinner.
+    """
+    finalize_days(uid)
+
+    target = month or _local_now().strftime("%Y-%m")
+    db = get_firestore()
+    docs = db.collection(DAILY_COLLECTION).where("uid", "==", uid).stream()
+
+    entries = []
+    for doc in docs:
+        data = doc.to_dict() or {}
+        date = data.get("date") or ""
+        if not date.startswith(target):
+            continue
+        data.pop("created_at", None)
+        entries.append({**data, "date": date, "in_progress": False})
+    entries.sort(key=lambda e: e["date"], reverse=True)
+
+    today = _local_today()
+    if today.startswith(target):
+        rows = [row for row in _activity_rows(uid) if row["local_date"] == today]
+        if rows:
+            state = get_stress_state(uid)
+            entries.insert(0, {
+                **_summarise(uid, today, rows, breathing_done=state["breathing_used_today"]),
+                "in_progress": True,
+            })
+
+    return {"month": target, "entries": entries}

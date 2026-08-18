@@ -15,7 +15,6 @@ from services.batch_service import (
 )
 from services.wellness_service import STRESS_BATCH_CREATE, apply_feature_stress
 from utils.firebase_auth import CurrentUser, get_current_user
-from utils.stress_guard import stress_guard
 
 logger = logging.getLogger(__name__)
 
@@ -26,12 +25,11 @@ router = APIRouter(prefix="/batches", tags=["batches"])
 async def create_batch_endpoint(
     payload: BatchCreate,
     current_user: CurrentUser = Depends(get_current_user),
-    _stress: None = Depends(stress_guard),
 ) -> dict:
     lecturer_id: str = current_user["uid"]
     lecturer_email: str = current_user.get("email") or ""
     batch_id = create_batch(payload, lecturer_id, lecturer_email)
-    apply_feature_stress(lecturer_id, STRESS_BATCH_CREATE)
+    apply_feature_stress(lecturer_id, STRESS_BATCH_CREATE, "batch_create")
     return {"batch_id": batch_id}
 
 

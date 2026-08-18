@@ -21,23 +21,3 @@ export interface ToastMessage {
   type: 'error' | 'success'
   message: string
 }
-
-export interface MoodOption {
-  value: string
-  label: string
-  emoji: string
-}
-
-export interface MoodStyle {
-  pill: string
-  text: string
-  card: string
-}
-
-export type MoodValue =
-  | 'great'
-  | 'okay'
-  | 'tired'
-  | 'stressed'
-  | 'overwhelmed'
-  | 'not_selected'

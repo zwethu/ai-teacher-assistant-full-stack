@@ -4,7 +4,6 @@ import { MilaLogo } from '../brand/MilaLogo'
 import type { LucideIcon } from 'lucide-react'
 import {
   Activity,
-  ChevronDown,
   History,
   LogOut,
   Mail,
@@ -18,7 +17,7 @@ import { confirm } from '../ui/confirmStore'
 import { useAuth } from '../../hooks/useAuth'
 import { ARTIFACT_ICONS } from '../../utils/artifactIcons'
 import { useStress } from '../../context/StressContext'
-import WellnessPopover from '../wellness/WellnessPopover'
+import { LEVEL_FILL, LEVEL_TEXT, levelWord } from '../wellness/stressLevel'
 const NAV_ITEMS: {
   to: string
   label: string
@@ -35,80 +34,53 @@ const NAV_ITEMS: {
   { to: '/chat-history', label: 'Chat History', icon: History },
 ]
 
-function stressLabel(score: number): string {
-  if (score >= 100) return 'Max'
-  if (score >= 80) return 'High'
-  return 'Low'
-}
-
-/* Meter colors come from the wellness tokens: violet at rest (MILA calm),
-   orange in the warning band, red at the ceiling. */
-function stressBarVar(score: number): string {
-  if (score >= 100) return 'var(--stress-max)'
-  if (score >= 80) return 'var(--stress-high)'
-  return 'var(--stress-low)'
-}
-
-function stressLabelColor(score: number): string {
-  if (score >= 100) return 'text-red-600'
-  if (score >= 80) return 'text-orange-600'
-  return 'text-violet-600'
-}
-
+/**
+ * The meter, in the sidebar where it has always been.
+ *
+ * Clicking it used to unfold a panel inside the rail — a 200px-tall wellness
+ * app squeezed into a 240px column, under everything else the sidebar is for.
+ * It opens a dialog now: the same two things (breathe, read the journal) with
+ * room to be read, and the rail stays a rail.
+ */
 function StressWidget() {
-  const [expanded, setExpanded] = useState(false)
-  const { stress } = useStress()
+  const { stress, openWellness } = useStress()
 
   const score = stress?.stress_score ?? 0
-  const elevated = score >= 80
+  const level = stress?.level ?? 'low'
 
   return (
-    <div
-      data-stress-ui
-      className={`rounded-xl transition-colors ${
-        expanded ? 'bg-slate-50 border border-slate-200' : 'hover:bg-slate-50'
-      }`}
-    >
+    <div data-stress-ui className="rounded-xl transition-colors hover:bg-slate-50">
       <button
         type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="w-full text-left rounded-xl p-2 transition-colors group"
-        aria-expanded={expanded}
+        onClick={openWellness}
+        className="group w-full rounded-xl p-2 text-left transition-colors"
+        aria-label={`Stress level ${levelWord(level)}, ${Math.round(score)} of 100. Open wellness.`}
       >
-        <div className="flex items-center justify-between mb-1.5">
-          <span className="text-xs font-semibold text-slate-500 flex items-center gap-1.5 group-hover:text-slate-700">
+        <div className="mb-1.5 flex items-center justify-between">
+          <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 group-hover:text-slate-700">
             <Activity className="w-3.5 h-3.5" />
             Stress Level
           </span>
-          <span className="flex items-center gap-1.5">
-            <span className={`text-xs font-bold ${stressLabelColor(score)}`}>
-              {stressLabel(score)}
-            </span>
-            <ChevronDown
-              className={`w-3.5 h-3.5 text-slate-400 transition-transform ${
-                expanded ? 'rotate-180' : ''
-              }`}
-            />
+          <span className={`text-xs font-bold ${LEVEL_TEXT[level]}`}>
+            {levelWord(level)}
           </span>
         </div>
-        <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+        <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+          {/* Depth is the amount and width is the amount, so the two agree even
+              at a glance from across a desk. Pinned at the ceiling the bar
+              breathes — the only motion in the rail, and the one state worth
+              interrupting someone for. */}
           <div
             className={`h-full rounded-full transition-all duration-700 ${
-              elevated ? 'mila-stress-pulse' : ''
+              level === 'max' ? 'mila-stress-pulse' : ''
             }`}
             style={{
-              width: `${Math.min(100, score)}%`,
-              backgroundColor: stressBarVar(score),
+              width: `${Math.max(2, Math.min(100, score))}%`,
+              backgroundImage: LEVEL_FILL[level],
             }}
           />
         </div>
       </button>
-
-      {expanded && (
-        <div className="px-2 pb-3 pt-1 border-t border-slate-200/80">
-          <WellnessPopover />
-        </div>
-      )}
     </div>
   )
 }

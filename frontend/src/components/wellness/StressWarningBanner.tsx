@@ -3,14 +3,18 @@ import { TriangleAlert, X } from 'lucide-react'
 import { useStress } from '../../context/StressContext'
 import { Button } from '../../design-system'
 
-/* Shown while stress sits in the 80–99 warning band. Dismissible; the
-   dismissal resets once the score falls back under the threshold, so the
-   next climb warns again. */
+/* Shown in the high and max bands. Dismissible, and the dismissal resets once
+   the score falls back under the threshold, so the next climb warns again.
+
+   It says what is true and stops there. The old copy promised that "at 100 the
+   assistant pauses", which is no longer how any of this works — and a warning
+   that threatens a consequence the app will not deliver teaches people to
+   ignore the next one. */
 export default function StressWarningBanner() {
   const { stress, openBreathing } = useStress()
   const [dismissed, setDismissed] = useState(false)
 
-  const warning = Boolean(stress?.warning && !stress?.blocked)
+  const warning = stress?.level === 'high' || stress?.level === 'max'
 
   useEffect(() => {
     if (!warning) setDismissed(false)
@@ -30,8 +34,8 @@ export default function StressWarningBanner() {
           Your stress level is high ({Math.round(stress.stress_score)}/100)
         </p>
         <p className="text-xs text-amber-800/80">
-          At 100 the assistant pauses. A breathing exercise takes one minute
-          and lowers it by 20 points.
+          Nothing is locked — keep going if you have to. A breathing exercise
+          takes a minute and lowers it by 20 points.
         </p>
       </div>
       <div className="flex items-center gap-1.5">

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Archive, Pencil, Plus, RefreshCw, RotateCcw, Sparkles, Trash2, X } from 'lucide-react'
+import { Archive, ArchiveRestore, Pencil, Plus, RefreshCw, RotateCcw, Sparkles, Trash2, X } from 'lucide-react'
 import {
   archiveCurrentCourseBlueprint,
   deleteCourseBlueprintVersion,
   getCurrentCourseBlueprint,
   listCourseBlueprintHistory,
+  restoreCourseBlueprintVersion,
   revertToCourseBlueprintVersion,
   updateCurrentCourseBlueprint,
   type CourseBlueprint,
@@ -34,6 +35,11 @@ export function PlanningTab({ batchId }: { batchId: string }) {
   const run = useGenerationRun(batch, 'course_blueprint')
   const pendingUndo = usePendingUndo()
   const visibleHistory = history.filter((item) => !pendingUndo.has(item.blueprint_id))
+  /* Archiving hides the plan from every other surface in the product, so this page
+     is the only place left that can tell the lecturer it still exists. `history` is
+     version-descending, so the head of this list is the most recently numbered one. */
+  const restorable = visibleHistory.filter((item) => item.status === 'archived')
+  const shownCurrent = current && pendingUndo.has(current.blueprint_id) ? null : current
 
   // Reopen the inline generation panel when a run is active/loaded — e.g. after
   // navigating away and back, the run keeps going in the background.
@@ -78,17 +84,32 @@ export function PlanningTab({ batchId }: { batchId: string }) {
     finally { setSaving(false) }
   }
 
-  /* Archiving and reverting no longer ask. Both were confirming something that
-     is already undoable by construction: the archived version stays in the
-     history below, and reverting explicitly says it keeps history and creates
-     a new version rather than overwriting one. A dialog in front of a
-     reversible action spends the lecturer's attention and buys nothing —
-     worse, it trains them to dismiss the two dialogs that do matter. */
-  async function archive() {
+  /* Archiving and reverting do not ask, they undo. A dialog in front of a
+     reversible action spends the lecturer's attention and buys nothing — worse, it
+     trains them to dismiss the two dialogs that do matter.
+     Archive gets the same undo window as delete because it is the action that makes
+     the plan vanish from the current card, from chat context, and from week prefill
+     all at once. Saying so on a toast is the difference between "I archived it" and
+     the report this fixes: "it disappeared and I couldn't find it anywhere". */
+  function archive() {
     if (!current) return
+    const target = current
+    undoable({
+      id: target.blueprint_id,
+      message: `Archived “${target.title}”. It stays in Version history.`,
+      commit: async () => {
+        setError('')
+        try { await archiveCurrentCourseBlueprint(batchId); await refresh() }
+        catch { setError('Could not archive the Course Plan.') }
+      },
+    })
+  }
+
+  /** The exact inverse of Archive — the same version goes back to being current. */
+  async function restoreVersion(blueprintId: string) {
     setSaving(true); setError('')
-    try { await archiveCurrentCourseBlueprint(batchId); await refresh() }
-    catch { setError('Could not archive the Course Blueprint.') }
+    try { await restoreCourseBlueprintVersion(batchId, blueprintId); await refresh() }
+    catch { setError('Could not restore this Course Plan.') }
     finally { setSaving(false) }
   }
 
@@ -116,12 +137,16 @@ export function PlanningTab({ batchId }: { batchId: string }) {
   return <div className="space-y-6">
     {error && <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
     {generating && batch && <GeneratePlanPanel batch={batch} run={run} onClose={() => { setGenerating(false); void refresh() }} />}
-    {!generating && (!current ? <div className="rounded-2xl border border-dashed border-slate-300 bg-white/60 px-6 py-14 text-center"><h2 className="font-semibold text-slate-800">No active Course Plan</h2><p className="mt-2 text-sm text-slate-500">Generate a plan with AI, or save one from an assistant message’s action menu in Chat.</p><Button type="button" onClick={() => setGenerating(true)} disabled={!batch} leadingIcon={<Sparkles className="h-4 w-4" />} className="mt-4">Generate with AI</Button></div> :
-      <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="mb-5 flex flex-wrap items-start justify-between gap-3"><div><div className="text-xs font-semibold uppercase tracking-wide text-violet-700">Current · Version {current.version}</div><h2 className="mt-1 text-xl font-bold text-slate-900">{current.title}</h2><p className="text-xs text-slate-400">Updated {formatDateTime(current.updated_at || current.created_at || '')}</p></div><div className="flex flex-wrap gap-2"><Button type="button" onClick={() => setGenerating(true)} disabled={!batch} leadingIcon={<Sparkles className="h-4 w-4" />}>Generate</Button><Button type="button" variant="secondary" onClick={beginEdit} leadingIcon={<Pencil className="h-4 w-4" />}>Edit as new version</Button><Button type="button" variant="danger" onClick={archive} disabled={saving} leadingIcon={<Archive className="h-4 w-4" />}>Archive</Button></div></div>
-        <BlueprintView blueprint={current}/>
+    {!generating && (!shownCurrent
+      ? <EmptyPlanState archived={restorable} saving={saving} canGenerate={Boolean(batch)}
+          onGenerate={() => setGenerating(true)} onRestore={(id) => void restoreVersion(id)} />
+      : <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="mb-5 flex flex-wrap items-start justify-between gap-3"><div><div className="text-xs font-semibold uppercase tracking-wide text-violet-700">Current · Version {shownCurrent.version}</div><h2 className="mt-1 text-xl font-bold text-slate-900">{shownCurrent.title}</h2><p className="text-xs text-slate-400">Updated {formatDateTime(shownCurrent.updated_at || shownCurrent.created_at || '')}</p></div><div className="flex flex-wrap gap-2"><Button type="button" onClick={() => setGenerating(true)} disabled={!batch} leadingIcon={<Sparkles className="h-4 w-4" />}>Generate</Button><Button type="button" variant="secondary" onClick={beginEdit} leadingIcon={<Pencil className="h-4 w-4" />}>Edit as new version</Button><Button type="button" variant="secondary" onClick={archive} disabled={saving} leadingIcon={<Archive className="h-4 w-4" />}>Archive</Button></div></div>
+        <BlueprintView blueprint={shownCurrent}/>
       </section>)}
-    <section><div className="mb-3 flex items-center justify-between"><h2 className="font-semibold text-slate-800">Version history</h2><button onClick={() => void refresh()} className="rounded p-1 text-slate-500"><RefreshCw className="h-4 w-4"/></button></div><div className="space-y-2">{visibleHistory.length === 0 ? <p className="text-sm text-slate-500">No saved versions yet.</p> : visibleHistory.map((item)=><details key={item.blueprint_id} className="rounded-xl border border-slate-200 bg-white px-4 py-3"><summary className="cursor-pointer text-sm font-medium text-slate-800">v{item.version} · {item.title} <span className="ml-2 text-xs font-normal text-slate-400">{item.status}</span></summary><div className="mt-4"><BlueprintView blueprint={item}/></div><div className="mt-3 flex flex-wrap gap-2 border-t border-slate-100 pt-3">{item.blueprint_id !== current?.blueprint_id && <button onClick={()=>void revertVersion(item.blueprint_id)} disabled={saving} className="inline-flex items-center gap-1.5 rounded-md border border-violet-200 px-3 py-1.5 text-xs font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-60"><RotateCcw className="h-3.5 w-3.5"/>Make current</button>}<button onClick={()=>deleteVersion(item.blueprint_id, item.version)} disabled={saving} className="inline-flex items-center gap-1.5 rounded-md border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-60"><Trash2 className="h-3.5 w-3.5"/>Delete</button></div></details>)}</div></section>
+    <section><div className="mb-3 flex items-center justify-between"><div><h2 className="font-semibold text-slate-800">Version history</h2><p className="text-xs text-slate-500">Every version ever saved, including archived ones. Nothing here is deleted by archiving.</p></div><button onClick={() => void refresh()} className="rounded p-1 text-slate-500"><RefreshCw className="h-4 w-4"/></button></div><div className="space-y-2">{visibleHistory.length === 0 ? <p className="text-sm text-slate-500">No saved versions yet.</p> : visibleHistory.map((item)=><details key={item.blueprint_id} className="rounded-xl border border-slate-200 bg-white px-4 py-3"><summary className="cursor-pointer text-sm font-medium text-slate-800">v{item.version} · {item.title} <StatusBadge status={item.status}/></summary><div className="mt-4"><BlueprintView blueprint={item}/></div><div className="mt-3 flex flex-wrap gap-2 border-t border-slate-100 pt-3">{item.status === 'archived'
+      ? <button onClick={()=>void restoreVersion(item.blueprint_id)} disabled={saving} className="inline-flex items-center gap-1.5 rounded-md border border-amber-200 px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-60"><ArchiveRestore className="h-3.5 w-3.5"/>Restore</button>
+      : item.blueprint_id !== shownCurrent?.blueprint_id && <button onClick={()=>void revertVersion(item.blueprint_id)} disabled={saving} className="inline-flex items-center gap-1.5 rounded-md border border-violet-200 px-3 py-1.5 text-xs font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-60"><RotateCcw className="h-3.5 w-3.5"/>Make current</button>}<button onClick={()=>deleteVersion(item.blueprint_id, item.version)} disabled={saving} className="inline-flex items-center gap-1.5 rounded-md border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-60"><Trash2 className="h-3.5 w-3.5"/>Delete</button></div></details>)}</div></section>
     {editing && form && <EditBlueprintModal form={form} setForm={setForm} saving={saving} onClose={()=>setEditing(false)} onSave={()=>void saveEdit()}/>}
   </div>
 }
@@ -204,6 +229,40 @@ function GeneratePlanPanel({
         )}
     </section>
   )
+}
+
+/**
+ * The empty state after an archive is where this page used to lose people. It
+ * announced "No active Course Plan" and pointed at Generate and at Chat — while the
+ * lecturer's plan sat further down the page in a collapsed history row tagged with
+ * one small grey word. Following its own advice could not bring the plan back: the
+ * chat message that produced it keeps a spent Save button. When something archived
+ * exists, name it here and offer the way back in the same breath.
+ */
+function EmptyPlanState({archived, saving, canGenerate, onGenerate, onRestore}:{archived:CourseBlueprint[];saving:boolean;canGenerate:boolean;onGenerate:()=>void;onRestore:(blueprintId:string)=>void}) {
+  const latest = archived[0]
+  return <div className="rounded-2xl border border-dashed border-slate-300 bg-white/60 px-6 py-14 text-center">
+    <h2 className="font-semibold text-slate-800">No active Course Plan</h2>
+    {latest ? <>
+      <p className="mx-auto mt-2 max-w-lg text-sm text-slate-500"><span className="font-medium text-slate-700">{latest.title}</span> (v{latest.version}) is archived{latest.updated_at ? ` since ${formatDateTime(latest.updated_at)}` : ''}. Nothing was deleted — restore it to make it current again.</p>
+      <div className="mt-4 flex flex-wrap justify-center gap-2">
+        <Button type="button" onClick={() => onRestore(latest.blueprint_id)} disabled={saving} leadingIcon={<ArchiveRestore className="h-4 w-4" />}>Restore v{latest.version}</Button>
+        <Button type="button" variant="secondary" onClick={onGenerate} disabled={!canGenerate} leadingIcon={<Sparkles className="h-4 w-4" />}>Generate a new one</Button>
+      </div>
+      {archived.length > 1 && <p className="mt-3 text-xs text-slate-400">{archived.length} archived plans are listed under Version history below.</p>}
+    </> : <>
+      <p className="mt-2 text-sm text-slate-500">Generate a plan with AI, or save one from an assistant message’s action menu in Chat.</p>
+      <Button type="button" onClick={onGenerate} disabled={!canGenerate} leadingIcon={<Sparkles className="h-4 w-4" />} className="mt-4">Generate with AI</Button>
+    </>}
+  </div>
+}
+
+/** `archived` used to read as a lowercase grey afterthought next to two other states. */
+function StatusBadge({status}:{status:CourseBlueprint['status']}) {
+  const tone = status === 'archived' ? 'border-amber-200 bg-amber-50 text-amber-700'
+    : status === 'active' ? 'border-violet-200 bg-violet-50 text-violet-700'
+    : 'border-slate-200 bg-slate-50 text-slate-500'
+  return <span className={`ml-2 inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${tone}`}>{status}</span>
 }
 
 function BlueprintView({blueprint}:{blueprint:CourseBlueprint}) { return <div className="space-y-5 text-sm text-slate-700">{(blueprint.plan_scope||blueprint.planning_horizon_weeks)&&<p className="text-xs text-slate-500">{blueprint.plan_scope?.replaceAll('_',' ')}{blueprint.plan_scope&&blueprint.planning_horizon_weeks?' · ':''}{blueprint.planning_horizon_weeks?`${blueprint.planning_horizon_weeks} weeks`:''}</p>}{blueprint.summary && <Section title="Summary"><p className="whitespace-pre-wrap">{blueprint.summary}</p></Section>}{blueprint.weekly_plan.length>0&&<Section title="Weekly plan"><div className="overflow-x-auto"><table className="w-full text-left"><thead><tr className="border-b border-slate-200 text-xs text-slate-500"><th className="p-2">Week</th><th className="p-2">Theme</th><th className="p-2">Lesson goal</th><th className="p-2">Lab goal</th><th className="p-2">Assessment</th><th className="p-2">Source</th></tr></thead><tbody>{blueprint.weekly_plan.map((row)=><tr key={row.week} className="border-b border-slate-100 align-top"><td className="p-2 font-semibold">{row.week}</td><td className="p-2">{row.theme}</td><td className="p-2">{row.lesson_goal}</td><td className="p-2">{row.lab_goal}</td><td className="p-2">{row.assessment_idea}</td><td className="p-2 text-xs">{row.source_status?.replaceAll('_',' ')}</td></tr>)}</tbody></table></div></Section>}{blueprint.assessment_strategy&&<Section title="Assessment strategy"><p className="whitespace-pre-wrap">{blueprint.assessment_strategy}</p></Section>}{blueprint.lab_strategy&&<Section title="Lab strategy"><p className="whitespace-pre-wrap">{blueprint.lab_strategy}</p></Section>}{Object.keys(blueprint.teaching_preferences).length>0&&<Section title="Teaching preferences"><dl>{Object.entries(blueprint.teaching_preferences).map(([key,value])=><div key={key} className="flex gap-2"><dt className="font-medium">{key}:</dt><dd>{value}</dd></div>)}</dl></Section>}{blueprint.open_questions.length>0&&<Section title="Open questions"><ul className="list-disc pl-5">{blueprint.open_questions.map((q,i)=><li key={i}>{q}</li>)}</ul></Section>}{(blueprint.assumptions||[]).length>0&&<Section title="Assumptions"><ul className="list-disc pl-5">{(blueprint.assumptions||[]).map((q,i)=><li key={i}>{q}</li>)}</ul></Section>}{blueprint.source_summary&&<Section title="Source summary"><p className="whitespace-pre-wrap">{blueprint.source_summary}</p></Section>}</div> }

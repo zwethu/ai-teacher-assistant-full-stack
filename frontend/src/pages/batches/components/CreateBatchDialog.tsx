@@ -2,6 +2,7 @@ import { ArrowLeft, Plus, Upload, UserPlus, X } from 'lucide-react'
 import { BTN_BACK, BTN_PRIMARY, INPUT_CLASS } from '../constants'
 import type { BatchesPageState } from '../hooks/useBatchesPage'
 import { modalTitle } from '../utils/modalTitle'
+import { STUDENT_EMAIL_DOMAIN } from '../utils/parseCsv'
 import { Spinner } from '../../../design-system'
 
 type Props = Pick<
@@ -172,7 +173,7 @@ export function CreateBatchDialog(props: Props) {
                   </div>
                   <div className="font-semibold text-slate-900 text-sm mt-3 mb-1">Upload CSV File</div>
                   <p className="text-xs text-slate-600 leading-relaxed">
-                    Import multiple students from a CSV with name and email columns.
+                    Import multiple students from a CSV with name and email — or student ID.
                   </p>
                 </button>
 
@@ -226,9 +227,12 @@ export function CreateBatchDialog(props: Props) {
                   </div>
                 </label>
                 <p className="text-xs text-slate-500 mt-2">
-                  CSV must include columns{' '}
-                  <span className="font-mono bg-slate-100 px-1 rounded text-slate-600">name</span> and{' '}
-                  <span className="font-mono bg-slate-100 px-1 rounded text-slate-600">email</span>.
+                  CSV must include{' '}
+                  <span className="font-mono bg-slate-100 px-1 rounded text-slate-600">name</span>, plus{' '}
+                  <span className="font-mono bg-slate-100 px-1 rounded text-slate-600">email</span> or{' '}
+                  <span className="font-mono bg-slate-100 px-1 rounded text-slate-600">student_id</span>.
+                  IDs become <span className="font-mono text-slate-600">@{STUDENT_EMAIL_DOMAIN}</span>{' '}
+                  addresses — check the preview below before creating.
                 </p>
               </div>
 

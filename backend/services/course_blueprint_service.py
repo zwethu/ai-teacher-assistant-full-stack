@@ -342,12 +342,75 @@ def archive_current_blueprint(batch_id: str, lecturer_id: str) -> dict[str, Any]
             raise BlueprintNotFoundError("Current Course Blueprint not found")
         txn.update(current_ref, {"status": "archived", "is_current": False,
                                  "updated_at": SERVER_TIMESTAMP})
+        # Only the pointer is cleared. `current_course_blueprint_version` is a
+        # high-water mark for numbering, not a pointer -- moving it backwards would
+        # let the next save reuse a version number already present in history.
         txn.update(batch_ref, {"current_course_blueprint_id": "",
                                "updated_at": SERVER_TIMESTAMP})
         return current_id, current_snap.to_dict() or {}
 
     blueprint_id, data = _archive(transaction)
     return _serialize(blueprint_id, {**data, "status": "archived", "is_current": False})
+
+
+def restore_archived_blueprint(batch_id: str, lecturer_id: str, blueprint_id: str) -> dict[str, Any]:
+    """Undo an archive: make the archived version current again, in place.
+
+    The exact inverse of `archive_current_blueprint`, and deliberately not a
+    `revert_to_blueprint_version`. Archiving is a status change on one document, so
+    undoing it has to be one too -- cloning the content into a new version leaves the
+    lecturer holding a permanently archived twin of the plan they just brought back.
+    Restricted to archived versions: reaching back into superseded history is what
+    revert is for, and that path keeps the past immutable.
+    """
+    db = get_firestore()
+    batch_ref = db.collection(BATCHES_COLLECTION).document(batch_id)
+    target_ref = batch_ref.collection(BLUEPRINTS_SUBCOLLECTION).document(blueprint_id)
+    transaction = db.transaction()
+
+    @firestore.transactional
+    def _restore(txn):
+        batch_snap = batch_ref.get(transaction=txn)
+        batch = batch_snap.to_dict() or {}
+        if not batch_snap.exists or batch.get("lecturer_id") != lecturer_id:
+            raise BlueprintNotFoundError("Batch not found or access denied")
+        target_snap = target_ref.get(transaction=txn)
+        if not target_snap.exists:
+            raise BlueprintNotFoundError("Course Blueprint version not found")
+        target = target_snap.to_dict() or {}
+        if target.get("lecturer_id") != lecturer_id:
+            raise BlueprintNotFoundError("Course Blueprint version not found")
+        if target.get("status") != "archived":
+            raise BlueprintEligibilityError("Only an archived Course Plan can be restored")
+        current_id = str(batch.get("current_course_blueprint_id") or "")
+        current_ref = (
+            batch_ref.collection(BLUEPRINTS_SUBCOLLECTION).document(current_id)
+            if current_id and current_id != blueprint_id
+            else None
+        )
+        current_snap = current_ref.get(transaction=txn) if current_ref else None  # read before writes
+        version = int(target.get("version") or 0)
+        if current_snap is not None and current_snap.exists:
+            txn.update(current_ref, {
+                "status": "superseded", "is_current": False,
+                "superseded_by_blueprint_id": blueprint_id, "updated_at": SERVER_TIMESTAMP,
+            })
+        txn.update(target_ref, {
+            "status": "active", "is_current": True,
+            "superseded_by_blueprint_id": "", "updated_at": SERVER_TIMESTAMP,
+        })
+        txn.update(batch_ref, {
+            "current_course_blueprint_id": blueprint_id,
+            "current_course_blueprint_version": max(
+                int(batch.get("current_course_blueprint_version") or 0), version
+            ),
+            "updated_at": SERVER_TIMESTAMP,
+        })
+        return {**target, "status": "active", "is_current": True,
+                "superseded_by_blueprint_id": ""}
+
+    data = _restore(transaction)
+    return _serialize(blueprint_id, data)
 
 
 def delete_blueprint_version(batch_id: str, lecturer_id: str, blueprint_id: str) -> dict[str, Any]:
@@ -370,9 +433,11 @@ def delete_blueprint_version(batch_id: str, lecturer_id: str, blueprint_id: str)
         was_current = str(batch.get("current_course_blueprint_id") or "") == blueprint_id
         txn.delete(bp_ref)
         if was_current:
+            # The version counter is left alone on purpose. Resetting it to 0 made the
+            # next save start again at v1 -- colliding with the v1 still sitting in
+            # history and giving the lecturer two rows both labelled "v1".
             txn.update(batch_ref, {
                 "current_course_blueprint_id": "",
-                "current_course_blueprint_version": 0,
                 "updated_at": SERVER_TIMESTAMP,
             })
 

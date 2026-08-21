@@ -3,6 +3,7 @@ import type { BatchStudent } from '../../../entity/Batch'
 import { Plus, Trash2, Upload, UserPlus, Users } from 'lucide-react'
 import { Spinner, Button } from '../../../design-system'
 import { FIELD_CLASS } from '../../../components/ui/fieldStyles'
+import { STUDENT_EMAIL_DOMAIN } from '../utils/parseCsv'
 
 type Props = {
   students: BatchStudent[]
@@ -71,8 +72,10 @@ export function StudentsTab({
             Bulk import (CSV)
           </h2>
           <p className="text-xs text-slate-500 mb-3">
-            Upload a CSV with <code className="text-slate-700">name</code> and{' '}
-            <code className="text-slate-700">email</code> columns.
+            Upload a CSV with <code className="text-slate-700">name</code>, plus{' '}
+            <code className="text-slate-700">email</code> or{' '}
+            <code className="text-slate-700">student_id</code>. IDs are imported as{' '}
+            <code className="text-slate-700">@{STUDENT_EMAIL_DOMAIN}</code> addresses.
           </p>
           <label className="relative inline-flex w-full cursor-pointer">
             <input

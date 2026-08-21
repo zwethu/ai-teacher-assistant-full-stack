@@ -189,6 +189,23 @@ export async function archiveCurrentCourseBlueprint(batchId: string): Promise<Co
   return res.data
 }
 
+/**
+ * Undo an archive: the same version becomes current again.
+ *
+ * Deliberately not `revertToCourseBlueprintVersion` — that one clones the content
+ * into a new version, which after an archive leaves the lecturer with an identical
+ * pair (vN archived, vN+1 active) and no way to tell them apart.
+ */
+export async function restoreCourseBlueprintVersion(
+  batchId: string,
+  blueprintId: string,
+): Promise<CourseBlueprint> {
+  const res = await api.post<CourseBlueprint>(
+    `/batches/${batchId}/course-blueprint/versions/${blueprintId}/restore`,
+  )
+  return res.data
+}
+
 export async function revertToCourseBlueprintVersion(
   batchId: string,
   blueprintId: string,

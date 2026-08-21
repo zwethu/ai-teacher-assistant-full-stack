@@ -12,6 +12,7 @@ from services.course_blueprint_service import (
     delete_blueprint_version,
     get_current_blueprint,
     list_blueprint_history,
+    restore_archived_blueprint,
     revert_to_blueprint_version,
     save_blueprint_from_message,
     update_current_blueprint,
@@ -81,6 +82,18 @@ async def archive_current(
 ) -> dict:
     try:
         return archive_current_blueprint(batch_id, user["uid"])
+    except Exception as exc:
+        _raise_service_error(exc)
+        raise
+
+
+@router.post("/versions/{blueprint_id}/restore", response_model=dict)
+async def restore_version(
+    batch_id: str, blueprint_id: str, user: CurrentUser = Depends(get_current_user)
+) -> dict:
+    """Undo an archive in place -- no new version, no duplicate in history."""
+    try:
+        return restore_archived_blueprint(batch_id, user["uid"], blueprint_id)
     except Exception as exc:
         _raise_service_error(exc)
         raise
